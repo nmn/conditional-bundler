@@ -1,7 +1,11 @@
 import type { TransformInput, TransformResult, TransformMultiResult } from "@bundler/shared";
 import type { ModuleGraph } from "../graph/build.js";
 
-export type TransformModuleHook = (input: TransformInput) => Promise<TransformResult | TransformMultiResult>;
+export type TransformModuleInput = TransformInput & {
+  previousResult?: TransformResult | TransformMultiResult;
+};
+
+export type TransformModuleHookWithContext = (input: TransformModuleInput) => Promise<TransformResult | TransformMultiResult>;
 
 export type TransformModuleGraphHook = (graphs: ModuleGraph[]) => Promise<ModuleGraph[]>;
 
@@ -9,7 +13,7 @@ export type TransformAssetsHook = (assets: Record<string, string>) => Promise<Re
 
 export type BundlerPlugin = {
   name: string;
-  transformModule?: TransformModuleHook;
+  transformModule?: TransformModuleHookWithContext;
   transformModuleGraph?: TransformModuleGraphHook;
   transformAssets?: TransformAssetsHook;
 };

@@ -11,6 +11,8 @@ export type ImportEntry = {
   kind: "value" | "type" | "side-effect";
   isNamespace: boolean;
   isDefault: boolean;
+  namespaceUsage?: "static" | "dynamic";
+  condition?: ConditionExpr;
   attributes?: Record<string, string> | null;
   specifiers: ImportSpecifier[];
 };
@@ -25,6 +27,7 @@ export type ReexportNamed = {
   source: string;
   imported: string;
   exported: string;
+  isNamespace?: boolean;
 };
 
 export type ExportStar = {
@@ -63,6 +66,8 @@ export type FileIR = {
   dynamicImports: DynamicImport[];
   conditionalImports: ConditionalImport[];
   discoveredEntrypoints: string[];
+  importRanges: Array<[number, number]>;
+  exportRanges: Array<[number, number]>;
   codeByEnv: Record<string, string>;
   mapByEnv: Record<string, string>;
   diagnostics: { errors: string[]; warnings: string[] };
@@ -81,6 +86,9 @@ export type IRHeader = Pick<
   | "dynamicImports"
   | "conditionalImports"
   | "discoveredEntrypoints"
+  | "importRanges"
+  | "exportRanges"
+  | "pkg"
 > & {
   envs: string[];
   codeByEnv: Record<string, string>;
@@ -97,6 +105,8 @@ export type ModuleNode = {
   prefix: string;
   deps: string[];
   conditionalDeps: Map<string, ConditionExpr>;
+  resolvedSources: Map<string, string>;
+  condition?: ConditionExpr;
   irHeader: IRHeader;
   exportTable?: Map<string, Provider>;
   ambiguous?: Set<string>;

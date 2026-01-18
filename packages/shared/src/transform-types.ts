@@ -1,5 +1,4 @@
 import type { Diagnostic } from "./diagnostics.js";
-import type { ConditionExpr } from "./conditions.js";
 import type { ImportEntry, ExportLocal, ExportStar, ReexportNamed, DynamicImport, ConditionalImport } from "./ir.js";
 
 export type TransformInput = {
@@ -18,6 +17,8 @@ export type TransformMeta = {
   dynamicImports: DynamicImport[];
   conditionalImports: ConditionalImport[];
   discoveredEntrypoints: string[];
+  importRanges: Array<[number, number]>;
+  exportRanges: Array<[number, number]>;
   flags: {
     hasTopLevelAwait: boolean;
     sideEffects: boolean;
@@ -25,15 +26,19 @@ export type TransformMeta = {
   };
 };
 
+export type TransformPlugin = {
+  name: string;
+  transformModule: (input: TransformInput) => Promise<TransformResult | TransformMultiResult>;
+};
+
 export type TransformResult = {
   code: string;
   map?: string;
-  meta: TransformMeta;
+  meta?: TransformMeta;
+  codeByEnv?: Record<string, string>;
   diagnostics?: Diagnostic[];
+  skipCore?: boolean;
 };
 
 export type TransformMultiResult = Record<string, TransformResult>;
 
-export type ConditionMeta = {
-  condition: ConditionExpr;
-};

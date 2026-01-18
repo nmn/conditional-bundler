@@ -1,17 +1,18 @@
-import type { BundlerPlugin, TransformModuleGraphHook, TransformModuleHook, TransformAssetsHook } from "./types.js";
+import type { BundlerPlugin, TransformModuleGraphHook, TransformModuleHookWithContext, TransformAssetsHook } from "./types.js";
 import type { TransformInput } from "@bundler/shared";
 import type { ModuleGraph } from "../graph/build.js";
 
 export async function runTransformModule(
   plugins: BundlerPlugin[],
   input: TransformInput
-): Promise<ReturnType<TransformModuleHook> | undefined> {
+): Promise<ReturnType<TransformModuleHookWithContext> | undefined> {
+  let current: Awaited<ReturnType<TransformModuleHookWithContext>> | undefined;
   for (const plugin of plugins) {
     if (plugin.transformModule) {
-      return plugin.transformModule(input);
+      current = await plugin.transformModule({ ...input, previousResult: current });
     }
   }
-  return undefined;
+  return current;
 }
 
 export async function runTransformModuleGraph(

@@ -6,20 +6,22 @@ export type WorkerPoolOptions = {
   size: number;
 };
 
+type WorkerTask = {
+  payload: unknown;
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+};
+
 export class WorkerPool {
-  private queue: Array<{
-    payload: unknown;
-    resolve: (value: unknown) => void;
-    reject: (error: Error) => void;
-  }> = [];
+  private queue: WorkerTask[] = [];
   private workers: Worker[] = [];
   private idle: Worker[] = [];
 
   constructor(private options: WorkerPoolOptions) {
     for (let i = 0; i < options.size; i += 1) {
       const worker = new Worker(path.resolve(options.workerPath));
-      worker.on("message", (message) => this.handleMessage(worker, message));
-      worker.on("error", (error) => this.handleError(worker, error));
+      worker.on("message", this.handleMessage.bind(this, worker));
+      worker.on("error", this.handleError.bind(this, worker));
       this.workers.push(worker);
       this.idle.push(worker);
     }
@@ -32,6 +34,10 @@ export class WorkerPool {
     });
   }
 
+  async close(): Promise<void> {
+    await Promise.all(this.workers.map((worker) => worker.terminate()));
+  }
+
   private drain(): void {
     while (this.idle.length > 0 && this.queue.length > 0) {
       const worker = this.idle.shift();
@@ -39,26 +45,31 @@ export class WorkerPool {
       if (!worker || !task) {
         return;
       }
-      (worker as Worker & { current?: typeof task }).current = task;
+      (worker as Worker & { current?: WorkerTask }).current = task;
       worker.postMessage(task.payload);
     }
   }
 
-  private handleMessage(worker: Worker, message: unknown): void {
-    const current = (worker as Worker & { current?: typeof this.queue[0] }).current;
+  private handleMessage(this: WorkerPool, worker: Worker, message: unknown): void {
+    const current = (worker as Worker & { current?: WorkerTask }).current;
     if (current) {
-      current.resolve(message);
-      (worker as Worker & { current?: typeof this.queue[0] }).current = undefined;
+      const payload = message as { ok?: boolean; error?: string };
+      if (payload && payload.ok === false) {
+        current.reject(new Error(payload.error ?? "Worker error"));
+      } else {
+        current.resolve(message);
+      }
+      (worker as Worker & { current?: WorkerTask }).current = undefined;
       this.idle.push(worker);
       this.drain();
     }
   }
 
-  private handleError(worker: Worker, error: Error): void {
-    const current = (worker as Worker & { current?: typeof this.queue[0] }).current;
+  private handleError(this: WorkerPool, worker: Worker, error: Error): void {
+    const current = (worker as Worker & { current?: WorkerTask }).current;
     if (current) {
       current.reject(error);
-      (worker as Worker & { current?: typeof this.queue[0] }).current = undefined;
+      (worker as Worker & { current?: WorkerTask }).current = undefined;
     }
     this.idle.push(worker);
     this.drain();

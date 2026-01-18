@@ -33,3 +33,15 @@ export function readPkg(pkgRoot: string): PackageInfo {
     root: normalizePosixPath(pkgRoot)
   };
 }
+
+export function readPkgSafe(pkgRoot: string): PackageInfo {
+  try {
+    return readPkg(pkgRoot);
+  } catch {
+    return {
+      name: "",
+      version: "0.0.0",
+      root: normalizePosixPath(pkgRoot)
+    };
+  }
+}

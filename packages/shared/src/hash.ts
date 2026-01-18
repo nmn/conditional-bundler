@@ -9,16 +9,31 @@ export function base36Short(hex: string, length = 8): string {
   return value.toString(36).slice(0, length);
 }
 
+export function base36ShortAlpha(hex: string, length = 8): string {
+  const raw = base36Short(hex, length);
+  if (raw.length === 0) {
+    return "a";
+  }
+  if (/^[0-9]/.test(raw)) {
+    return `a${raw}`.slice(0, length + 1);
+  }
+  return raw;
+}
+
 export function contentHash(input: string): string {
   return hashString(input);
 }
 
+export function contentHashShort(input: string, length = 8): string {
+  return base36Short(hashString(input), length);
+}
+
 export function filePrefix(pkgName: string, relPath: string): string {
   const key = `${pkgName}:${relPath}`;
-  return base36Short(hashString(key));
+  return base36ShortAlpha(hashString(key));
 }
 
 export function importConstKey(pkgName: string, relPath: string): string {
   const key = `${pkgName}:${relPath}`;
-  return `${base36Short(hashString(key))}__IMPORT`;
+  return base36ShortAlpha(hashString(key));
 }

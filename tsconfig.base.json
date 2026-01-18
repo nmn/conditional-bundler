@@ -1,16 +1,21 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "strict": true,
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "dist",
-    "rootDir": "src",
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@bundler/shared": ["packages/shared/src/index.ts"],
+      "@bundler/worker": ["packages/worker/src/worker.ts"],
+      "@bundler/bundler": ["packages/bundler/src/index.ts"]
+    }
   }
 }

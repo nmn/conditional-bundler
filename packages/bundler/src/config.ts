@@ -18,6 +18,7 @@ export type BundlerConfig = {
   envs: Record<string, EnvConfig>;
   entries: EntrySpec[];
   outputs: OutputSpec;
+  cacheDir?: string;
   maxWorkers: number;
   diagnostics: "human" | "json";
 };
@@ -34,6 +35,7 @@ export const defaultConfig: BundlerConfig = {
     outDir: "dist",
     fileName: "bundle.[env].[hash].js"
   },
+  cacheDir: "node_modules/.bundler-cache",
   maxWorkers: 4,
   diagnostics: "human"
 };

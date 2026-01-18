@@ -33,3 +33,18 @@ export function combineOr(conditions: ConditionExpr[]): ConditionExpr {
   }
   return { OR: flattened };
 }
+
+export function combineAnd(conditions: ConditionExpr[]): ConditionExpr {
+  const flattened: ConditionExpr[] = [];
+  for (const condition of conditions) {
+    if (typeof condition === "object" && condition && "AND" in condition) {
+      flattened.push(...condition.AND);
+    } else {
+      flattened.push(condition);
+    }
+  }
+  if (flattened.length === 1) {
+    return flattened[0];
+  }
+  return { AND: flattened };
+}
