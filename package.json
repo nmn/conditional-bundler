@@ -8,10 +8,12 @@
   "scripts": {
     "build": "pnpm -r build",
     "clean": "pnpm -r clean",
-    "test": "pnpm -r build && pnpm -r test"
+    "test": "pnpm -r build && NODE_OPTIONS=--experimental-vm-modules pnpm exec jest --runInBand"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.12",
     "@types/node": "^20.11.30",
+    "jest": "^29.7.0",
     "rimraf": "^5.0.5",
     "typescript": "^5.4.2"
   }

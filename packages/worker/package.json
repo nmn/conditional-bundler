@@ -7,7 +7,8 @@
   "types": "dist/worker.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "test": "node ../../node_modules/.bin/jest"
   },
   "dependencies": {
     "@babel/core": "^7.24.0",

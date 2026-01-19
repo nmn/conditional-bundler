@@ -7,8 +7,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "clean": "rimraf dist",
-    "test": "node --test test/*.test.mjs"
+    "clean": "rimraf dist"
   },
   "dependencies": {
     "@bundler/shared": "workspace:*",
