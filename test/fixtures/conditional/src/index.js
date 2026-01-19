@@ -1,3 +1,3 @@
-import { feature } from "./feature.js" with { condition: "EXPERIMENT_A" };
+import { feature } from "./feature-a.js" with { condition: "EXPERIMENT_A" };
 
 export const value = feature;

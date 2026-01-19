@@ -1,4 +1,4 @@
-export type ConditionExpr = string | { AND: ConditionExpr[] } | { OR: ConditionExpr[] };
+export type ConditionExpr = string | { AND: ConditionExpr[] } | { OR: ConditionExpr[] } | { NOT: ConditionExpr };
 
 export function isCompoundCondition(condition: ConditionExpr): condition is { AND: ConditionExpr[] } | { OR: ConditionExpr[] } {
   return typeof condition === "object" && condition !== null;
@@ -15,6 +15,9 @@ export function normalizeCondition(condition: ConditionExpr): ConditionExpr {
   if ("OR" in condition) {
     const parts = condition.OR.map(normalizeCondition);
     return { OR: parts };
+  }
+  if ("NOT" in condition) {
+    return { NOT: normalizeCondition(condition.NOT) };
   }
   return condition;
 }

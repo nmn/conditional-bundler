@@ -281,12 +281,14 @@ function collectImports(
       }
 
       const conditionAttr = attributes.condition;
+      const elseAttr = attributes.else;
       let condition: ConditionalImport | undefined;
       if (conditionAttr) {
         const conditionExpr = parseCondition(conditionAttr);
-        condition = { source: path.node.source.value, condition: conditionExpr };
+        condition = { source: path.node.source.value, condition: conditionExpr, elseSource: elseAttr };
         conditionalImports.push(condition);
         delete attributes.condition;
+        delete attributes.else;
       }
 
       const specifiers: ImportSpecifier[] = [];

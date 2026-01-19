@@ -43,6 +43,7 @@ export type DynamicImport = {
 export type ConditionalImport = {
   source: string;
   condition: ConditionExpr;
+  elseSource?: string;
 };
 
 export type FileFlags = {

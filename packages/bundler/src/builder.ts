@@ -221,6 +221,9 @@ async function createBundlePlan(
     const replacements: Array<{ start: number; end: number; text: string }> = [];
     for (const importEntry of node.irHeader.imports) {
       for (const spec of importEntry.specifiers) {
+        if (importEntry.condition) {
+          continue;
+        }
         const provider = resolveProvider(graph, node, importEntry, spec);
         if (!provider) {
           continue;
@@ -252,6 +255,11 @@ async function createBundlePlan(
 
     if (condition) {
       parts.push(emitConditionalEnd());
+    }
+
+    const conditionalBindings = buildConditionalBindings(graph, node);
+    for (const binding of conditionalBindings) {
+      parts.push(binding);
     }
 
     for (const dyn of node.irHeader.dynamicImports) {
@@ -348,6 +356,45 @@ function resolveDynamicImports(
     mapping[dyn.hashKey] = bundleMap.get(resolved) ?? "";
   }
   return mapping;
+}
+
+function buildConditionalBindings(graph: ModuleGraph, node: ModuleNode): string[] {
+  const bindings: string[] = [];
+  for (const importEntry of node.irHeader.imports) {
+    if (!importEntry.condition) {
+      continue;
+    }
+    const sourceId = node.resolvedSources.get(importEntry.source);
+    const sourceNode = sourceId ? graph.nodes.get(sourceId) : undefined;
+    if (!sourceNode) {
+      continue;
+    }
+    const conditionExpr = importEntry.condition;
+    for (const spec of importEntry.specifiers) {
+      const localName = `${node.prefix}_${spec.local}`;
+      const primaryName = `${sourceNode.prefix}_${spec.imported}`;
+      const thenBlock = emitConditionalStart(conditionExpr) + "\n" +
+        `const ${localName} = ${primaryName};` + "\n" +
+        emitConditionalEnd();
+      bindings.push(thenBlock);
+
+      const elseSource = node.irHeader.conditionalImports.find((item) => item.source === importEntry.source)?.elseSource;
+      const elseCondition = { NOT: conditionExpr };
+      let fallback = "undefined";
+      if (elseSource) {
+        const elseId = node.resolvedSources.get(elseSource);
+        const elseNode = elseId ? graph.nodes.get(elseId) : undefined;
+        if (elseNode) {
+          fallback = `${elseNode.prefix}_${spec.imported}`;
+        }
+      }
+      const elseBlock = emitConditionalStart(elseCondition) + "\n" +
+        `const ${localName} = ${fallback};` + "\n" +
+        emitConditionalEnd();
+      bindings.push(elseBlock);
+    }
+  }
+  return bindings;
 }
 
 function adjustOffset(

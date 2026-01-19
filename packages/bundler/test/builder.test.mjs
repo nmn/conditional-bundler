@@ -43,6 +43,15 @@ test("adds conditional markers", async () => {
   const output = await readBundle(result, "conditional");
   expect(output).toContain("##CONDITION_START##");
   expect(output).toContain("EXPERIMENT_A");
+  expect(output).toContain("\"NOT\"");
+});
+
+test("handles conditional else imports", async () => {
+  const result = await buildFixture("conditional-alt");
+  const output = await readBundle(result, "conditional-alt");
+  expect(output).toContain("##CONDITION_START##");
+  expect(output).toContain("EXPERIMENT_B");
+  expect(output).toContain("\"NOT\"");
 });
 
 test("emits namespace object for namespace imports", async () => {
