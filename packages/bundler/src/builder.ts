@@ -106,32 +106,48 @@ export async function buildProject(config: BundlerConfig, plugins: BundlerPlugin
         }
       }
 
-      for (const importEntry of irHeader.imports) {
-        if (importEntry.kind === "type") {
-          continue;
-        }
-        for (const envId of envs) {
-          const resolved = await resolver(entry.path, importEntry.source, envId);
-          resolvedMap.set(resolved.id, resolved.resolvedPath);
-          if (!entrySet.has(resolved.resolvedPath)) {
-            const next = { id: resolved.id, path: resolved.resolvedPath };
-            entryQueue.push(next);
-            entrySet.add(resolved.resolvedPath);
-          }
+    for (const importEntry of irHeader.imports) {
+      if (importEntry.kind === "type") {
+        continue;
+      }
+      for (const envId of envs) {
+        const resolved = await resolver(entry.path, importEntry.source, envId);
+        resolvedMap.set(resolved.id, resolved.resolvedPath);
+        if (!entrySet.has(resolved.resolvedPath)) {
+          const next = { id: resolved.id, path: resolved.resolvedPath };
+          entryQueue.push(next);
+          entrySet.add(resolved.resolvedPath);
         }
       }
+    }
 
-      for (const reexport of [...irHeader.exportStars, ...irHeader.reexportsNamed]) {
-        for (const envId of envs) {
-          const resolved = await resolver(entry.path, reexport.source, envId);
-          resolvedMap.set(resolved.id, resolved.resolvedPath);
-          if (!entrySet.has(resolved.resolvedPath)) {
-            const next = { id: resolved.id, path: resolved.resolvedPath };
-            entryQueue.push(next);
-            entrySet.add(resolved.resolvedPath);
-          }
+    for (const conditionalImport of irHeader.conditionalImports) {
+      if (!conditionalImport.elseSource) {
+        continue;
+      }
+      for (const envId of envs) {
+        const resolved = await resolver(entry.path, conditionalImport.elseSource, envId);
+        resolvedMap.set(resolved.id, resolved.resolvedPath);
+        if (!entrySet.has(resolved.resolvedPath)) {
+          const next = { id: resolved.id, path: resolved.resolvedPath };
+          entryQueue.push(next);
+          entrySet.add(resolved.resolvedPath);
         }
       }
+    }
+
+    for (const reexport of [...irHeader.exportStars, ...irHeader.reexportsNamed]) {
+      for (const envId of envs) {
+        const resolved = await resolver(entry.path, reexport.source, envId);
+        resolvedMap.set(resolved.id, resolved.resolvedPath);
+        if (!entrySet.has(resolved.resolvedPath)) {
+          const next = { id: resolved.id, path: resolved.resolvedPath };
+          entryQueue.push(next);
+          entrySet.add(resolved.resolvedPath);
+        }
+      }
+    }
+
     }
 
     const graphs: ModuleGraph[] = [];
@@ -221,15 +237,15 @@ async function createBundlePlan(
     const replacements: Array<{ start: number; end: number; text: string }> = [];
     for (const importEntry of node.irHeader.imports) {
       for (const spec of importEntry.specifiers) {
-        if (importEntry.condition) {
-          continue;
-        }
         const provider = resolveProvider(graph, node, importEntry, spec);
         if (!provider) {
           continue;
         }
+        const targetSymbol = importEntry.condition
+          ? `${node.prefix}_${spec.local}`
+          : provider.symbol;
         for (const [start, end] of spec.useRanges) {
-          replacements.push({ start, end, text: provider.symbol });
+          replacements.push({ start, end, text: targetSymbol });
         }
       }
     }
@@ -247,6 +263,11 @@ async function createBundlePlan(
       parts.push(emitConditionalStart(condition));
     }
 
+    const conditionalBindings = buildConditionalBindings(graph, node);
+    for (const binding of conditionalBindings) {
+      parts.push(binding);
+    }
+
     parts.push(processed);
 
     if (node.irHeader.flags.needsNamespaceObject && node.exportTable) {
@@ -255,11 +276,6 @@ async function createBundlePlan(
 
     if (condition) {
       parts.push(emitConditionalEnd());
-    }
-
-    const conditionalBindings = buildConditionalBindings(graph, node);
-    for (const binding of conditionalBindings) {
-      parts.push(binding);
     }
 
     for (const dyn of node.irHeader.dynamicImports) {
@@ -372,7 +388,8 @@ function buildConditionalBindings(graph: ModuleGraph, node: ModuleNode): string[
     const conditionExpr = importEntry.condition;
     for (const spec of importEntry.specifiers) {
       const localName = `${node.prefix}_${spec.local}`;
-      const primaryName = `${sourceNode.prefix}_${spec.imported}`;
+      const importName = spec.imported === "default" ? "default" : spec.imported;
+      const primaryName = `${sourceNode.prefix}_${importName}`;
       const thenBlock = emitConditionalStart(conditionExpr) + "\n" +
         `const ${localName} = ${primaryName};` + "\n" +
         emitConditionalEnd();
@@ -385,7 +402,8 @@ function buildConditionalBindings(graph: ModuleGraph, node: ModuleNode): string[
         const elseId = node.resolvedSources.get(elseSource);
         const elseNode = elseId ? graph.nodes.get(elseId) : undefined;
         if (elseNode) {
-          fallback = `${elseNode.prefix}_${spec.imported}`;
+          const elseImportName = spec.imported === "default" ? "default" : spec.imported;
+          fallback = `${elseNode.prefix}_${elseImportName}`;
         }
       }
       const elseBlock = emitConditionalStart(elseCondition) + "\n" +

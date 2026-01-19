@@ -38,6 +38,19 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
       if (importEntry.condition) {
         const existing = node.conditionalDeps.get(resolved.id);
         node.conditionalDeps.set(resolved.id, existing ? combineOr([existing, importEntry.condition]) : importEntry.condition);
+
+        const elseSource = node.irHeader.conditionalImports.find((item) => item.source === importEntry.source)?.elseSource;
+        if (elseSource) {
+          const elseResolved = await input.resolver(node.irHeader.id, elseSource, input.envId);
+          node.deps.push(elseResolved.id);
+          node.resolvedSources.set(elseSource, elseResolved.id);
+          const elseCondition = { NOT: importEntry.condition };
+          const existingElse = node.conditionalDeps.get(elseResolved.id);
+          node.conditionalDeps.set(
+            elseResolved.id,
+            existingElse ? combineOr([existingElse, elseCondition]) : elseCondition
+          );
+        }
       }
     }
     for (const star of node.irHeader.exportStars) {
