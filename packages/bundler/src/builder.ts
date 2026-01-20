@@ -37,6 +37,7 @@ type BundlePlan = {
   fileName: string;
   parts: string[];
   dynamicImports: DynamicImportRef[];
+  preserveExports: boolean;
 };
 
 export async function buildProject(config: BundlerConfig, plugins: BundlerPlugin[]): Promise<BuildResult> {
@@ -170,16 +171,17 @@ export async function buildProject(config: BundlerConfig, plugins: BundlerPlugin
     const bundlePlans: BundlePlan[] = [];
     for (const graph of transformedGraphs) {
       const entries = pickEntriesForEnv(collectEntries(config.entries), graph.envId);
-      for (const entry of entries) {
-        bundlePlans.push(await createBundlePlan(graph, entry.path, config));
-      }
-      const dynamicForEnv = dynamicEntries.filter((entry) => entry.envs?.includes(graph.envId) || !entry.envs);
-      for (const entry of dynamicForEnv) {
-        if (entries.some((explicit) => explicit.path === entry.path)) {
-          continue;
-        }
-        bundlePlans.push(await createBundlePlan(graph, entry.path, config));
-      }
+       for (const entry of entries) {
+         bundlePlans.push(await createBundlePlan(graph, entry.path, config, { preserveExports: false }));
+       }
+       const dynamicForEnv = dynamicEntries.filter((entry) => entry.envs?.includes(graph.envId) || !entry.envs);
+       for (const entry of dynamicForEnv) {
+         if (entries.some((explicit) => explicit.path === entry.path)) {
+           continue;
+         }
+         bundlePlans.push(await createBundlePlan(graph, entry.path, config, { preserveExports: true }));
+       }
+
     }
 
     const bundleMap = new Map<string, string>();
@@ -220,7 +222,8 @@ function pickEntriesForEnv(entries: EntrySpec[], envId: string): EntrySpec[] {
 async function createBundlePlan(
   graph: ModuleGraph,
   entryPath: string,
-  config: BundlerConfig
+  config: BundlerConfig,
+  options: { preserveExports: boolean }
 ): Promise<BundlePlan> {
   const ordered = topoSort(graph, entryPath);
   if (ordered.length === 0) {
@@ -256,7 +259,9 @@ async function createBundlePlan(
     }
 
     processed = stripImportStatements(processed, node.irHeader.importRanges);
-    processed = stripImportStatements(processed, node.irHeader.exportRanges);
+    if (!options.preserveExports) {
+      processed = stripImportStatements(processed, node.irHeader.exportRanges);
+    }
 
     const condition = node.condition;
     if (condition) {
@@ -299,7 +304,7 @@ async function createBundlePlan(
     ? config.outputs.fileName.replace("[env]", graph.envId).replace("[hash]", hash)
     : `bundle.${graph.envId}.${hash}.js`;
 
-  return { envId: graph.envId, entryId: entryPath, fileName, parts, dynamicImports };
+  return { envId: graph.envId, entryId: entryPath, fileName, parts, dynamicImports, preserveExports: options.preserveExports };
 }
 
 function topoSort(graph: ModuleGraph, entryId: string): ModuleNode[] {

@@ -1,0 +1,105 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`adds conditional markers 1`] = `
+"
+/////##CONDITION_START##"EXPERIMENT_A"
+const d7lphhbj_feature = "enabled";
+export { d7lphhbj_feature as feature };
+/////##CONDITION_END##
+/////##CONDITION_START##"EXPERIMENT_A"
+const a2tnbcq4h_feature = d7lphhbj_feature;
+/////##CONDITION_END##
+/////##CONDITION_START##{"NOT":"EXPERIMENT_A"}
+const a2tnbcq4h_feature = undefined;
+/////##CONDITION_END##
+
+const a2tnbcq4h_value = a2tnbcq4h_feature;
+export { a2tnbcq4h_value as value };"
+`;
+
+exports[`bundles simple module graph 1`] = `
+"
+const a9vvu7r5q_foo = 2;
+export { a9vvu7r5q_foo as foo };
+globalThis.__SIDE_EFFECT__ = true;
+
+
+const a5fgvucwz_value = a9vvu7r5q_a9vvu7r5q_foo + 1;
+export { a5fgvucwz_value as value };"
+`;
+
+exports[`dedupes dynamic import constants 1`] = `
+"const __IMPORT_a3niwtk07 = () => import("dynamic-import-shared.browser.qq0i00mb.js");
+async function ofm8jtpk_loadA() {
+  return __IMPORT_a3niwtk07();
+}
+export { ofm8jtpk_loadA as loadA };
+async function ofm8jtpk_loadB() {
+  return __IMPORT_a3niwtk07();
+}
+export { ofm8jtpk_loadB as loadB };"
+`;
+
+exports[`emits namespace object for namespace imports 1`] = `
+"
+const a70ovn9sv_answer = 7;
+export { a70ovn9sv_answer as answer };
+const a70ovn9sv_name = "ns";
+export { a70ovn9sv_name as name };
+
+const a9gaxiodg_value = __NS__a70ovn9sv.answer;
+export { a9gaxiodg_value as value };
+const a9gaxiodg_dynamic = __NS__a70ovn9sv["answer"];
+export { a9gaxiodg_dynamic as dynamic };
+const __NS__a9gaxiodg = Object.create(null);
+Object.defineProperty(__NS__a9gaxiodg, Symbol.toStringTag, { value: "Module" });
+Object.defineProperty(__NS__a9gaxiodg, "value", { enumerable: true, get: () => a9gaxiodg_value });
+Object.defineProperty(__NS__a9gaxiodg, "dynamic", { enumerable: true, get: () => a9gaxiodg_dynamic });
+Object.preventExtensions(__NS__a9gaxiodg);"
+`;
+
+exports[`handles conditional else imports 1`] = `
+"
+/////##CONDITION_START##"EXPERIMENT_B"
+const qbsxd3ur_feature = "yes";
+export { qbsxd3ur_feature as feature };
+/////##CONDITION_END##
+/////##CONDITION_START##{"NOT":"EXPERIMENT_B"}
+const tkfsqtny_feature = "no";
+export { tkfsqtny_feature as feature };
+/////##CONDITION_END##
+/////##CONDITION_START##"EXPERIMENT_B"
+const b07tb108_feature = qbsxd3ur_feature;
+/////##CONDITION_END##
+/////##CONDITION_START##{"NOT":"EXPERIMENT_B"}
+const b07tb108_feature = tkfsqtny_feature;
+/////##CONDITION_END##
+
+const b07tb108_value = b07tb108_feature;
+export { b07tb108_value as value };"
+`;
+
+exports[`handles export star with override 1`] = `
+"
+const psv712k8_value = "a";
+export { psv712k8_value as value };
+const aqcqowdi_value = "b";
+export { aqcqowdi_value as value };
+
+"
+`;
+
+exports[`rewrites dynamic import to constant 1`] = `
+"const __IMPORT_a1yfq98g1 = () => import("dynamic-import.browser.5jpe4lvi.js");
+async function t38r3uny_loadFoo() {
+  const mod = await __IMPORT_a1yfq98g1();
+  return mod.foo;
+}
+export { t38r3uny_loadFoo as loadFoo };"
+`;
+
+exports[`rewrites import.meta url 1`] = `
+"
+const m95rhhlx_asset = __BUNDLER_URL__("m95rhhlx", "./asset.png").href;
+export { m95rhhlx_asset as asset };"
+`;

@@ -90,14 +90,15 @@ export function transformWithCore(
       }
     },
     Import(path: NodePath<t.Import>) {
-      const parent = path.parentPath.node;
+      const parentPath = path.parentPath;
+      const parent = parentPath.node;
       if (t.isCallExpression(parent) && parent.arguments.length === 1) {
         const arg = parent.arguments[0];
         if (t.isStringLiteral(arg)) {
           const rel = pathArgToRel(input, arg.value);
           const key = importConstKey(input.pkg.name, rel);
           dynamicImportMap.set(key, arg.value);
-          parent.arguments[0] = t.identifier(`__IMPORT_${key}`);
+          parentPath.replaceWith(t.callExpression(t.identifier(`__IMPORT_${key}`), []));
         }
       }
     },
@@ -145,7 +146,6 @@ export function transformWithCore(
             reexportsNamed.push({ source: path.node.source.value, imported, exported });
           }
         }
-        path.remove();
         return;
       }
       if (path.node.declaration) {
@@ -163,7 +163,6 @@ export function transformWithCore(
             }
           }
         }
-        path.replaceWith(decl);
         return;
       }
       for (const spec of path.node.specifiers) {
@@ -177,7 +176,6 @@ export function transformWithCore(
           exportsLocal.push({ local, exported, kind: "var" });
         }
       }
-      path.remove();
     },
     ExportDefaultDeclaration(path: NodePath<t.ExportDefaultDeclaration>) {
       if (path.node.start != null && path.node.end != null) {
@@ -187,7 +185,8 @@ export function transformWithCore(
       const expr = exportDefaultToExpression(path.node.declaration);
       const local = t.identifier(`${options.prefix}_default`);
       const decl = t.variableDeclaration("const", [t.variableDeclarator(local, expr)]);
-      path.replaceWith(decl);
+      const exportDecl = t.exportDefaultDeclaration(local);
+      path.replaceWithMultiple([decl, exportDecl]);
     },
     ExportAllDeclaration(path: NodePath<t.ExportAllDeclaration>) {
       if (path.node.start != null && path.node.end != null) {
@@ -201,11 +200,9 @@ export function transformWithCore(
           exported: exported.name,
           isNamespace: true
         });
-        path.remove();
         return;
       }
       exportStars.push({ source: path.node.source.value });
-      path.remove();
     }
   });
 
@@ -243,7 +240,7 @@ export function transformWithCore(
       conditionalImports,
       discoveredEntrypoints: dynamicImports.map((entry) => entry.source),
       importRanges,
-      exportRanges: [],
+      exportRanges,
       flags: {
         hasTopLevelAwait,
         sideEffects: true,
@@ -251,6 +248,7 @@ export function transformWithCore(
       }
     }
   };
+
 }
 
 function collectImports(

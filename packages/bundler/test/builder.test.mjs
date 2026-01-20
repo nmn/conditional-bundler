@@ -34,48 +34,49 @@ async function readBundle(result, name) {
 test("bundles simple module graph", async () => {
   const result = await buildFixture("simple");
   const output = await readBundle(result, "simple");
-  expect(output).toContain("__SIDE_EFFECT__");
-  expect(output).toContain("_foo");
+  expect(output).toMatchSnapshot();
 });
 
 test("adds conditional markers", async () => {
   const result = await buildFixture("conditional");
   const output = await readBundle(result, "conditional");
-  expect(output).toContain("##CONDITION_START##");
-  expect(output).toContain("EXPERIMENT_A");
-  expect(output).toContain("\"NOT\"");
+  expect(output).toMatchSnapshot();
 });
 
 test("handles conditional else imports", async () => {
   const result = await buildFixture("conditional-alt");
   const output = await readBundle(result, "conditional-alt");
-  expect(output).toContain("##CONDITION_START##");
-  expect(output).toContain("EXPERIMENT_B");
-  expect(output).toContain("\"NOT\"");
+  expect(output).toMatchSnapshot();
 });
 
 test("emits namespace object for namespace imports", async () => {
   const result = await buildFixture("namespace");
   const output = await readBundle(result, "namespace");
-  expect(output).toContain("__NS__");
+  expect(output).toMatchSnapshot();
 });
 
 test("handles export star with override", async () => {
   const result = await buildFixture("export-star");
   const output = await readBundle(result, "export-star");
-  expect(output).toContain("value");
+  expect(output).toMatchSnapshot();
 });
 
 test("rewrites dynamic import to constant", async () => {
   const result = await buildFixture("dynamic-import");
   const output = await readBundle(result, "dynamic-import");
-  expect(output).toMatch(/__IMPORT/);
+  expect(output).toMatchSnapshot();
+});
+
+test("dedupes dynamic import constants", async () => {
+  const result = await buildFixture("dynamic-import-shared");
+  const output = await readBundle(result, "dynamic-import-shared");
+  expect(output).toMatchSnapshot();
 });
 
 test("rewrites import.meta url", async () => {
   const result = await buildFixture("import-meta");
   const output = await readBundle(result, "import-meta");
-  expect(output).toContain("__BUNDLER_URL__");
+  expect(output).toMatchSnapshot();
 });
 
 test("fails on top-level await", async () => {

@@ -7,7 +7,7 @@ export function emitDynamicImportConstants(imports: DynamicImport[], bundleMap: 
     if (!target) {
       continue;
     }
-    lines.push(`const ${dynamicImport.hashKey} = "${target}";`);
+    lines.push(`const ${dynamicImport.hashKey} = () => import("${target}");`);
   }
   return lines.join("\n");
 }
