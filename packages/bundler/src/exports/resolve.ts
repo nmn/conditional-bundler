@@ -71,6 +71,9 @@ export function resolveExportTables(nodes: ModuleNode[], nodeMap: Map<string, Mo
         if (!sourceNode?.exportTable) {
           continue;
         }
+        if (table.has(reexport.exported)) {
+          continue;
+        }
         if (reexport.isNamespace) {
           table.set(reexport.exported, {
             moduleId: sourceId,

@@ -27,12 +27,9 @@ async function transformSnapshot(code, filePath = defaultFilePath, root = pkgRoo
   };
 }
 
-test("renames top-level bindings", async () => {
-  const result = await transformSnapshot("export const value = 1; const local = 2;");
-  expect(result.code).toMatchInlineSnapshot(`
-"const ji19ybwd_value = 1;
-const ji19ybwd_local = 2;"
-`);
+test("keeps export declaration shape", async () => {
+  const result = await transformSnapshot("export const foo = 42;");
+  expect(result.code).toMatchInlineSnapshot(`"const ji19ybwd_foo = 42;"`);
   expect(result.meta).toMatchInlineSnapshot(`
 {
   "conditionalImports": [],
@@ -42,9 +39,9 @@ const ji19ybwd_local = 2;"
   "exportStars": [],
   "exportsLocal": [
     {
-      "exported": "value",
+      "exported": "foo",
       "kind": "var",
-      "local": "value",
+      "local": "foo",
     },
   ],
   "flags": {
@@ -57,6 +54,15 @@ const ji19ybwd_local = 2;"
   "reexportsNamed": [],
 }
 `);
+});
+
+test("rewrites default export to renamed binding", async () => {
+  const result = await transformSnapshot("export default function foo() { return 1; }");
+  expect(result.code).toMatchInlineSnapshot(`
+"const ji19ybwd_default = function ji19ybwd_foo() {
+  return 1;
+};"
+`);
   expect(result.meta).toMatchInlineSnapshot(`
 {
   "conditionalImports": [],
@@ -66,9 +72,9 @@ const ji19ybwd_local = 2;"
   "exportStars": [],
   "exportsLocal": [
     {
-      "exported": "value",
-      "kind": "var",
-      "local": "value",
+      "exported": "default",
+      "kind": "default",
+      "local": "default",
     },
   ],
   "flags": {
@@ -79,6 +85,45 @@ const ji19ybwd_local = 2;"
   "importRanges": [],
   "imports": [],
   "reexportsNamed": [],
+}
+`);
+});
+
+test("records export stars and reexports", async () => {
+  const result = await transformSnapshot("export * from './dep.js'; export { foo as bar } from './dep.js';");
+  expect(result.code).toMatchInlineSnapshot(`"const ji19ybwd_bar = a4tfu7r6i_foo;"`);
+  expect(result.meta).toMatchInlineSnapshot(`
+{
+  "conditionalImports": [],
+  "discoveredEntrypoints": [],
+  "dynamicImports": [],
+  "exportRanges": [],
+  "exportStars": [
+    {
+      "source": "./dep.js",
+    },
+  ],
+  "exportsLocal": [
+    {
+      "exported": "bar",
+      "kind": "var",
+      "local": "bar",
+    },
+  ],
+  "flags": {
+    "hasTopLevelAwait": false,
+    "needsNamespaceObject": false,
+    "sideEffects": true,
+  },
+  "importRanges": [],
+  "imports": [],
+  "reexportsNamed": [
+    {
+      "exported": "bar",
+      "imported": "foo",
+      "source": "./dep.js",
+    },
+  ],
 }
 `);
 });

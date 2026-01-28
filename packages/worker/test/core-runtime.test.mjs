@@ -27,24 +27,32 @@ async function transformSnapshot(code, filePath = defaultFilePath, root = pkgRoo
   };
 }
 
-test("renames top-level bindings", async () => {
-  const result = await transformSnapshot("export const value = 1; const local = 2;");
+test("rewrites dynamic import to constant", async () => {
+  const result = await transformSnapshot("export async function load() { return import('./dep.js'); }");
   expect(result.code).toMatchInlineSnapshot(`
-"const ji19ybwd_value = 1;
-const ji19ybwd_local = 2;"
+"async function ji19ybwd_load() {
+  return __IMPORT_a4tfu7r6i();
+}"
 `);
   expect(result.meta).toMatchInlineSnapshot(`
 {
   "conditionalImports": [],
-  "discoveredEntrypoints": [],
-  "dynamicImports": [],
+  "discoveredEntrypoints": [
+    "./dep.js",
+  ],
+  "dynamicImports": [
+    {
+      "hashKey": "__IMPORT_a4tfu7r6i",
+      "source": "./dep.js",
+    },
+  ],
   "exportRanges": [],
   "exportStars": [],
   "exportsLocal": [
     {
-      "exported": "value",
-      "kind": "var",
-      "local": "value",
+      "exported": "load",
+      "kind": "func",
+      "local": "load",
     },
   ],
   "flags": {
@@ -57,28 +65,10 @@ const ji19ybwd_local = 2;"
   "reexportsNamed": [],
 }
 `);
-  expect(result.meta).toMatchInlineSnapshot(`
-{
-  "conditionalImports": [],
-  "discoveredEntrypoints": [],
-  "dynamicImports": [],
-  "exportRanges": [],
-  "exportStars": [],
-  "exportsLocal": [
-    {
-      "exported": "value",
-      "kind": "var",
-      "local": "value",
-    },
-  ],
-  "flags": {
-    "hasTopLevelAwait": false,
-    "needsNamespaceObject": false,
-    "sideEffects": true,
-  },
-  "importRanges": [],
-  "imports": [],
-  "reexportsNamed": [],
-}
-`);
+});
+
+test("rejects top-level await", async () => {
+  await expect(transform("await Promise.resolve(1);"))
+    .rejects
+    .toThrow("E_TLA");
 });

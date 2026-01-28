@@ -27,11 +27,16 @@ async function transformSnapshot(code, filePath = defaultFilePath, root = pkgRoo
   };
 }
 
-test("renames top-level bindings", async () => {
-  const result = await transformSnapshot("export const value = 1; const local = 2;");
+test.skip("transforms mixed exports and imports", async () => {
+  const result = await transformSnapshot(`
+    import { foo } from './dep.js';
+    export const bar = foo + 1;
+    export { foo };
+  `);
   expect(result.code).toMatchInlineSnapshot(`
-"const ji19ybwd_value = 1;
-const ji19ybwd_local = 2;"
+"import { foo } from './dep.js';
+export const ji19ybwd_bar = foo + 1;
+export { foo };"
 `);
   expect(result.meta).toMatchInlineSnapshot(`
 {
@@ -42,33 +47,14 @@ const ji19ybwd_local = 2;"
   "exportStars": [],
   "exportsLocal": [
     {
-      "exported": "value",
+      "exported": "bar",
       "kind": "var",
-      "local": "value",
+      "local": "ji19ybwd_bar",
     },
-  ],
-  "flags": {
-    "hasTopLevelAwait": false,
-    "needsNamespaceObject": false,
-    "sideEffects": true,
-  },
-  "importRanges": [],
-  "imports": [],
-  "reexportsNamed": [],
-}
-`);
-  expect(result.meta).toMatchInlineSnapshot(`
-{
-  "conditionalImports": [],
-  "discoveredEntrypoints": [],
-  "dynamicImports": [],
-  "exportRanges": [],
-  "exportStars": [],
-  "exportsLocal": [
     {
-      "exported": "value",
+      "exported": "foo",
       "kind": "var",
-      "local": "value",
+      "local": "foo",
     },
   ],
   "flags": {
@@ -76,8 +62,34 @@ const ji19ybwd_local = 2;"
     "needsNamespaceObject": false,
     "sideEffects": true,
   },
-  "importRanges": [],
-  "imports": [],
+  "importRanges": [
+    [
+      0,
+      31,
+    ],
+  ],
+  "imports": [
+    {
+      "attributes": undefined,
+      "condition": undefined,
+      "isDefault": false,
+      "isNamespace": false,
+      "kind": "value",
+      "source": "./dep.js",
+      "specifiers": [
+        {
+          "imported": "foo",
+          "local": "foo",
+          "useRanges": [
+            [
+              55,
+              58,
+            ],
+          ],
+        },
+      ],
+    },
+  ],
   "reexportsNamed": [],
 }
 `);

@@ -1,7 +1,7 @@
 import { parentPort } from "node:worker_threads";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { filePrefix, contentHash } from "@bundler/shared";
+import { filePrefix, contentHash, normalizePosixPath } from "@bundler/shared";
 import type { TransformInput, TransformResult, TransformMultiResult } from "@bundler/shared";
 import { writeFileAtomic, ensureDir } from "@bundler/shared";
 
@@ -47,10 +47,11 @@ type WorkerResponse = {
 async function handleTransform(request: WorkerRequest): Promise<WorkerResponse> {
   const fileHash = contentHash(request.code);
   const parsedByEnv = request.codeByEnv;
-  const relPath = path.posix.relative(request.pkg.root, request.realPath);
-  const prefix = filePrefix(request.pkg.name, relPath);
+  const normalizedPath = normalizePosixPath(request.realPath);
+  const relPath = path.posix.relative(request.pkg.root, normalizedPath);
+  const prefix = filePrefix(request.pkg.name, request.pkg.version, relPath);
 
-  const result = await transformFile(request, prefix, parsedByEnv);
+  const result = await transformFile(request, parsedByEnv);
   const resultsByEnv = ("code" in result ? { default: result } : result) as TransformMultiResult;
 
   const codeByEnv: Record<string, string> = {};
@@ -108,7 +109,6 @@ async function handleTransform(request: WorkerRequest): Promise<WorkerResponse> 
 
 async function transformFile(
   request: WorkerRequest,
-  prefix: string,
   overrideByEnv?: Record<string, string>
 ): Promise<TransformResult | TransformMultiResult> {
   const { transformWithCore } = await import("./transform/core.js");
@@ -124,7 +124,6 @@ async function transformFile(
           envs: request.envs
         },
         {
-          prefix,
           importAttrAllow: ["json"]
         }
       );
@@ -140,7 +139,6 @@ async function transformFile(
       envs: request.envs
     },
     {
-      prefix,
       importAttrAllow: ["json"]
     }
   );

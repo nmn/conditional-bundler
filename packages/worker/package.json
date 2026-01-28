@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rimraf dist",
-    "test": "node ../../node_modules/.bin/jest"
+    "test": "NODE_OPTIONS=--experimental-vm-modules ../../node_modules/.bin/jest"
   },
   "dependencies": {
     "@babel/core": "^7.24.0",

@@ -1,6 +1,7 @@
+import fs from "node:fs";
 import path from "node:path";
 import { parse } from "@babel/parser";
-import traverseModule, { type NodePath } from "@babel/traverse";
+import traverseModule, { type NodePath, type Binding } from "@babel/traverse";
 import generateModule from "@babel/generator";
 import * as t from "@babel/types";
 import type {
@@ -14,10 +15,9 @@ import type {
   DynamicImport,
   ConditionalImport
 } from "@bundler/shared";
-import { importConstKey } from "@bundler/shared";
+import { importConstKey, filePrefix, findPkgRoot, readPkgSafe, normalizePosixPath } from "@bundler/shared";
 
 export type CoreTransformOptions = {
-  prefix: string;
   importAttrAllow: string[];
 };
 
@@ -42,27 +42,13 @@ export function transformWithCore(
   const generate = ((generateModule as unknown as { default?: typeof import("@babel/generator").default }).default ??
     (generateModule as unknown as typeof import("@babel/generator").default)) as typeof import("@babel/generator").default;
 
+  const normalizedPath = normalizePosixPath(input.realPath);
+  const relPath = path.posix.relative(input.pkg.root, normalizedPath);
+  const prefix = filePrefix(input.pkg.name, input.pkg.version, relPath);
+
   let hasTopLevelAwait = false;
 
-  const exportStars: ExportStar[] = [];
-  const reexportsNamed: ReexportNamed[] = [];
-  const exportsLocal: ExportLocal[] = [];
-  const exportRanges: Array<[number, number]> = [];
-
   traverse(ast, {
-    Program(path) {
-      const bindings = path.scope.getAllBindings() as Record<string, unknown>;
-      for (const [name, binding] of Object.entries(bindings)) {
-        const info = binding as { kind?: string; scope?: unknown };
-        if (info.kind === "module") {
-          continue;
-        }
-        if (info.scope !== path.scope) {
-          continue;
-        }
-        path.scope.rename(name, `${options.prefix}_${name}`);
-      }
-    },
     AwaitExpression(path: NodePath<t.AwaitExpression>) {
       if (path.getFunctionParent() == null) {
         hasTopLevelAwait = true;
@@ -88,6 +74,73 @@ export function transformWithCore(
           throw new Error(`E_IMPORT_ASSIGN: Cannot assign to import '${path.node.argument.name}' from '${input.realPath}'`);
         }
       }
+    }
+  });
+
+  const declaredExportNames = new Set<string>();
+
+  traverse(ast, {
+    ExportNamedDeclaration(path: NodePath<t.ExportNamedDeclaration>) {
+      const decl = path.node.declaration;
+      if (!decl) {
+        return;
+      }
+      if (t.isFunctionDeclaration(decl) && decl.id) {
+        declaredExportNames.add(decl.id.name);
+      }
+      if (t.isClassDeclaration(decl) && decl.id) {
+        declaredExportNames.add(decl.id.name);
+      }
+      if (t.isVariableDeclaration(decl)) {
+        for (const varDecl of decl.declarations) {
+          if (t.isIdentifier(varDecl.id)) {
+            declaredExportNames.add(varDecl.id.name);
+          }
+        }
+      }
+    },
+    ExportDefaultDeclaration(path: NodePath<t.ExportDefaultDeclaration>) {
+      const decl = path.node.declaration;
+      if (t.isFunctionDeclaration(decl) && decl.id) {
+        declaredExportNames.add(decl.id.name);
+      }
+      if (t.isClassDeclaration(decl) && decl.id) {
+        declaredExportNames.add(decl.id.name);
+      }
+    }
+  });
+
+  const exportStars: ExportStar[] = [];
+  const reexportsNamed: ReexportNamed[] = [];
+  const exportsLocal: ExportLocal[] = [];
+  const exportRanges: Array<[number, number]> = [];
+  const renameMap = new Map<string, string>();
+  const renameReverse = new Map<string, string>();
+  const handledDefaultExports = new WeakSet<t.ExportDefaultDeclaration>();
+
+  traverse(ast, {
+    Program(path) {
+      const bindings = path.scope.getAllBindings() as Record<string, Binding>;
+      for (const [name, binding] of Object.entries(bindings)) {
+        if (binding.scope !== path.scope) {
+          continue;
+        }
+        const isImportBinding =
+          binding.path.isImportSpecifier() ||
+          binding.path.isImportDefaultSpecifier() ||
+          binding.path.isImportNamespaceSpecifier();
+        if (binding.kind === "module" && isImportBinding) {
+          continue;
+        }
+        const nextName = `${prefix}_${name}`;
+        renameMap.set(name, nextName);
+        renameReverse.set(nextName, name);
+        if (declaredExportNames.has(name)) {
+          renameModuleBinding(binding, nextName);
+        } else {
+          path.scope.rename(name, nextName);
+        }
+      }
     },
     Import(path: NodePath<t.Import>) {
       const parentPath = path.parentPath;
@@ -95,8 +148,8 @@ export function transformWithCore(
       if (t.isCallExpression(parent) && parent.arguments.length === 1) {
         const arg = parent.arguments[0];
         if (t.isStringLiteral(arg)) {
-          const rel = pathArgToRel(input, arg.value);
-          const key = importConstKey(input.pkg.name, rel);
+          const resolved = resolveImportForHash(input, arg.value);
+          const key = importConstKey(resolved.pkg.name, resolved.pkg.version, resolved.relPath);
           dynamicImportMap.set(key, arg.value);
           parentPath.replaceWith(t.callExpression(t.identifier(`__IMPORT_${key}`), []));
         }
@@ -120,22 +173,22 @@ export function transformWithCore(
         return;
       }
       path.replaceWith(
-        t.callExpression(t.identifier("__BUNDLER_URL__"), [t.stringLiteral(options.prefix), t.stringLiteral(first.value)])
+        t.callExpression(t.identifier("__BUNDLER_URL__"), [t.stringLiteral(prefix), t.stringLiteral(first.value)])
       );
     },
     ExportNamedDeclaration(path: NodePath<t.ExportNamedDeclaration>) {
-      if (path.node.start != null && path.node.end != null) {
-        exportRanges.push([path.node.start, path.node.end]);
-      }
       if (path.node.source) {
+        const resolved = resolveImportForHash(input, path.node.source.value);
+        const depPrefix = filePrefix(resolved.pkg.name, resolved.pkg.version, resolved.relPath);
+        const declarations: t.VariableDeclarator[] = [];
         for (const spec of path.node.specifiers) {
           if (t.isExportNamespaceSpecifier(spec)) {
-            reexportsNamed.push({
-              source: path.node.source.value,
-              imported: "*",
-              exported: spec.exported.name,
-              isNamespace: true
-            });
+            const exported = spec.exported.name;
+            const localName = `${prefix}_${exported}`;
+            const init = t.identifier(`__NS__${depPrefix}`);
+            declarations.push(t.variableDeclarator(t.identifier(localName), init));
+            exportsLocal.push({ local: exported, exported, kind: "var" });
+            reexportsNamed.push({ source: path.node.source.value, imported: "*", exported, isNamespace: true });
           } else if (t.isExportSpecifier(spec)) {
             const imported = t.isIdentifier(spec.local)
               ? spec.local.name
@@ -143,55 +196,96 @@ export function transformWithCore(
             const exported = t.isIdentifier(spec.exported)
               ? spec.exported.name
               : "";
+            const localName = `${prefix}_${exported}`;
+            declarations.push(t.variableDeclarator(t.identifier(localName), t.identifier(`${depPrefix}_${imported}`)));
+            exportsLocal.push({ local: exported, exported, kind: "var" });
             reexportsNamed.push({ source: path.node.source.value, imported, exported });
           }
+        }
+        if (declarations.length > 0) {
+          path.replaceWith(t.variableDeclaration("const", declarations));
+        } else {
+          path.remove();
         }
         return;
       }
       if (path.node.declaration) {
         const decl = path.node.declaration;
         if (t.isFunctionDeclaration(decl) && decl.id) {
-          exportsLocal.push({ local: decl.id.name, exported: decl.id.name, kind: "func" });
+          const local = renameReverse.get(decl.id.name) ?? decl.id.name;
+          exportsLocal.push({ local, exported: local, kind: "func" });
+          path.replaceWith(decl);
+          return;
         }
         if (t.isClassDeclaration(decl) && decl.id) {
-          exportsLocal.push({ local: decl.id.name, exported: decl.id.name, kind: "class" });
+          const local = renameReverse.get(decl.id.name) ?? decl.id.name;
+          exportsLocal.push({ local, exported: local, kind: "class" });
+          path.replaceWith(decl);
+          return;
         }
         if (t.isVariableDeclaration(decl)) {
+          const extraExports: ExportLocal[] = [];
           for (const varDecl of decl.declarations) {
             if (t.isIdentifier(varDecl.id)) {
-              exportsLocal.push({ local: varDecl.id.name, exported: varDecl.id.name, kind: "var" });
+              const local = renameReverse.get(varDecl.id.name) ?? varDecl.id.name;
+              extraExports.push({ local, exported: local, kind: "var" });
+            }
+          }
+          if (extraExports.length > 0) {
+            exportsLocal.push(...extraExports);
+          }
+          path.replaceWith(decl);
+          return;
+        }
+        path.remove();
+        return;
+      }
+      if (path.node.specifiers.length > 0) {
+        const declarations: t.VariableDeclarator[] = [];
+        for (const spec of path.node.specifiers) {
+          if (t.isExportSpecifier(spec)) {
+            const local = t.isIdentifier(spec.local)
+              ? spec.local.name
+              : "";
+            const exported = t.isIdentifier(spec.exported)
+              ? spec.exported.name
+              : "";
+            const localRenamed = renameMap.get(local) ?? local;
+            const originalLocal = renameReverse.get(localRenamed) ?? localRenamed;
+            exportsLocal.push({ local: originalLocal, exported, kind: "var" });
+            if (exported && originalLocal !== exported) {
+              declarations.push(
+                t.variableDeclarator(
+                  t.identifier(`${prefix}_${exported}`),
+                  t.identifier(localRenamed)
+                )
+              );
             }
           }
         }
-        return;
-      }
-      for (const spec of path.node.specifiers) {
-        if (t.isExportSpecifier(spec)) {
-          const local = t.isIdentifier(spec.local)
-            ? spec.local.name
-            : "";
-          const exported = t.isIdentifier(spec.exported)
-            ? spec.exported.name
-            : "";
-          exportsLocal.push({ local, exported, kind: "var" });
+        if (declarations.length > 0) {
+          path.replaceWith(t.variableDeclaration("const", declarations));
+        } else {
+          path.remove();
         }
+        return;
       }
     },
     ExportDefaultDeclaration(path: NodePath<t.ExportDefaultDeclaration>) {
-      if (path.node.start != null && path.node.end != null) {
-        exportRanges.push([path.node.start, path.node.end]);
+      if (handledDefaultExports.has(path.node)) {
+        return;
+      }
+      if (t.isIdentifier(path.node.declaration) && path.node.declaration.name === `${prefix}_default`) {
+        return;
       }
       exportsLocal.push({ local: "default", exported: "default", kind: "default" });
       const expr = exportDefaultToExpression(path.node.declaration);
-      const local = t.identifier(`${options.prefix}_default`);
+      const local = t.identifier(`${prefix}_default`);
       const decl = t.variableDeclaration("const", [t.variableDeclarator(local, expr)]);
-      const exportDecl = t.exportDefaultDeclaration(local);
-      path.replaceWithMultiple([decl, exportDecl]);
+      handledDefaultExports.add(path.node);
+      path.replaceWith(decl);
     },
     ExportAllDeclaration(path: NodePath<t.ExportAllDeclaration>) {
-      if (path.node.start != null && path.node.end != null) {
-        exportRanges.push([path.node.start, path.node.end]);
-      }
       const exported = (path.node as t.ExportAllDeclaration & { exported?: t.Identifier }).exported;
       if (exported && t.isIdentifier(exported)) {
         reexportsNamed.push({
@@ -200,9 +294,11 @@ export function transformWithCore(
           exported: exported.name,
           isNamespace: true
         });
+        path.remove();
         return;
       }
       exportStars.push({ source: path.node.source.value });
+      path.remove();
     }
   });
 
@@ -222,14 +318,29 @@ export function transformWithCore(
     ].filter(Boolean) as any
   });
 
-  const { imports, conditionalImports, importRanges, needsNamespaceObject } = collectImports(parsed, input, options, traverse);
+  const importMeta = collectImports(parsed, input, options, traverse);
   const dynamicImports: DynamicImport[] = Array.from(dynamicImportMap.entries()).map(([hashKey, source]) => ({
     hashKey: `__IMPORT_${hashKey}`,
     source
   }));
 
+  const replacements = buildImportReplacements(importMeta.imports, input, prefix);
+  let transformedCode = output.code;
+  if (replacements.length > 0) {
+    transformedCode = applyReplacements(transformedCode, replacements);
+  }
+  if (importMeta.importRanges.length > 0) {
+    transformedCode = stripRanges(transformedCode, importMeta.importRanges);
+  }
+
+  const finalExportRanges = collectExportRanges(transformedCode, input);
+  const imports = importMeta.imports.map((entry) => ({
+    ...entry,
+    specifiers: entry.specifiers.map((spec) => ({ ...spec, useRanges: [] }))
+  }));
+
   return {
-    code: output.code,
+    code: transformedCode,
     map: output.map ? JSON.stringify(output.map) : undefined,
     meta: {
       imports,
@@ -237,14 +348,14 @@ export function transformWithCore(
       exportStars,
       reexportsNamed,
       dynamicImports,
-      conditionalImports,
+      conditionalImports: importMeta.conditionalImports,
       discoveredEntrypoints: dynamicImports.map((entry) => entry.source),
-      importRanges,
-      exportRanges,
+      importRanges: [],
+      exportRanges: finalExportRanges,
       flags: {
         hasTopLevelAwait,
         sideEffects: true,
-        needsNamespaceObject
+        needsNamespaceObject: importMeta.needsNamespaceObject
       }
     }
   };
@@ -417,13 +528,140 @@ function collectImports(
   return { imports, conditionalImports, importRanges, needsNamespaceObject };
 }
 
-function pathArgToRel(input: TransformInput, value: string): string {
-  if (!value.startsWith(".")) {
-    return value;
+type Replacement = {
+  start: number;
+  end: number;
+  text: string;
+};
+
+function buildImportReplacements(
+  imports: ImportEntry[],
+  input: TransformInput,
+  prefix: string
+): Replacement[] {
+  const replacements: Replacement[] = [];
+  for (const entry of imports) {
+    if (entry.kind === "type") {
+      continue;
+    }
+    const resolved = resolveImportForHash(input, entry.source);
+    const depPrefix = filePrefix(resolved.pkg.name, resolved.pkg.version, resolved.relPath);
+    for (const spec of entry.specifiers) {
+      let target = "";
+      if (entry.condition) {
+        target = `${prefix}_${spec.local}`;
+      } else if (entry.isNamespace && entry.namespaceUsage === "dynamic") {
+        target = `__NS__${depPrefix}`;
+      } else {
+        const importName = spec.imported === "default" ? "default" : spec.imported;
+        target = `${depPrefix}_${importName}`;
+      }
+      for (const [start, end] of spec.useRanges) {
+        replacements.push({ start, end, text: target });
+      }
+    }
   }
-  const rel = path.posix.normalize(path.posix.join(path.posix.dirname(input.realPath), value));
-  const pkgRel = path.posix.relative(input.pkg.root, rel);
-  return pkgRel.startsWith(".") ? value : pkgRel;
+  return replacements;
+}
+
+function applyReplacements(code: string, replacements: Replacement[]): string {
+  const sorted = [...replacements].sort((a, b) => b.start - a.start);
+  let output = code;
+  for (const { start, end, text } of sorted) {
+    output = output.slice(0, start) + text + output.slice(end);
+  }
+  return output;
+}
+
+function stripRanges(code: string, ranges: Array<[number, number]>): string {
+  const sorted = [...ranges].sort((a, b) => b[0] - a[0]);
+  let output = code;
+  for (const [start, end] of sorted) {
+    output = output.slice(0, start) + output.slice(end);
+  }
+  return output;
+}
+
+function collectExportRanges(code: string, input: TransformInput): Array<[number, number]> {
+  const ast = parse(code, {
+    sourceType: "module",
+    sourceFilename: input.realPath,
+    plugins: [
+      input.syntax.ts ? "typescript" : "",
+      input.syntax.jsx ? "jsx" : "",
+      "importAttributes"
+    ].filter(Boolean) as any
+  });
+  const traverse = ((traverseModule as unknown as { default?: typeof import("@babel/traverse").default }).default ??
+    (traverseModule as unknown as typeof import("@babel/traverse").default)) as typeof import("@babel/traverse").default;
+  const ranges: Array<[number, number]> = [];
+  traverse(ast, {
+    ExportNamedDeclaration(path: NodePath<t.ExportNamedDeclaration>) {
+      if (path.node.start != null && path.node.end != null) {
+        ranges.push([path.node.start, path.node.end]);
+      }
+    },
+    ExportDefaultDeclaration(path: NodePath<t.ExportDefaultDeclaration>) {
+      if (path.node.start != null && path.node.end != null) {
+        ranges.push([path.node.start, path.node.end]);
+      }
+    },
+    ExportAllDeclaration(path: NodePath<t.ExportAllDeclaration>) {
+      if (path.node.start != null && path.node.end != null) {
+        ranges.push([path.node.start, path.node.end]);
+      }
+    }
+  });
+  return ranges;
+}
+
+function resolveImportForHash(
+  input: TransformInput,
+  source: string
+): { pkg: TransformInput["pkg"]; relPath: string } {
+  if (source.startsWith(".")) {
+    const resolvedPath = resolveImportPath(input.realPath, source) ?? path.resolve(path.dirname(input.realPath), source);
+    const relPath = path.posix.relative(input.pkg.root, normalizePosixPath(resolvedPath));
+    return { pkg: input.pkg, relPath };
+  }
+  const resolvedPath = resolveImportPath(input.realPath, source);
+  if (!resolvedPath) {
+    return { pkg: input.pkg, relPath: source };
+  }
+  const pkgRoot = findPkgRoot(resolvedPath) ?? path.dirname(resolvedPath);
+  const pkg = readPkgSafe(pkgRoot);
+  const relPath = path.posix.relative(pkg.root, normalizePosixPath(resolvedPath));
+  return { pkg, relPath };
+}
+
+function resolveImportPath(fromPath: string, source: string): string | null {
+  if (source.startsWith(".")) {
+    const base = path.resolve(path.dirname(fromPath), source);
+    return resolveWithExtensions(base) ?? base;
+  }
+  try {
+    return require.resolve(source, { paths: [path.dirname(fromPath)] });
+  } catch {
+    return null;
+  }
+}
+
+function resolveWithExtensions(filePath: string): string | null {
+  const extensions = [".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs"];
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+    return filePath;
+  }
+  for (const ext of extensions) {
+    const candidate = filePath + ext;
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  const indexPath = path.join(filePath, "index.js");
+  if (fs.existsSync(indexPath)) {
+    return indexPath;
+  }
+  return null;
 }
 
 function isImportMetaUrl(node: t.MemberExpression): boolean {
@@ -500,4 +738,30 @@ function exportDefaultToExpression(
     return declaration;
   }
   return t.identifier("undefined");
+}
+
+function renameModuleBinding(binding: Binding, newName: string): void {
+  if (binding.identifier.name === newName) {
+    return;
+  }
+  binding.identifier.name = newName;
+  for (const refPath of binding.referencePaths) {
+    if (!refPath.isIdentifier()) {
+      continue;
+    }
+    if (refPath.node.name === newName) {
+      continue;
+    }
+    refPath.node.name = newName;
+  }
+  for (const path of binding.constantViolations) {
+    if (path.isIdentifier()) {
+      path.node.name = newName;
+    } else if (path.isAssignmentExpression()) {
+      const left = path.get("left");
+      if (left.isIdentifier()) {
+        left.node.name = newName;
+      }
+    }
+  }
 }
