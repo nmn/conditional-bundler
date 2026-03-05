@@ -18,9 +18,9 @@ async function buildFixture(name) {
       outputs: { outDir, fileName: `${name}.[env].[hash].js` },
       cacheDir: path.join(rootDir, "node_modules/.bundler-cache"),
       maxWorkers: 2,
-      diagnostics: "human"
+      diagnostics: "human",
     },
-    []
+    [],
   );
 }
 

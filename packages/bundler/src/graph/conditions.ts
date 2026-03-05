@@ -20,7 +20,11 @@ export function normalizeGraphConditions(graph: ModuleGraph): void {
   }
 
   for (const node of graph.nodes.values()) {
-    const condition = resolveNodeCondition(node, conditionCounts, unconditional);
+    const condition = resolveNodeCondition(
+      node,
+      conditionCounts,
+      unconditional,
+    );
     node.condition = condition;
   }
 }
@@ -28,7 +32,7 @@ export function normalizeGraphConditions(graph: ModuleGraph): void {
 function resolveNodeCondition(
   node: ModuleNode,
   conditionCounts: Map<string, ConditionExpr[]>,
-  unconditional: Set<string>
+  unconditional: Set<string>,
 ): ConditionExpr | undefined {
   if (unconditional.has(node.id)) {
     return undefined;

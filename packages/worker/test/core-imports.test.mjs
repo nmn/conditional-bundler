@@ -11,24 +11,30 @@ async function transform(code, filePath = defaultFilePath, root = pkgRoot) {
       realPath: filePath,
       pkg: { name: "fixture", version: "0.0.0", root },
       syntax: { jsx: false, ts: false },
-      envs: ["browser"]
+      envs: ["browser"],
     },
     {
-      importAttrAllow: ["json"]
-    }
+      importAttrAllow: ["json"],
+    },
   );
 }
 
-async function transformSnapshot(code, filePath = defaultFilePath, root = pkgRoot) {
+async function transformSnapshot(
+  code,
+  filePath = defaultFilePath,
+  root = pkgRoot,
+) {
   const result = await transform(code, filePath, root);
   return {
     code: result.code,
-    meta: result.meta
+    meta: result.meta,
   };
 }
 
 test("records import use ranges", async () => {
-  const result = await transformSnapshot("import { foo } from './dep.js'; const value = foo + 1;");
+  const result = await transformSnapshot(
+    "import { foo } from './dep.js'; const value = foo + 1;",
+  );
   expect(result.code).toMatchInlineSnapshot(`
 "
 const ji19ybwd_value = a4tfu7r6i_foo + 1;"
@@ -70,7 +76,9 @@ const ji19ybwd_value = a4tfu7r6i_foo + 1;"
 });
 
 test("captures conditional import attributes", async () => {
-  const result = await transformSnapshot("import { foo } from './dep.js' with { condition: 'COND_A' }; export const value = foo;");
+  const result = await transformSnapshot(
+    "import { foo } from './dep.js' with { condition: 'COND_A' }; export const value = foo;",
+  );
   expect(result.code).toMatchInlineSnapshot(`
 "
 const ji19ybwd_value = ji19ybwd_foo;"
@@ -125,7 +133,7 @@ const ji19ybwd_value = ji19ybwd_foo;"
 
 test("handles conditional else attributes", async () => {
   const result = await transformSnapshot(
-    "import { foo } from './dep.js' with { condition: 'COND_A', else: './alt.js' }; export const value = foo;"
+    "import { foo } from './dep.js' with { condition: 'COND_A', else: './alt.js' }; export const value = foo;",
   );
   expect(result.code).toMatchInlineSnapshot(`
 "
@@ -180,7 +188,9 @@ const ji19ybwd_value = ji19ybwd_foo;"
 });
 
 test("marks namespace dynamic usage", async () => {
-  const result = await transformSnapshot("import * as ns from './dep.js'; const value = ns['foo'];");
+  const result = await transformSnapshot(
+    "import * as ns from './dep.js'; const value = ns['foo'];",
+  );
   expect(result.code).toMatchInlineSnapshot(`
 "
 const ji19ybwd_value = __NS__a4tfu7r6i['foo'];"
@@ -223,7 +233,9 @@ const ji19ybwd_value = __NS__a4tfu7r6i['foo'];"
 });
 
 test("captures namespace import static usage", async () => {
-  const result = await transformSnapshot("import * as ns from './dep.js'; const value = ns.foo + ns.bar;");
+  const result = await transformSnapshot(
+    "import * as ns from './dep.js'; const value = ns.foo + ns.bar;",
+  );
   expect(result.code).toMatchInlineSnapshot(`
 "
 const ji19ybwd_value = a4tfu7r6i_foo + a4tfu7r6i_bar;"

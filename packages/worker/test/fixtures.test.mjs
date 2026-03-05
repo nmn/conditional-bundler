@@ -11,19 +11,23 @@ async function transform(code, filePath = defaultFilePath, root = pkgRoot) {
       realPath: filePath,
       pkg: { name: "fixture", version: "0.0.0", root },
       syntax: { jsx: false, ts: false },
-      envs: ["browser"]
+      envs: ["browser"],
     },
     {
-      importAttrAllow: ["json"]
-    }
+      importAttrAllow: ["json"],
+    },
   );
 }
 
-async function transformSnapshot(code, filePath = defaultFilePath, root = pkgRoot) {
+async function transformSnapshot(
+  code,
+  filePath = defaultFilePath,
+  root = pkgRoot,
+) {
   const result = await transform(code, filePath, root);
   return {
     code: result.code,
-    meta: result.meta
+    meta: result.meta,
   };
 }
 

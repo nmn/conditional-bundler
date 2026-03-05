@@ -11,24 +11,30 @@ async function transform(code, filePath = defaultFilePath, root = pkgRoot) {
       realPath: filePath,
       pkg: { name: "fixture", version: "0.0.0", root },
       syntax: { jsx: false, ts: false },
-      envs: ["browser"]
+      envs: ["browser"],
     },
     {
-      importAttrAllow: ["json"]
-    }
+      importAttrAllow: ["json"],
+    },
   );
 }
 
-async function transformSnapshot(code, filePath = defaultFilePath, root = pkgRoot) {
+async function transformSnapshot(
+  code,
+  filePath = defaultFilePath,
+  root = pkgRoot,
+) {
   const result = await transform(code, filePath, root);
   return {
     code: result.code,
-    meta: result.meta
+    meta: result.meta,
   };
 }
 
 test("rewrites dynamic import to constant", async () => {
-  const result = await transformSnapshot("export async function load() { return import('./dep.js'); }");
+  const result = await transformSnapshot(
+    "export async function load() { return import('./dep.js'); }",
+  );
   expect(result.code).toMatchInlineSnapshot(`
 "async function ji19ybwd_load() {
   return __IMPORT_a4tfu7r6i();
@@ -68,7 +74,5 @@ test("rewrites dynamic import to constant", async () => {
 });
 
 test("rejects top-level await", async () => {
-  await expect(transform("await Promise.resolve(1);"))
-    .rejects
-    .toThrow("E_TLA");
+  await expect(transform("await Promise.resolve(1);")).rejects.toThrow("E_TLA");
 });

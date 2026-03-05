@@ -23,7 +23,7 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
       deps: [],
       conditionalDeps: new Map<string, ConditionExpr>(),
       resolvedSources: new Map<string, string>(),
-      irHeader: header
+      irHeader: header,
     });
   }
 
@@ -32,39 +32,63 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
       if (importEntry.kind === "type") {
         continue;
       }
-      const resolved = await input.resolver(node.irHeader.id, importEntry.source, input.envId);
+      const resolved = await input.resolver(
+        node.irHeader.id,
+        importEntry.source,
+        input.envId,
+      );
       node.deps.push(resolved.id);
       node.resolvedSources.set(importEntry.source, resolved.id);
       if (importEntry.condition) {
         const existing = node.conditionalDeps.get(resolved.id);
-        node.conditionalDeps.set(resolved.id, existing ? combineOr([existing, importEntry.condition]) : importEntry.condition);
+        node.conditionalDeps.set(
+          resolved.id,
+          existing
+            ? combineOr([existing, importEntry.condition])
+            : importEntry.condition,
+        );
 
-        const elseSource = node.irHeader.conditionalImports.find((item) => item.source === importEntry.source)?.elseSource;
+        const elseSource = node.irHeader.conditionalImports.find(
+          (item) => item.source === importEntry.source,
+        )?.elseSource;
         if (elseSource) {
-          const elseResolved = await input.resolver(node.irHeader.id, elseSource, input.envId);
+          const elseResolved = await input.resolver(
+            node.irHeader.id,
+            elseSource,
+            input.envId,
+          );
           node.deps.push(elseResolved.id);
           node.resolvedSources.set(elseSource, elseResolved.id);
           const elseCondition = { NOT: importEntry.condition };
           const existingElse = node.conditionalDeps.get(elseResolved.id);
           node.conditionalDeps.set(
             elseResolved.id,
-            existingElse ? combineOr([existingElse, elseCondition]) : elseCondition
+            existingElse
+              ? combineOr([existingElse, elseCondition])
+              : elseCondition,
           );
         }
       }
     }
     for (const star of node.irHeader.exportStars) {
-      const resolved = await input.resolver(node.irHeader.id, star.source, input.envId);
+      const resolved = await input.resolver(
+        node.irHeader.id,
+        star.source,
+        input.envId,
+      );
       node.deps.push(resolved.id);
       node.resolvedSources.set(star.source, resolved.id);
     }
     for (const reexport of node.irHeader.reexportsNamed) {
-      const resolved = await input.resolver(node.irHeader.id, reexport.source, input.envId);
+      const resolved = await input.resolver(
+        node.irHeader.id,
+        reexport.source,
+        input.envId,
+      );
       node.deps.push(resolved.id);
       node.resolvedSources.set(reexport.source, resolved.id);
     }
   }
-
 
   for (const node of nodes.values()) {
     const unique = Array.from(new Set(node.deps));

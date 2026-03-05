@@ -27,15 +27,15 @@ export const defaultConfig: BundlerConfig = {
   envs: {
     default: {
       conditions: ["default"],
-      target: "browser"
-    }
+      target: "browser",
+    },
   },
   entries: [],
   outputs: {
     outDir: "dist",
-    fileName: "bundle.[env].[hash].js"
+    fileName: "bundle.[env].[hash].js",
   },
   cacheDir: "node_modules/.bundler-cache",
   maxWorkers: 4,
-  diagnostics: "human"
+  diagnostics: "human",
 };

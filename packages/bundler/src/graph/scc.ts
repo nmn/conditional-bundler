@@ -18,9 +18,15 @@ export function findCycles(nodes: Map<string, { deps: string[] }>): string[][] {
       for (const dep of node.deps) {
         if (!indexMap.has(dep)) {
           strongConnect(dep);
-          lowlink.set(nodeId, Math.min(lowlink.get(nodeId) ?? 0, lowlink.get(dep) ?? 0));
+          lowlink.set(
+            nodeId,
+            Math.min(lowlink.get(nodeId) ?? 0, lowlink.get(dep) ?? 0),
+          );
         } else if (onStack.has(dep)) {
-          lowlink.set(nodeId, Math.min(lowlink.get(nodeId) ?? 0, indexMap.get(dep) ?? 0));
+          lowlink.set(
+            nodeId,
+            Math.min(lowlink.get(nodeId) ?? 0, indexMap.get(dep) ?? 0),
+          );
         }
       }
     }

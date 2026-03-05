@@ -50,7 +50,11 @@ export class WorkerPool {
     }
   }
 
-  private handleMessage(this: WorkerPool, worker: Worker, message: unknown): void {
+  private handleMessage(
+    this: WorkerPool,
+    worker: Worker,
+    message: unknown,
+  ): void {
     const current = (worker as Worker & { current?: WorkerTask }).current;
     if (current) {
       const payload = message as { ok?: boolean; error?: string };

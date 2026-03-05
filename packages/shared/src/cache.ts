@@ -11,7 +11,10 @@ export async function ensureDir(dirPath: string): Promise<void> {
   await fs.mkdir(dirPath, { recursive: true });
 }
 
-export async function writeFileAtomic(filePath: string, content: string): Promise<void> {
+export async function writeFileAtomic(
+  filePath: string,
+  content: string,
+): Promise<void> {
   const dir = path.dirname(filePath);
   await ensureDir(dir);
   const tempPath = `${filePath}.tmp`;
@@ -19,7 +22,9 @@ export async function writeFileAtomic(filePath: string, content: string): Promis
   await fs.rename(tempPath, filePath);
 }
 
-export async function readFileIfExists(filePath: string): Promise<string | null> {
+export async function readFileIfExists(
+  filePath: string,
+): Promise<string | null> {
   try {
     return await fs.readFile(filePath, "utf8");
   } catch {

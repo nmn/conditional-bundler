@@ -4,5 +4,5 @@ module.exports = {
   verbose: true,
   moduleFileExtensions: ["mjs", "js", "json"],
   roots: ["<rootDir>/packages"],
-  transform: {}
+  transform: {},
 };

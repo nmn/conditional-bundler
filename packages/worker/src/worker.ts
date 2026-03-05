@@ -1,8 +1,11 @@
 import { parentPort } from "node:worker_threads";
-import fs from "node:fs/promises";
 import path from "node:path";
 import { filePrefix, contentHash, normalizePosixPath } from "@bundler/shared";
-import type { TransformInput, TransformResult, TransformMultiResult } from "@bundler/shared";
+import type {
+  TransformInput,
+  TransformResult,
+  TransformMultiResult,
+} from "@bundler/shared";
 import { writeFileAtomic, ensureDir } from "@bundler/shared";
 
 if (!parentPort) {
@@ -37,14 +40,20 @@ type WorkerResponse = {
     exportsLocal: NonNullable<TransformResult["meta"]>["exportsLocal"];
     flags: NonNullable<TransformResult["meta"]>["flags"];
     dynamicImports: NonNullable<TransformResult["meta"]>["dynamicImports"];
-    conditionalImports: NonNullable<TransformResult["meta"]>["conditionalImports"];
-    discoveredEntrypoints: NonNullable<TransformResult["meta"]>["discoveredEntrypoints"];
+    conditionalImports: NonNullable<
+      TransformResult["meta"]
+    >["conditionalImports"];
+    discoveredEntrypoints: NonNullable<
+      TransformResult["meta"]
+    >["discoveredEntrypoints"];
     importRanges: NonNullable<TransformResult["meta"]>["importRanges"];
     exportRanges: NonNullable<TransformResult["meta"]>["exportRanges"];
   };
 };
 
-async function handleTransform(request: WorkerRequest): Promise<WorkerResponse> {
+async function handleTransform(
+  request: WorkerRequest,
+): Promise<WorkerResponse> {
   const fileHash = contentHash(request.code);
   const parsedByEnv = request.codeByEnv;
   const normalizedPath = normalizePosixPath(request.realPath);
@@ -52,14 +61,20 @@ async function handleTransform(request: WorkerRequest): Promise<WorkerResponse> 
   const prefix = filePrefix(request.pkg.name, request.pkg.version, relPath);
 
   const result = await transformFile(request, parsedByEnv);
-  const resultsByEnv = ("code" in result ? { default: result } : result) as TransformMultiResult;
+  const resultsByEnv = (
+    "code" in result ? { default: result } : result
+  ) as TransformMultiResult;
 
   const codeByEnv: Record<string, string> = {};
   const mapByEnv: Record<string, string> = {};
 
   for (const [envId, envResult] of Object.entries(resultsByEnv)) {
     const result = envResult as TransformResult;
-    const codePath = path.join(request.cacheDir, "code", `${fileHash}.${envId}.js`);
+    const codePath = path.join(
+      request.cacheDir,
+      "code",
+      `${fileHash}.${envId}.js`,
+    );
     const mapPath = result.map
       ? path.join(request.cacheDir, "map", `${fileHash}.${envId}.map`)
       : undefined;
@@ -93,7 +108,7 @@ async function handleTransform(request: WorkerRequest): Promise<WorkerResponse> 
     conditionalImports: first.meta.conditionalImports,
     discoveredEntrypoints: first.meta.discoveredEntrypoints,
     importRanges: first.meta.importRanges,
-    exportRanges: first.meta.exportRanges
+    exportRanges: first.meta.exportRanges,
   };
 
   const irPath = path.join(request.cacheDir, "ir", `${fileHash}.json`);
@@ -103,13 +118,13 @@ async function handleTransform(request: WorkerRequest): Promise<WorkerResponse> 
     ok: true,
     contentHash: fileHash,
     prefix,
-    irHeader
+    irHeader,
   };
 }
 
 async function transformFile(
   request: WorkerRequest,
-  overrideByEnv?: Record<string, string>
+  overrideByEnv?: Record<string, string>,
 ): Promise<TransformResult | TransformMultiResult> {
   const { transformWithCore } = await import("./transform/core.js");
   if (overrideByEnv) {
@@ -121,11 +136,11 @@ async function transformFile(
           realPath: request.realPath,
           pkg: request.pkg,
           syntax: request.syntax,
-          envs: request.envs
+          envs: request.envs,
         },
         {
-          importAttrAllow: ["json"]
-        }
+          importAttrAllow: ["json"],
+        },
       );
     }
     return results;
@@ -136,11 +151,11 @@ async function transformFile(
       realPath: request.realPath,
       pkg: request.pkg,
       syntax: request.syntax,
-      envs: request.envs
+      envs: request.envs,
     },
     {
-      importAttrAllow: ["json"]
-    }
+      importAttrAllow: ["json"],
+    },
   );
 }
 

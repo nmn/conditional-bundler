@@ -1,6 +1,9 @@
 import type { ModuleNode, Provider } from "@bundler/shared";
 
-export function resolveExportTables(nodes: ModuleNode[], nodeMap: Map<string, ModuleNode> = new Map()): void {
+export function resolveExportTables(
+  nodes: ModuleNode[],
+  nodeMap: Map<string, ModuleNode> = new Map(),
+): void {
   if (nodeMap.size === 0) {
     for (const node of nodes) {
       nodeMap.set(node.id, node);
@@ -14,13 +17,16 @@ export function resolveExportTables(nodes: ModuleNode[], nodeMap: Map<string, Mo
       if (!node) {
         return false;
       }
-      return node.irHeader.exportStars.every((star) => {
-        const sourceId = node.resolvedSources.get(star.source);
-        return !sourceId || !remaining.has(sourceId);
-      }) && node.irHeader.reexportsNamed.every((reexport) => {
-        const sourceId = node.resolvedSources.get(reexport.source);
-        return !sourceId || !remaining.has(sourceId);
-      });
+      return (
+        node.irHeader.exportStars.every((star) => {
+          const sourceId = node.resolvedSources.get(star.source);
+          return !sourceId || !remaining.has(sourceId);
+        }) &&
+        node.irHeader.reexportsNamed.every((reexport) => {
+          const sourceId = node.resolvedSources.get(reexport.source);
+          return !sourceId || !remaining.has(sourceId);
+        })
+      );
     });
 
     for (const id of progress) {
@@ -33,10 +39,11 @@ export function resolveExportTables(nodes: ModuleNode[], nodeMap: Map<string, Mo
       const ambiguous = new Set<string>();
 
       for (const localExport of node.irHeader.exportsLocal) {
-        const localName = localExport.local === "default" ? "default" : localExport.local;
+        const localName =
+          localExport.local === "default" ? "default" : localExport.local;
         table.set(localExport.exported, {
           moduleId: node.id,
-          symbol: `${node.prefix}_${localName}`
+          symbol: `${node.prefix}_${localName}`,
         });
       }
 
@@ -77,7 +84,7 @@ export function resolveExportTables(nodes: ModuleNode[], nodeMap: Map<string, Mo
         if (reexport.isNamespace) {
           table.set(reexport.exported, {
             moduleId: sourceId,
-            symbol: `__NS__${sourceNode.prefix}`
+            symbol: `__NS__${sourceNode.prefix}`,
           });
           continue;
         }

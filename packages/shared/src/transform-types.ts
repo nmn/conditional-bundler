@@ -1,5 +1,12 @@
 import type { Diagnostic } from "./diagnostics.js";
-import type { ImportEntry, ExportLocal, ExportStar, ReexportNamed, DynamicImport, ConditionalImport } from "./ir.js";
+import type {
+  ImportEntry,
+  ExportLocal,
+  ExportStar,
+  ReexportNamed,
+  DynamicImport,
+  ConditionalImport,
+} from "./ir.js";
 
 export type TransformInput = {
   code: string;
@@ -28,7 +35,9 @@ export type TransformMeta = {
 
 export type TransformPlugin = {
   name: string;
-  transformModule: (input: TransformInput) => Promise<TransformResult | TransformMultiResult>;
+  transformModule: (
+    input: TransformInput,
+  ) => Promise<TransformResult | TransformMultiResult>;
 };
 
 export type TransformResult = {
@@ -41,4 +50,3 @@ export type TransformResult = {
 };
 
 export type TransformMultiResult = Record<string, TransformResult>;
-

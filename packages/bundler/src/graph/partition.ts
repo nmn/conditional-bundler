@@ -6,11 +6,18 @@ export type BundlePlan = {
   moduleIds: string[];
 };
 
-export function defaultPartition(graphs: ModuleGraph[], entries: string[]): BundlePlan[] {
+export function defaultPartition(
+  graphs: ModuleGraph[],
+  entries: string[],
+): BundlePlan[] {
   const plans: BundlePlan[] = [];
   for (const graph of graphs) {
     for (const entry of entries) {
-      plans.push({ envId: graph.envId, entryId: entry, moduleIds: Array.from(graph.nodes.keys()) });
+      plans.push({
+        envId: graph.envId,
+        entryId: entry,
+        moduleIds: Array.from(graph.nodes.keys()),
+      });
     }
   }
   return plans;

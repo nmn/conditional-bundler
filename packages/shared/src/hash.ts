@@ -28,12 +28,20 @@ export function contentHashShort(input: string, length = 8): string {
   return base36Short(hashString(input), length);
 }
 
-export function filePrefix(pkgName: string, pkgVersion: string, relPath: string): string {
+export function filePrefix(
+  pkgName: string,
+  pkgVersion: string,
+  relPath: string,
+): string {
   const key = `${pkgName}@${pkgVersion}:${relPath}`;
   return base36ShortAlpha(hashString(key));
 }
 
-export function importConstKey(pkgName: string, pkgVersion: string, relPath: string): string {
+export function importConstKey(
+  pkgName: string,
+  pkgVersion: string,
+  relPath: string,
+): string {
   const key = `${pkgName}@${pkgVersion}:${relPath}`;
   return base36ShortAlpha(hashString(key));
 }

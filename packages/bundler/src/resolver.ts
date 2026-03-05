@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
-import { findPkgRoot, readPkg, normalizePosixPath } from "@bundler/shared";
+import { findPkgRoot, readPkg } from "@bundler/shared";
 
 export type ResolveResult = {
   id: string;
@@ -8,19 +8,22 @@ export type ResolveResult = {
   pkg: { name: string; version: string; root: string };
 };
 
-export type Resolver = (from: string, source: string, envId: string) => Promise<ResolveResult>;
+export type Resolver = (
+  from: string,
+  source: string,
+  envId: string,
+) => Promise<ResolveResult>;
 
 export function createResolver(): Resolver {
   return async (from: string, source: string) => {
     const resolvedPath = resolvePath(from, source);
     const pkgRoot = findPkgRoot(resolvedPath) ?? path.dirname(resolvedPath);
     const pkg = readPkg(pkgRoot);
-    const rel = normalizePosixPath(path.relative(pkg.root, resolvedPath));
     const id = resolvedPath;
     return {
       id,
       resolvedPath,
-      pkg
+      pkg,
     };
   };
 }

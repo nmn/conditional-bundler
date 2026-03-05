@@ -1,7 +1,7 @@
 export type PackageInfo = {
-    name: string;
-    version: string;
-    root: string;
+  name: string;
+  version: string;
+  root: string;
 };
 export declare function findPkgRoot(startPath: string): string | null;
 export declare function readPkg(pkgRoot: string): PackageInfo;

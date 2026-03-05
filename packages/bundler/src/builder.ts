@@ -8,7 +8,10 @@ import { resolveExportTables } from "./exports/resolve.js";
 import { findCycles } from "./graph/scc.js";
 import { normalizeGraphConditions } from "./graph/conditions.js";
 import { applyReplacements } from "./linker/rewriter.js";
-import { emitConditionalStart, emitConditionalEnd } from "./linker/conditional-markers.js";
+import {
+  emitConditionalStart,
+  emitConditionalEnd,
+} from "./linker/conditional-markers.js";
 import { emitNamespaceObject } from "./linker/namespace.js";
 import { emitDynamicImportConstants } from "./linker/dynamic-import-constants.js";
 import { stripImportStatements } from "./linker/strip-imports.js";
@@ -18,7 +21,12 @@ import type { BundlerConfig, EntrySpec } from "./config.js";
 import { readPkgSafe, findPkgRoot, contentHashShort } from "@bundler/shared";
 import type { BundlerPlugin } from "./plugins/types.js";
 import type { ModuleGraph } from "./graph/build.js";
-import type { ModuleNode, Provider, IRHeader, ImportSpecifier } from "@bundler/shared";
+import type {
+  ModuleNode,
+  Provider,
+  IRHeader,
+  ImportSpecifier,
+} from "@bundler/shared";
 
 export type BuildResult = {
   bundles: Array<{ envId: string; entryId: string; fileName: string }>;
@@ -40,11 +48,16 @@ type BundlePlan = {
   preserveExports: boolean;
 };
 
-export async function buildProject(config: BundlerConfig, plugins: BundlerPlugin[]): Promise<BuildResult> {
-  const cacheDir = path.resolve(config.cacheDir ?? "node_modules/.bundler-cache");
+export async function buildProject(
+  config: BundlerConfig,
+  plugins: BundlerPlugin[],
+): Promise<BuildResult> {
+  const cacheDir = path.resolve(
+    config.cacheDir ?? "node_modules/.bundler-cache",
+  );
   const pool = new WorkerPool({
     workerPath: resolveWorkerPath(),
-    size: config.maxWorkers
+    size: config.maxWorkers,
   });
   const cleanup = async () => {
     await pool.close();
@@ -73,28 +86,40 @@ export async function buildProject(config: BundlerConfig, plugins: BundlerPlugin
         code,
         realPath: entry.path,
         pkg,
-        syntax: { jsx: entry.path.endsWith(".jsx") || entry.path.endsWith(".tsx"), ts: entry.path.endsWith(".ts") || entry.path.endsWith(".tsx") },
-        envs
+        syntax: {
+          jsx: entry.path.endsWith(".jsx") || entry.path.endsWith(".tsx"),
+          ts: entry.path.endsWith(".ts") || entry.path.endsWith(".tsx"),
+        },
+        envs,
       });
       if (pluginResult && (pluginResult as { skipCore?: boolean }).skipCore) {
         throw new Error("Custom transform cannot skip core analysis in v1.");
       }
-      const multiEnvCode = pluginResult && "codeByEnv" in pluginResult ? pluginResult.codeByEnv : undefined;
-      const fallbackCode = pluginResult && "code" in pluginResult ? pluginResult.code : code;
+      const multiEnvCode =
+        pluginResult && "codeByEnv" in pluginResult
+          ? pluginResult.codeByEnv
+          : undefined;
+      const fallbackCode =
+        pluginResult && "code" in pluginResult ? pluginResult.code : code;
       const response = await pool.run({
         realPath: entry.path,
         code: fallbackCode,
         pkg,
         envs,
         cacheDir,
-        syntax: { jsx: entry.path.endsWith(".jsx") || entry.path.endsWith(".tsx"), ts: entry.path.endsWith(".ts") || entry.path.endsWith(".tsx") },
-        codeByEnv: multiEnvCode
+        syntax: {
+          jsx: entry.path.endsWith(".jsx") || entry.path.endsWith(".tsx"),
+          ts: entry.path.endsWith(".ts") || entry.path.endsWith(".tsx"),
+        },
+        codeByEnv: multiEnvCode,
       });
       const irHeader = (response as { irHeader: IRHeader }).irHeader;
       headers.push(irHeader);
 
       if (irHeader.flags.hasTopLevelAwait) {
-        throw new Error(`E_TLA: Top-level 'await' is not supported (v1). at ${entry.path}`);
+        throw new Error(
+          `E_TLA: Top-level 'await' is not supported (v1). at ${entry.path}`,
+        );
       }
 
       for (const dynamic of irHeader.dynamicImports) {
@@ -107,48 +132,58 @@ export async function buildProject(config: BundlerConfig, plugins: BundlerPlugin
         }
       }
 
-    for (const importEntry of irHeader.imports) {
-      if (importEntry.kind === "type") {
-        continue;
-      }
-      for (const envId of envs) {
-        const resolved = await resolver(entry.path, importEntry.source, envId);
-        resolvedMap.set(resolved.id, resolved.resolvedPath);
-        if (!entrySet.has(resolved.resolvedPath)) {
-          const next = { id: resolved.id, path: resolved.resolvedPath };
-          entryQueue.push(next);
-          entrySet.add(resolved.resolvedPath);
+      for (const importEntry of irHeader.imports) {
+        if (importEntry.kind === "type") {
+          continue;
+        }
+        for (const envId of envs) {
+          const resolved = await resolver(
+            entry.path,
+            importEntry.source,
+            envId,
+          );
+          resolvedMap.set(resolved.id, resolved.resolvedPath);
+          if (!entrySet.has(resolved.resolvedPath)) {
+            const next = { id: resolved.id, path: resolved.resolvedPath };
+            entryQueue.push(next);
+            entrySet.add(resolved.resolvedPath);
+          }
         }
       }
-    }
 
-    for (const conditionalImport of irHeader.conditionalImports) {
-      if (!conditionalImport.elseSource) {
-        continue;
-      }
-      for (const envId of envs) {
-        const resolved = await resolver(entry.path, conditionalImport.elseSource, envId);
-        resolvedMap.set(resolved.id, resolved.resolvedPath);
-        if (!entrySet.has(resolved.resolvedPath)) {
-          const next = { id: resolved.id, path: resolved.resolvedPath };
-          entryQueue.push(next);
-          entrySet.add(resolved.resolvedPath);
+      for (const conditionalImport of irHeader.conditionalImports) {
+        if (!conditionalImport.elseSource) {
+          continue;
+        }
+        for (const envId of envs) {
+          const resolved = await resolver(
+            entry.path,
+            conditionalImport.elseSource,
+            envId,
+          );
+          resolvedMap.set(resolved.id, resolved.resolvedPath);
+          if (!entrySet.has(resolved.resolvedPath)) {
+            const next = { id: resolved.id, path: resolved.resolvedPath };
+            entryQueue.push(next);
+            entrySet.add(resolved.resolvedPath);
+          }
         }
       }
-    }
 
-    for (const reexport of [...irHeader.exportStars, ...irHeader.reexportsNamed]) {
-      for (const envId of envs) {
-        const resolved = await resolver(entry.path, reexport.source, envId);
-        resolvedMap.set(resolved.id, resolved.resolvedPath);
-        if (!entrySet.has(resolved.resolvedPath)) {
-          const next = { id: resolved.id, path: resolved.resolvedPath };
-          entryQueue.push(next);
-          entrySet.add(resolved.resolvedPath);
+      for (const reexport of [
+        ...irHeader.exportStars,
+        ...irHeader.reexportsNamed,
+      ]) {
+        for (const envId of envs) {
+          const resolved = await resolver(entry.path, reexport.source, envId);
+          resolvedMap.set(resolved.id, resolved.resolvedPath);
+          if (!entrySet.has(resolved.resolvedPath)) {
+            const next = { id: resolved.id, path: resolved.resolvedPath };
+            entryQueue.push(next);
+            entrySet.add(resolved.resolvedPath);
+          }
         }
       }
-    }
-
     }
 
     const graphs: ModuleGraph[] = [];
@@ -162,7 +197,9 @@ export async function buildProject(config: BundlerConfig, plugins: BundlerPlugin
     for (const graph of transformedGraphs) {
       const cycles = findCycles(graph.nodes);
       if (cycles.length > 0) {
-        throw new Error(`E_CYCLE: Cyclic dependency graph not supported (v1). Cycle: ${cycles[0].join(" -> ")}`);
+        throw new Error(
+          `E_CYCLE: Cyclic dependency graph not supported (v1). Cycle: ${cycles[0].join(" -> ")}`,
+        );
       }
       normalizeGraphConditions(graph);
       resolveExportTables(Array.from(graph.nodes.values()), graph.nodes);
@@ -170,18 +207,30 @@ export async function buildProject(config: BundlerConfig, plugins: BundlerPlugin
 
     const bundlePlans: BundlePlan[] = [];
     for (const graph of transformedGraphs) {
-      const entries = pickEntriesForEnv(collectEntries(config.entries), graph.envId);
-       for (const entry of entries) {
-         bundlePlans.push(await createBundlePlan(graph, entry.path, config, { preserveExports: false }));
-       }
-       const dynamicForEnv = dynamicEntries.filter((entry) => entry.envs?.includes(graph.envId) || !entry.envs);
-       for (const entry of dynamicForEnv) {
-         if (entries.some((explicit) => explicit.path === entry.path)) {
-           continue;
-         }
-         bundlePlans.push(await createBundlePlan(graph, entry.path, config, { preserveExports: true }));
-       }
-
+      const entries = pickEntriesForEnv(
+        collectEntries(config.entries),
+        graph.envId,
+      );
+      for (const entry of entries) {
+        bundlePlans.push(
+          await createBundlePlan(graph, entry.path, config, {
+            preserveExports: false,
+          }),
+        );
+      }
+      const dynamicForEnv = dynamicEntries.filter(
+        (entry) => entry.envs?.includes(graph.envId) || !entry.envs,
+      );
+      for (const entry of dynamicForEnv) {
+        if (entries.some((explicit) => explicit.path === entry.path)) {
+          continue;
+        }
+        bundlePlans.push(
+          await createBundlePlan(graph, entry.path, config, {
+            preserveExports: true,
+          }),
+        );
+      }
     }
 
     const bundleMap = new Map<string, string>();
@@ -190,19 +239,30 @@ export async function buildProject(config: BundlerConfig, plugins: BundlerPlugin
       bundleMap.set(resolved, plan.fileName);
     }
 
-    const bundles: Array<{ envId: string; entryId: string; fileName: string }> = [];
+    const bundles: Array<{ envId: string; entryId: string; fileName: string }> =
+      [];
     for (const plan of bundlePlans) {
-      const dynamicMapResolved = resolveDynamicImports(plan.dynamicImports, bundleMap);
+      const dynamicMapResolved = resolveDynamicImports(
+        plan.dynamicImports,
+        bundleMap,
+      );
       const header = emitDynamicImportConstants(
-        plan.dynamicImports.map((entry) => ({ hashKey: entry.hashKey, source: entry.source })),
-        dynamicMapResolved
+        plan.dynamicImports.map((entry) => ({
+          hashKey: entry.hashKey,
+          source: entry.source,
+        })),
+        dynamicMapResolved,
       );
       const patchedBundle = concatParts([header, ...plan.parts]);
 
       const outputPath = path.join(config.outputs.outDir, plan.fileName);
       await fs.mkdir(config.outputs.outDir, { recursive: true });
       await fs.writeFile(outputPath, patchedBundle, "utf8");
-      bundles.push({ envId: plan.envId, entryId: plan.entryId, fileName: plan.fileName });
+      bundles.push({
+        envId: plan.envId,
+        entryId: plan.entryId,
+        fileName: plan.fileName,
+      });
     }
 
     return { bundles, manifest: {} };
@@ -223,7 +283,7 @@ async function createBundlePlan(
   graph: ModuleGraph,
   entryPath: string,
   config: BundlerConfig,
-  options: { preserveExports: boolean }
+  options: { preserveExports: boolean },
 ): Promise<BundlePlan> {
   const ordered = topoSort(graph, entryPath);
   if (ordered.length === 0) {
@@ -234,10 +294,12 @@ async function createBundlePlan(
   const dynamicImports: DynamicImportRef[] = [];
 
   for (const node of ordered) {
-    const codePath = node.irHeader.codeByEnv[graph.envId] ?? node.irHeader.codeByEnv.default;
+    const codePath =
+      node.irHeader.codeByEnv[graph.envId] ?? node.irHeader.codeByEnv.default;
     const code = await fs.readFile(codePath, "utf8");
 
-    const replacements: Array<{ start: number; end: number; text: string }> = [];
+    const replacements: Array<{ start: number; end: number; text: string }> =
+      [];
     for (const importEntry of node.irHeader.imports) {
       for (const spec of importEntry.specifiers) {
         const provider = resolveProvider(graph, node, importEntry, spec);
@@ -284,7 +346,11 @@ async function createBundlePlan(
     }
 
     for (const dyn of node.irHeader.dynamicImports) {
-      dynamicImports.push({ hashKey: dyn.hashKey, source: dyn.source, fromId: node.id });
+      dynamicImports.push({
+        hashKey: dyn.hashKey,
+        source: dyn.source,
+        fromId: node.id,
+      });
     }
   }
 
@@ -294,17 +360,29 @@ async function createBundlePlan(
   }
 
   const header = emitDynamicImportConstants(
-    dynamicImports.map((entry) => ({ hashKey: entry.hashKey, source: entry.source })),
-    dynamicMap
+    dynamicImports.map((entry) => ({
+      hashKey: entry.hashKey,
+      source: entry.source,
+    })),
+    dynamicMap,
   );
 
   const bundle = concatParts([header, ...parts]);
   const hash = contentHashShort(bundle);
   const fileName = config.outputs.fileName
-    ? config.outputs.fileName.replace("[env]", graph.envId).replace("[hash]", hash)
+    ? config.outputs.fileName
+        .replace("[env]", graph.envId)
+        .replace("[hash]", hash)
     : `bundle.${graph.envId}.${hash}.js`;
 
-  return { envId: graph.envId, entryId: entryPath, fileName, parts, dynamicImports, preserveExports: options.preserveExports };
+  return {
+    envId: graph.envId,
+    entryId: entryPath,
+    fileName,
+    parts,
+    dynamicImports,
+    preserveExports: options.preserveExports,
+  };
 }
 
 function topoSort(graph: ModuleGraph, entryId: string): ModuleNode[] {
@@ -337,7 +415,7 @@ function resolveProvider(
   graph: ModuleGraph,
   node: ModuleNode,
   importEntry: IRHeader["imports"][number],
-  spec: ImportSpecifier
+  spec: ImportSpecifier,
 ): Provider | undefined {
   const sourceId = node.resolvedSources.get(importEntry.source);
   if (!sourceId) {
@@ -350,7 +428,7 @@ function resolveProvider(
   if (importEntry.isNamespace && importEntry.namespaceUsage === "dynamic") {
     return {
       moduleId: sourceNode.id,
-      symbol: `__NS__${sourceNode.prefix}`
+      symbol: `__NS__${sourceNode.prefix}`,
     };
   }
   const provider = sourceNode.exportTable.get(spec.imported);
@@ -369,7 +447,7 @@ function resolveRelative(from: string, request: string): string {
 
 function resolveDynamicImports(
   imports: DynamicImportRef[],
-  bundleMap: Map<string, string>
+  bundleMap: Map<string, string>,
 ): Record<string, string> {
   const mapping: Record<string, string> = {};
   for (const dyn of imports) {
@@ -379,7 +457,10 @@ function resolveDynamicImports(
   return mapping;
 }
 
-function buildConditionalBindings(graph: ModuleGraph, node: ModuleNode): string[] {
+function buildConditionalBindings(
+  graph: ModuleGraph,
+  node: ModuleNode,
+): string[] {
   const bindings: string[] = [];
   for (const importEntry of node.irHeader.imports) {
     if (!importEntry.condition) {
@@ -393,53 +474,39 @@ function buildConditionalBindings(graph: ModuleGraph, node: ModuleNode): string[
     const conditionExpr = importEntry.condition;
     for (const spec of importEntry.specifiers) {
       const localName = `${node.prefix}_${spec.local}`;
-      const importName = spec.imported === "default" ? "default" : spec.imported;
+      const importName =
+        spec.imported === "default" ? "default" : spec.imported;
       const primaryName = `${sourceNode.prefix}_${importName}`;
-      const thenBlock = emitConditionalStart(conditionExpr) + "\n" +
-        `const ${localName} = ${primaryName};` + "\n" +
+      const thenBlock =
+        emitConditionalStart(conditionExpr) +
+        "\n" +
+        `const ${localName} = ${primaryName};` +
+        "\n" +
         emitConditionalEnd();
       bindings.push(thenBlock);
 
-      const elseSource = node.irHeader.conditionalImports.find((item) => item.source === importEntry.source)?.elseSource;
+      const elseSource = node.irHeader.conditionalImports.find(
+        (item) => item.source === importEntry.source,
+      )?.elseSource;
       const elseCondition = { NOT: conditionExpr };
       let fallback = "undefined";
       if (elseSource) {
         const elseId = node.resolvedSources.get(elseSource);
         const elseNode = elseId ? graph.nodes.get(elseId) : undefined;
         if (elseNode) {
-          const elseImportName = spec.imported === "default" ? "default" : spec.imported;
+          const elseImportName =
+            spec.imported === "default" ? "default" : spec.imported;
           fallback = `${elseNode.prefix}_${elseImportName}`;
         }
       }
-      const elseBlock = emitConditionalStart(elseCondition) + "\n" +
-        `const ${localName} = ${fallback};` + "\n" +
+      const elseBlock =
+        emitConditionalStart(elseCondition) +
+        "\n" +
+        `const ${localName} = ${fallback};` +
+        "\n" +
         emitConditionalEnd();
       bindings.push(elseBlock);
     }
   }
   return bindings;
-}
-
-function adjustOffset(
-  offset: number,
-  drops: Array<[number, number]>,
-  current: [number, number],
-  replacements: Array<{ start: number; end: number; text: string }>
-): number {
-  let adjusted = offset;
-  for (const [start, end] of drops) {
-    if (start === current[0] && end === current[1]) {
-      continue;
-    }
-    if (start >= offset) {
-      continue;
-    }
-    adjusted -= end - start;
-  }
-  for (const rep of replacements) {
-    if (rep.start < offset && rep.end <= offset) {
-      adjusted += rep.text.length - (rep.end - rep.start);
-    }
-  }
-  return adjusted;
 }

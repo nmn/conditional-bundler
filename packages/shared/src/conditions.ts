@@ -1,6 +1,12 @@
-export type ConditionExpr = string | { AND: ConditionExpr[] } | { OR: ConditionExpr[] } | { NOT: ConditionExpr };
+export type ConditionExpr =
+  | string
+  | { AND: ConditionExpr[] }
+  | { OR: ConditionExpr[] }
+  | { NOT: ConditionExpr };
 
-export function isCompoundCondition(condition: ConditionExpr): condition is { AND: ConditionExpr[] } | { OR: ConditionExpr[] } {
+export function isCompoundCondition(
+  condition: ConditionExpr,
+): condition is { AND: ConditionExpr[] } | { OR: ConditionExpr[] } {
   return typeof condition === "object" && condition !== null;
 }
 

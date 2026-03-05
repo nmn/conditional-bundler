@@ -11,19 +11,23 @@ async function transform(code, filePath = defaultFilePath, root = pkgRoot) {
       realPath: filePath,
       pkg: { name: "fixture", version: "0.0.0", root },
       syntax: { jsx: false, ts: false },
-      envs: ["browser"]
+      envs: ["browser"],
     },
     {
-      importAttrAllow: ["json"]
-    }
+      importAttrAllow: ["json"],
+    },
   );
 }
 
-async function transformSnapshot(code, filePath = defaultFilePath, root = pkgRoot) {
+async function transformSnapshot(
+  code,
+  filePath = defaultFilePath,
+  root = pkgRoot,
+) {
   const result = await transform(code, filePath, root);
   return {
     code: result.code,
-    meta: result.meta
+    meta: result.meta,
   };
 }
 
@@ -57,7 +61,9 @@ test("keeps export declaration shape", async () => {
 });
 
 test("rewrites default export to renamed binding", async () => {
-  const result = await transformSnapshot("export default function foo() { return 1; }");
+  const result = await transformSnapshot(
+    "export default function foo() { return 1; }",
+  );
   expect(result.code).toMatchInlineSnapshot(`
 "const ji19ybwd_default = function ji19ybwd_foo() {
   return 1;
@@ -90,8 +96,12 @@ test("rewrites default export to renamed binding", async () => {
 });
 
 test("records export stars and reexports", async () => {
-  const result = await transformSnapshot("export * from './dep.js'; export { foo as bar } from './dep.js';");
-  expect(result.code).toMatchInlineSnapshot(`"const ji19ybwd_bar = a4tfu7r6i_foo;"`);
+  const result = await transformSnapshot(
+    "export * from './dep.js'; export { foo as bar } from './dep.js';",
+  );
+  expect(result.code).toMatchInlineSnapshot(
+    `"const ji19ybwd_bar = a4tfu7r6i_foo;"`,
+  );
   expect(result.meta).toMatchInlineSnapshot(`
 {
   "conditionalImports": [],

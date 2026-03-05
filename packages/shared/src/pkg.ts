@@ -30,7 +30,7 @@ export function readPkg(pkgRoot: string): PackageInfo {
   return {
     name: data.name ?? "",
     version: data.version ?? "0.0.0",
-    root: normalizePosixPath(pkgRoot)
+    root: normalizePosixPath(pkgRoot),
   };
 }
 
@@ -41,7 +41,7 @@ export function readPkgSafe(pkgRoot: string): PackageInfo {
     return {
       name: "",
       version: "0.0.0",
-      root: normalizePosixPath(pkgRoot)
+      root: normalizePosixPath(pkgRoot),
     };
   }
 }
