@@ -1,10 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 const rootDir = path.resolve(process.cwd());
 const fixturesDir = path.join(rootDir, "test/fixtures");
 const outRoot = path.join(rootDir, "test/.out");
 const cacheRoot = path.join(rootDir, "tmp/test-cache");
+const execFileAsync = promisify(execFile);
 
 async function buildFixture(name, options = {}) {
   const entry = path.join(fixturesDir, name, "src/index.js");
@@ -47,7 +51,8 @@ test("bundles simple module graph", async () => {
   "output": "
 const k7isotkd_foo = 2;
 globalThis.__SIDE_EFFECT__ = true;
-const a33jpi1jb_value = k7isotkd_foo + 1;",
+const a33jpi1jb_value = k7isotkd_foo + 1;
+export { a33jpi1jb_value as value };",
 }
 `);
 });
@@ -67,7 +72,8 @@ const kftqz1jg_feature = ka1gyw5b_feature;
 /////##CONDITION_START##{"NOT":"EXPERIMENT_A"}
 const kftqz1jg_feature = undefined;
 /////##CONDITION_END##
-const kftqz1jg_value = kftqz1jg_feature;",
+const kftqz1jg_value = kftqz1jg_feature;
+export { kftqz1jg_value as value };",
 }
 `);
 });
@@ -90,7 +96,8 @@ const pvain3vm_feature = a57bqmm6a_feature;
 /////##CONDITION_START##{"NOT":"EXPERIMENT_B"}
 const pvain3vm_feature = qb58dser_feature;
 /////##CONDITION_END##
-const pvain3vm_value = pvain3vm_feature;",
+const pvain3vm_value = pvain3vm_feature;
+export { pvain3vm_value as value };",
 }
 `);
 });
@@ -124,7 +131,8 @@ const a2u80kk0g_feature = undefined;
 /////##CONDITION_END##
 function a2u80kk0g_run() {
   return a2u80kk0g_feature;
-}",
+}
+export { a2u80kk0g_run as run };",
 }
 `);
 });
@@ -143,7 +151,8 @@ const __NS__a5wvqoyh8 = Object.create(null);
 Object.defineProperty(__NS__a5wvqoyh8, Symbol.toStringTag, { value: "Module" });
 Object.defineProperty(__NS__a5wvqoyh8, "value", { enumerable: true, get: () => a5wvqoyh8_value });
 Object.defineProperty(__NS__a5wvqoyh8, "dynamic", { enumerable: true, get: () => a5wvqoyh8_dynamic });
-Object.preventExtensions(__NS__a5wvqoyh8);",
+Object.preventExtensions(__NS__a5wvqoyh8);
+export { a5wvqoyh8_value as value, a5wvqoyh8_dynamic as dynamic };",
 }
 `);
 });
@@ -156,7 +165,8 @@ test("handles export star with override", async () => {
   "output": "
 const a8h9vqgv5_value = "a";
 const kzk1bb96_value = "b";
-const d3sn4zje_bValue = kzk1bb96_value;",
+const d3sn4zje_bValue = kzk1bb96_value;
+export { d3sn4zje_bValue as bValue, a8h9vqgv5_value as value };",
 }
 `);
 });
@@ -166,11 +176,18 @@ test("rewrites dynamic import to constant", async () => {
   expect(snapshot).toMatchInlineSnapshot(`
 {
   "name": "dynamic-import",
-  "output": "const __IMPORT_ra8btrgq = () => import("dynamic-import.browser.gilisr19.js");
+  "output": "const __IMPORT_ra8btrgq = () => import("./dynamic-import.browser.sp6pcy52.js").then((mod) => {
+  const ns = Object.create(null);
+  Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });
+  Object.defineProperty(ns, "foo", { enumerable: true, get: () => mod["ra8btrgq_foo"] });
+  Object.preventExtensions(ns);
+  return ns;
+});
 async function ogy9gk4r_loadFoo() {
   const mod = await __IMPORT_ra8btrgq();
   return mod.foo;
-}",
+}
+export { ogy9gk4r_loadFoo as loadFoo };",
 }
 `);
 });
@@ -180,13 +197,20 @@ test("dedupes dynamic import constants", async () => {
   expect(snapshot).toMatchInlineSnapshot(`
 {
   "name": "dynamic-import-shared",
-  "output": "const __IMPORT_s5ot8viw = () => import("dynamic-import-shared.browser.m5ae8409.js");
+  "output": "const __IMPORT_s5ot8viw = () => import("./dynamic-import-shared.browser.v345apxf.js").then((mod) => {
+  const ns = Object.create(null);
+  Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });
+  Object.defineProperty(ns, "shared", { enumerable: true, get: () => mod["s5ot8viw_shared"] });
+  Object.preventExtensions(ns);
+  return ns;
+});
 async function pjxrtv5k_loadA() {
   return __IMPORT_s5ot8viw();
 }
 async function pjxrtv5k_loadB() {
   return __IMPORT_s5ot8viw();
-}",
+}
+export { pjxrtv5k_loadA as loadA, pjxrtv5k_loadB as loadB };",
 }
 `);
 });
@@ -197,7 +221,8 @@ test("rewrites import.meta url", async () => {
 {
   "name": "import-meta",
   "output": "
-const a2i26jx0t_asset = __BUNDLER_URL__("a2i26jx0t", "./asset.png").href;",
+const a2i26jx0t_asset = __BUNDLER_URL__("a2i26jx0t", "./asset.png").href;
+export { a2i26jx0t_asset as asset };",
 }
 `);
 });
@@ -223,4 +248,24 @@ test("reuses cached worker artifacts for unchanged modules", async () => {
 
   const secondStat = await fs.stat(recordPath);
   expect(secondStat.mtimeMs).toBe(firstStat.mtimeMs);
+});
+
+test("executes dynamically imported bundles with the expected exports", async () => {
+  const entryPath = path.join(fixturesDir, "dynamic-import", "src/index.js");
+  const result = await buildFixture("dynamic-import");
+  const bundleDir = path.join(outRoot, "dynamic-import");
+  const entryBundle = result.bundles.find((bundle) => bundle.entryId === entryPath);
+
+  expect(entryBundle).toBeDefined();
+
+  const bundleUrl = pathToFileURL(
+    path.join(bundleDir, entryBundle.fileName),
+  ).href;
+  const { stdout } = await execFileAsync(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    `const mod = await import(${JSON.stringify(bundleUrl)}); console.log(await mod.loadFoo());`,
+  ]);
+
+  expect(stdout.trim()).toBe("42");
 });

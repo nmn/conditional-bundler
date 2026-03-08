@@ -1,0 +1,26 @@
+const __IMPORT_kh774klk = () => import("./hybrid.browser.sxouosn9.js").then((mod) => {
+  const ns = Object.create(null);
+  Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });
+  Object.defineProperty(ns, "default", { enumerable: true, get: () => mod["kh774klk_default"] });
+  Object.preventExtensions(ns);
+  return ns;
+});
+const kbgjp98n_label = "base";
+const a7c4iu3zz_label = kbgjp98n_label;
+/////##CONDITION_START##"FLAG_A"
+const e68ec7o1_feature = "alpha";
+/////##CONDITION_END##
+/////##CONDITION_START##{"NOT":"FLAG_A"}
+const dvxo7bsl_feature = "beta";
+/////##CONDITION_END##
+/////##CONDITION_START##"FLAG_A"
+const a54u0cy4f_feature = e68ec7o1_feature;
+/////##CONDITION_END##
+/////##CONDITION_START##{"NOT":"FLAG_A"}
+const a54u0cy4f_feature = dvxo7bsl_feature;
+/////##CONDITION_END##
+async function a54u0cy4f_run(key) {
+  const mod = await __IMPORT_kh774klk();
+  return mod.default(`${a7c4iu3zz_label}:${a54u0cy4f_feature}:${key}`);
+}
+export { a54u0cy4f_run as run };

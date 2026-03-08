@@ -21,7 +21,10 @@ import {
   emitConditionalEnd,
 } from "./linker/conditional-markers.js";
 import { emitNamespaceObject } from "./linker/namespace.js";
-import { emitDynamicImportConstants } from "./linker/dynamic-import-constants.js";
+import {
+  emitDynamicImportConstants,
+  type BundleTarget,
+} from "./linker/dynamic-import-constants.js";
 import { stripImportStatements } from "./linker/strip-imports.js";
 import { concatParts } from "./concat.js";
 import { runTransformModule, runTransformModuleGraph } from "./plugins/run.js";
@@ -49,15 +52,15 @@ export type BuildResult = {
 
 type DynamicImportRef = {
   hashKey: string;
-  source: string;
-  request?: string;
-  fromId: string;
+  resolvedId: string;
+  exports: Array<{ exported: string; symbol: string }>;
 };
 
 type BundlePlan = {
   envId: string;
   entryId: string;
   fileName: string;
+  exportMode: "entry" | "dynamic";
   parts: string[];
   dynamicImports: DynamicImportRef[];
   diagnostics: Diagnostic[];
@@ -125,9 +128,7 @@ export async function buildProject(
       const entries = pickEntriesForEnv(explicitEntries, graph.envId);
       for (const entry of entries) {
         bundlePlans.push(
-          await createBundlePlan(graph, entry.path, config, {
-            preserveExports: false,
-          }),
+          await createBundlePlan(graph, entry.path, config, resolver, "entry"),
         );
       }
 
@@ -139,34 +140,31 @@ export async function buildProject(
           continue;
         }
         bundlePlans.push(
-          await createBundlePlan(graph, entry.path, config, {
-            preserveExports: true,
-          }),
+          await createBundlePlan(
+            graph,
+            entry.path,
+            config,
+            resolver,
+            "dynamic",
+          ),
         );
       }
     }
 
-    const bundleMap = new Map<string, string>();
+    const bundleMap = new Map<string, BundleTarget>();
     for (const plan of bundlePlans) {
       const resolved = resolvedMap.get(plan.entryId) ?? plan.entryId;
-      bundleMap.set(resolved, plan.fileName);
+      bundleMap.set(resolved, {
+        fileName: plan.fileName,
+        exportMode: plan.exportMode,
+      });
     }
 
     await fs.mkdir(config.outputs.outDir, { recursive: true });
     const bundles: Array<{ envId: string; entryId: string; fileName: string }> =
       [];
     for (const plan of bundlePlans) {
-      const dynamicMapResolved = resolveDynamicImports(
-        plan.dynamicImports,
-        bundleMap,
-      );
-      const header = emitDynamicImportConstants(
-        plan.dynamicImports.map((entry) => ({
-          hashKey: entry.hashKey,
-          source: entry.source,
-        })),
-        dynamicMapResolved,
-      );
+      const header = emitDynamicImportConstants(plan.dynamicImports, bundleMap);
       const patchedBundle = concatParts([header, ...plan.parts]);
 
       const outputPath = path.join(config.outputs.outDir, plan.fileName);
@@ -202,7 +200,8 @@ async function createBundlePlan(
   graph: ModuleGraph,
   entryPath: string,
   config: BundlerConfig,
-  options: { preserveExports: boolean },
+  resolver: Resolver,
+  exportMode: "entry" | "dynamic",
 ): Promise<BundlePlan> {
   const ordered = topoSort(graph, entryPath);
   if (ordered.length === 0) {
@@ -241,9 +240,7 @@ async function createBundlePlan(
     }
 
     processed = stripImportStatements(processed, node.irHeader.importRanges);
-    if (!options.preserveExports) {
-      processed = stripImportStatements(processed, node.irHeader.exportRanges);
-    }
+    processed = stripImportStatements(processed, node.irHeader.exportRanges);
 
     const condition = conditions.get(node.id);
     if (condition) {
@@ -261,29 +258,27 @@ async function createBundlePlan(
     }
 
     for (const dyn of node.irHeader.dynamicImports) {
+      const resolved = await resolver(
+        node.id,
+        dyn.request ?? dyn.source,
+        graph.envId,
+      );
+      const targetNode = graph.nodes.get(resolved.id);
       dynamicImports.push({
         hashKey: dyn.hashKey,
-        source: dyn.source,
-        request: dyn.request,
-        fromId: node.id,
+        resolvedId: resolved.id,
+        exports: collectDynamicImportExports(targetNode),
       });
     }
   }
-
-  const dynamicMap: Record<string, string> = {};
-  for (const dyn of dynamicImports) {
-    dynamicMap[dyn.hashKey] = "";
+  const exportFooter =
+    exportMode === "entry"
+      ? emitEntryExports(graph.nodes.get(entryPath))
+      : emitDynamicBundleExports(ordered);
+  if (exportFooter) {
+    parts.push(exportFooter);
   }
-
-  const header = emitDynamicImportConstants(
-    dynamicImports.map((entry) => ({
-      hashKey: entry.hashKey,
-      source: entry.source,
-    })),
-    dynamicMap,
-  );
-
-  const bundle = concatParts([header, ...parts]);
+  const bundle = concatParts(parts);
   const hash = contentHashShort(bundle);
   const fileName = config.outputs.fileName
     ? config.outputs.fileName
@@ -295,6 +290,7 @@ async function createBundlePlan(
     envId: graph.envId,
     entryId: entryPath,
     fileName,
+    exportMode,
     parts,
     dynamicImports,
     diagnostics,
@@ -558,23 +554,53 @@ function resolveProvider(
   return provider;
 }
 
-function resolveRelative(from: string, request: string): string {
-  if (!request.startsWith(".")) {
-    return request;
+function collectDynamicImportExports(
+  node: ModuleNode | undefined,
+): Array<{ exported: string; symbol: string }> {
+  if (!node?.exportTable) {
+    return [];
   }
-  return path.resolve(path.dirname(from), request);
+
+  return Array.from(node.exportTable.entries()).map(([exported, provider]) => ({
+    exported,
+    symbol: provider.symbol,
+  }));
 }
 
-function resolveDynamicImports(
-  imports: DynamicImportRef[],
-  bundleMap: Map<string, string>,
-): Record<string, string> {
-  const mapping: Record<string, string> = {};
-  for (const dyn of imports) {
-    const resolved = resolveRelative(dyn.fromId, dyn.request ?? dyn.source);
-    mapping[dyn.hashKey] = bundleMap.get(resolved) ?? "";
+function emitEntryExports(node: ModuleNode | undefined): string {
+  if (!node?.exportTable || node.exportTable.size === 0) {
+    return "";
   }
-  return mapping;
+
+  const parts: string[] = [];
+  for (const [exported, provider] of node.exportTable.entries()) {
+    parts.push(
+      provider.symbol === exported
+        ? provider.symbol
+        : `${provider.symbol} as ${exported}`,
+    );
+  }
+
+  return `export { ${parts.join(", ")} };`;
+}
+
+function emitDynamicBundleExports(nodes: ModuleNode[]): string {
+  const exportedSymbols = new Set<string>();
+
+  for (const node of nodes) {
+    if (!node.exportTable) {
+      continue;
+    }
+    for (const provider of node.exportTable.values()) {
+      exportedSymbols.add(provider.symbol);
+    }
+  }
+
+  if (exportedSymbols.size === 0) {
+    return "";
+  }
+
+  return `export { ${Array.from(exportedSymbols).join(", ")} };`;
 }
 
 function dedupeResolved(results: ResolveResult[]): ResolveResult[] {

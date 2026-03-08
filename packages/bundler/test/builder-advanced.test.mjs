@@ -67,7 +67,8 @@ const a60qcqth9_thing = "ok";
 const a60qcqth9_default = a60qcqth9_thing;
 const rgvw7xif_foo = juo8zpng_foo;
 const rgvw7xif_Thing = a60qcqth9_default;
-const rgvw7xif_local = 1;",
+const rgvw7xif_local = 1;
+export { rgvw7xif_foo as foo, rgvw7xif_Thing as Thing, rgvw7xif_local as local, a11gvr3t_star as star, a11gvr3t_shared as shared };",
 }
 `);
 });
@@ -93,7 +94,8 @@ const a1wam17ob_pick = m1lyft9j_pick;
 /////##CONDITION_END##
 function a1wam17ob_run() {
   return a1wam17ob_pick(mag3x3is_shared);
-}",
+}
+export { a1wam17ob_run as run };",
 }
 `);
 });
@@ -103,11 +105,18 @@ test("bundles complex dynamic imports", async () => {
   expect(snapshot).toMatchInlineSnapshot(`
 {
   "name": "complex-dynamic",
-  "output": "const __IMPORT_a7s65xr38 = () => import("complex-dynamic.browser.mmk2qf4d.js");
+  "output": "const __IMPORT_a7s65xr38 = () => import("./complex-dynamic.browser.3nusib50.js").then((mod) => {
+  const ns = Object.create(null);
+  Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });
+  Object.defineProperty(ns, "value", { enumerable: true, get: () => mod["a7s65xr38_value"] });
+  Object.preventExtensions(ns);
+  return ns;
+});
 async function ia6xmlu2_load() {
   const mod = await __IMPORT_a7s65xr38();
   return mod.value;
-}",
+}
+export { ia6xmlu2_load as load };",
 }
 `);
 });
@@ -122,7 +131,8 @@ const k0ehfg11_alpha = 1;
 const k0ehfg11_beta = 2;
 function s509r9pf_run() {
   return k0ehfg11_alpha + k0ehfg11_beta;
-}",
+}
+export { s509r9pf_run as run };",
 }
 `);
 });
@@ -133,7 +143,13 @@ test("bundles a hybrid graph with conditionals, barrels, and dynamic namespace u
 {
   "name": "hybrid",
   "outputs": {
-    "hybrid.browser.7994ucli.js": "const __IMPORT_kh774klk = () => import("hybrid.browser.fvogf1gi.js");
+    "hybrid.browser.gfdy0l3l.js": "const __IMPORT_kh774klk = () => import("./hybrid.browser.sxouosn9.js").then((mod) => {
+  const ns = Object.create(null);
+  Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });
+  Object.defineProperty(ns, "default", { enumerable: true, get: () => mod["kh774klk_default"] });
+  Object.preventExtensions(ns);
+  return ns;
+});
 const kbgjp98n_label = "base";
 const a7c4iu3zz_label = kbgjp98n_label;
 /////##CONDITION_START##"FLAG_A"
@@ -151,8 +167,9 @@ const a54u0cy4f_feature = dvxo7bsl_feature;
 async function a54u0cy4f_run(key) {
   const mod = await __IMPORT_kh774klk();
   return mod.default(\`\${a7c4iu3zz_label}:\${a54u0cy4f_feature}:\${key}\`);
-}",
-    "hybrid.browser.fvogf1gi.js": "
+}
+export { a54u0cy4f_run as run };",
+    "hybrid.browser.sxouosn9.js": "
 const o5ufutef_suffix = "tail";
 const kh774klk_default = function kh774klk_finish(input) {
   return \`\${input}:\${__NS__o5ufutef.suffix}:\${__NS__o5ufutef["suffix"]}\`;
@@ -160,7 +177,8 @@ const kh774klk_default = function kh774klk_finish(input) {
 const __NS__kh774klk = Object.create(null);
 Object.defineProperty(__NS__kh774klk, Symbol.toStringTag, { value: "Module" });
 Object.defineProperty(__NS__kh774klk, "default", { enumerable: true, get: () => kh774klk_default });
-Object.preventExtensions(__NS__kh774klk);",
+Object.preventExtensions(__NS__kh774klk);
+export { o5ufutef_suffix, kh774klk_default };",
   },
 }
 `);
