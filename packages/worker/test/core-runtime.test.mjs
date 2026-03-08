@@ -44,12 +44,13 @@ test("rewrites dynamic import to constant", async () => {
 {
   "conditionalImports": [],
   "discoveredEntrypoints": [
-    "./dep.js",
+    "src/dep.js",
   ],
   "dynamicImports": [
     {
       "hashKey": "__IMPORT_a4tfu7r6i",
-      "source": "./dep.js",
+      "request": "./dep.js",
+      "source": "src/dep.js",
     },
   ],
   "exportRanges": [],

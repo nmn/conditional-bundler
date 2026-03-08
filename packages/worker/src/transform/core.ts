@@ -42,7 +42,7 @@ export function transformWithCore(
   input: TransformInput,
   options: CoreTransformOptions,
 ): TransformResult {
-  const dynamicImportMap = new Map<string, string>();
+  const dynamicImportMap = new Map<string, { source: string; request: string }>();
 
   const ast = parse(input.code, {
     sourceType: "module",
@@ -103,6 +103,7 @@ export function transformWithCore(
   });
 
   const declaredExportNames = new Set<string>();
+  const importMeta = collectImports(ast, input, options, traverse);
 
   traverse(ast, {
     ExportNamedDeclaration(path: NodePath<t.ExportNamedDeclaration>) {
@@ -178,7 +179,10 @@ export function transformWithCore(
             resolved.pkg.version,
             resolved.relPath,
           );
-          dynamicImportMap.set(key, arg.value);
+          dynamicImportMap.set(key, {
+            source: resolved.relPath,
+            request: arg.value,
+          });
           parentPath.replaceWith(
             t.callExpression(t.identifier(`__IMPORT_${key}`), []),
           );
@@ -211,7 +215,8 @@ export function transformWithCore(
     },
     ExportNamedDeclaration(path: NodePath<t.ExportNamedDeclaration>) {
       if (path.node.source) {
-        const resolved = resolveImportForHash(input, path.node.source.value);
+        const request = path.node.source.value;
+        const resolved = resolveImportForHash(input, request);
         const depPrefix = filePrefix(
           resolved.pkg.name,
           resolved.pkg.version,
@@ -228,7 +233,8 @@ export function transformWithCore(
             );
             exportsLocal.push({ local: exported, exported, kind: "var" });
             reexportsNamed.push({
-              source: path.node.source.value,
+              source: resolved.relPath,
+              request,
               imported: "*",
               exported,
               isNamespace: true,
@@ -247,7 +253,8 @@ export function transformWithCore(
             );
             exportsLocal.push({ local: exported, exported, kind: "var" });
             reexportsNamed.push({
-              source: path.node.source.value,
+              source: resolved.relPath,
+              request,
               imported,
               exported,
             });
@@ -346,12 +353,15 @@ export function transformWithCore(
       path.replaceWith(decl);
     },
     ExportAllDeclaration(path: NodePath<t.ExportAllDeclaration>) {
+      const request = path.node.source.value;
+      const resolved = resolveImportForHash(input, request);
       const exported = (
         path.node as t.ExportAllDeclaration & { exported?: t.Identifier }
       ).exported;
       if (exported && t.isIdentifier(exported)) {
         reexportsNamed.push({
-          source: path.node.source.value,
+          source: resolved.relPath,
+          request,
           imported: "*",
           exported: exported.name,
           isNamespace: true,
@@ -359,10 +369,13 @@ export function transformWithCore(
         path.remove();
         return;
       }
-      exportStars.push({ source: path.node.source.value });
+      exportStars.push({ source: resolved.relPath, request });
       path.remove();
     },
   });
+
+  rewriteImportsInAst(ast, input, prefix, importMeta.imports, traverse);
+  removeImportDeclarations(ast, traverse);
 
   if (hasTopLevelAwait) {
     throw new Error(
@@ -375,35 +388,24 @@ export function transformWithCore(
     { sourceMaps: true, sourceFileName: input.realPath },
     input.code,
   );
-
-  const parsed = parse(output.code, {
-    sourceType: "module",
-    sourceFilename: input.realPath,
-    plugins: getParserPlugins(input),
-  });
-
-  const importMeta = collectImports(parsed, input, options, traverse);
   const dynamicImports: DynamicImport[] = Array.from(
     dynamicImportMap.entries(),
-  ).map(([hashKey, source]) => ({
+  ).map(([hashKey, entry]) => ({
     hashKey: `__IMPORT_${hashKey}`,
-    source,
+    source: entry.source,
+    request: entry.request,
   }));
 
-  const replacements = buildImportReplacements(
+  let transformedCode = output.code;
+  const conditionalBindings = buildConditionalBindings(
     importMeta.imports,
+    importMeta.conditionalImports,
     input,
     prefix,
   );
-  let transformedCode = output.code;
-  if (replacements.length > 0) {
-    transformedCode = applyReplacements(transformedCode, replacements);
+  if (conditionalBindings.length > 0) {
+    transformedCode = `${conditionalBindings.join("\n")}\n${transformedCode}`;
   }
-  if (importMeta.importRanges.length > 0) {
-    transformedCode = stripRanges(transformedCode, importMeta.importRanges);
-  }
-
-  const finalExportRanges = collectExportRanges(transformedCode, input);
   const imports = importMeta.imports.map((entry) => ({
     ...entry,
     specifiers: entry.specifiers.map((spec) => ({ ...spec, useRanges: [] })),
@@ -421,7 +423,7 @@ export function transformWithCore(
       conditionalImports: importMeta.conditionalImports,
       discoveredEntrypoints: dynamicImports.map((entry) => entry.source),
       importRanges: [],
-      exportRanges: finalExportRanges,
+      exportRanges: [],
       flags: {
         hasTopLevelAwait,
         sideEffects: true,
@@ -439,16 +441,16 @@ function collectImports(
 ): {
   imports: ImportEntry[];
   conditionalImports: ConditionalImport[];
-  importRanges: Array<[number, number]>;
   needsNamespaceObject: boolean;
 } {
   const imports: ImportEntry[] = [];
   const conditionalImports: ConditionalImport[] = [];
-  const importRanges: Array<[number, number]> = [];
   let needsNamespaceObject = false;
 
   traverse(ast, {
     ImportDeclaration(path: NodePath<t.ImportDeclaration>) {
+      const request = path.node.source.value;
+      const resolved = resolveImportForHash(input, request);
       const attributes = readImportAttributes(path.node);
       const typeAttr = attributes.type;
       if (typeAttr && typeAttr !== "json") {
@@ -467,10 +469,15 @@ function collectImports(
       let condition: ConditionalImport | undefined;
       if (conditionAttr) {
         const conditionExpr = parseCondition(conditionAttr);
+        const elseResolved = elseAttr
+          ? resolveImportForHash(input, elseAttr)
+          : undefined;
         condition = {
-          source: path.node.source.value,
+          source: resolved.relPath,
+          request,
           condition: conditionExpr,
-          elseSource: elseAttr,
+          elseSource: elseResolved?.relPath,
+          elseRequest: elseAttr,
         };
         conditionalImports.push(condition);
         delete attributes.condition;
@@ -513,14 +520,11 @@ function collectImports(
         }
       }
 
-      if (path.node.start != null && path.node.end != null) {
-        importRanges.push([path.node.start, path.node.end]);
-      }
-
       const kind =
         specifiers.length === 0 ? "side-effect" : isTypeOnly ? "type" : "value";
       imports.push({
-        source: path.node.source.value,
+        source: resolved.relPath,
+        request,
         kind,
         isNamespace,
         isDefault,
@@ -615,102 +619,184 @@ function collectImports(
     }
   }
 
-  return { imports, conditionalImports, importRanges, needsNamespaceObject };
+  return { imports, conditionalImports, needsNamespaceObject };
 }
 
-type Replacement = {
-  start: number;
-  end: number;
-  text: string;
-};
-
-function buildImportReplacements(
+function buildConditionalBindings(
   imports: ImportEntry[],
+  conditionalImports: ConditionalImport[],
   input: TransformInput,
   prefix: string,
-): Replacement[] {
-  const replacements: Replacement[] = [];
+): string[] {
+  const bindings: string[] = [];
   for (const entry of imports) {
-    if (entry.kind === "type") {
+    if (!entry.condition) {
       continue;
     }
-    const resolved = resolveImportForHash(input, entry.source);
+    const resolved = resolveImportForHash(input, entry.request ?? entry.source);
     const depPrefix = filePrefix(
       resolved.pkg.name,
       resolved.pkg.version,
       resolved.relPath,
     );
+    const conditionalImport = conditionalImports.find(
+      (item) =>
+        item.source === entry.source &&
+        JSON.stringify(item.condition) === JSON.stringify(entry.condition),
+    );
+
+    if (entry.isNamespace) {
+      const namespaceLocal = entry.specifiers[0]?.local;
+      if (!namespaceLocal) {
+        continue;
+      }
+      const localName = `${prefix}_${namespaceLocal}`;
+      bindings.push(
+        emitConditionalStart(entry.condition),
+        `const ${localName} = __NS__${depPrefix};`,
+        emitConditionalEnd(),
+      );
+
+      let fallback = "undefined";
+      if (conditionalImport?.elseSource) {
+        const elseResolved = resolveImportForHash(
+          input,
+          conditionalImport.elseRequest ?? conditionalImport.elseSource,
+        );
+        const elsePrefix = filePrefix(
+          elseResolved.pkg.name,
+          elseResolved.pkg.version,
+          elseResolved.relPath,
+        );
+        fallback = `__NS__${elsePrefix}`;
+      }
+      bindings.push(
+        emitConditionalStart({ NOT: entry.condition }),
+        `const ${localName} = ${fallback};`,
+        emitConditionalEnd(),
+      );
+      continue;
+    }
+
     for (const spec of entry.specifiers) {
-      let target = "";
-      if (entry.condition) {
-        target = `${prefix}_${spec.local}`;
-      } else if (entry.isNamespace && entry.namespaceUsage === "dynamic") {
-        target = `__NS__${depPrefix}`;
-      } else {
-        const importName =
-          spec.imported === "default" ? "default" : spec.imported;
-        target = `${depPrefix}_${importName}`;
+      const localName = `${prefix}_${spec.local}`;
+      bindings.push(
+        emitConditionalStart(entry.condition),
+        `const ${localName} = ${conditionalImportTarget(entry, spec, depPrefix)};`,
+        emitConditionalEnd(),
+      );
+
+      let fallback = "undefined";
+      if (conditionalImport?.elseSource) {
+        const elseResolved = resolveImportForHash(
+          input,
+          conditionalImport.elseRequest ?? conditionalImport.elseSource,
+        );
+        const elsePrefix = filePrefix(
+          elseResolved.pkg.name,
+          elseResolved.pkg.version,
+          elseResolved.relPath,
+        );
+        fallback = conditionalImportTarget(entry, spec, elsePrefix);
       }
-      for (const [start, end] of spec.useRanges) {
-        replacements.push({ start, end, text: target });
-      }
+      bindings.push(
+        emitConditionalStart({ NOT: entry.condition }),
+        `const ${localName} = ${fallback};`,
+        emitConditionalEnd(),
+      );
     }
   }
-  return replacements;
+  return bindings;
 }
 
-function applyReplacements(code: string, replacements: Replacement[]): string {
-  const sorted = [...replacements].sort((a, b) => b.start - a.start);
-  let output = code;
-  for (const { start, end, text } of sorted) {
-    output = output.slice(0, start) + text + output.slice(end);
-  }
-  return output;
-}
-
-function stripRanges(code: string, ranges: Array<[number, number]>): string {
-  const sorted = [...ranges].sort((a, b) => b[0] - a[0]);
-  let output = code;
-  for (const [start, end] of sorted) {
-    output = output.slice(0, start) + output.slice(end);
-  }
-  return output;
-}
-
-function collectExportRanges(
-  code: string,
+function rewriteImportsInAst(
+  ast: t.File,
   input: TransformInput,
-): Array<[number, number]> {
-  const ast = parse(code, {
-    sourceType: "module",
-    sourceFilename: input.realPath,
-    plugins: getParserPlugins(input),
-  });
-  const traverse = ((
-    traverseModule as unknown as {
-      default?: typeof import("@babel/traverse").default;
+  prefix: string,
+  imports: ImportEntry[],
+  traverse: typeof import("@babel/traverse").default,
+): void {
+  const programPath = getProgramPath(ast, traverse);
+  if (!programPath) {
+    return;
+  }
+
+  for (const entry of imports) {
+    if (entry.kind !== "value") {
+      continue;
     }
-  ).default ??
-    (traverseModule as unknown as typeof import("@babel/traverse").default)) as typeof import("@babel/traverse").default;
-  const ranges: Array<[number, number]> = [];
+
+    const resolved = resolveImportForHash(input, entry.request ?? entry.source);
+    const depPrefix = filePrefix(
+      resolved.pkg.name,
+      resolved.pkg.version,
+      resolved.relPath,
+    );
+
+    if (entry.isNamespace) {
+      const namespaceLocal = entry.specifiers[0]?.local;
+      if (!namespaceLocal) {
+        continue;
+      }
+      const binding = programPath.scope.getBinding(namespaceLocal);
+      if (!binding) {
+        continue;
+      }
+      const targetName = entry.condition
+        ? `${prefix}_${namespaceLocal}`
+        : `__NS__${depPrefix}`;
+      for (const refPath of binding.referencePaths) {
+        if (!refPath.isReferencedIdentifier()) {
+          continue;
+        }
+        const parent = refPath.parentPath;
+        if (
+          !entry.condition &&
+          entry.namespaceUsage === "static" &&
+          parent &&
+          parent.isMemberExpression() &&
+          parent.node.object === refPath.node &&
+          !parent.node.computed &&
+          t.isIdentifier(parent.node.property)
+        ) {
+          parent.replaceWith(
+            t.identifier(`${depPrefix}_${parent.node.property.name}`),
+          );
+          continue;
+        }
+        refPath.replaceWith(t.identifier(targetName));
+      }
+      continue;
+    }
+
+    for (const spec of entry.specifiers) {
+      const binding = programPath.scope.getBinding(spec.local);
+      if (!binding) {
+        continue;
+      }
+      const importName = spec.imported === "default" ? "default" : spec.imported;
+      const targetName = entry.condition
+        ? `${prefix}_${spec.local}`
+        : `${depPrefix}_${importName}`;
+      for (const refPath of binding.referencePaths) {
+        if (!refPath.isReferencedIdentifier()) {
+          continue;
+        }
+        refPath.replaceWith(t.identifier(targetName));
+      }
+    }
+  }
+}
+
+function removeImportDeclarations(
+  ast: t.File,
+  traverse: typeof import("@babel/traverse").default,
+): void {
   traverse(ast, {
-    ExportNamedDeclaration(path: NodePath<t.ExportNamedDeclaration>) {
-      if (path.node.start != null && path.node.end != null) {
-        ranges.push([path.node.start, path.node.end]);
-      }
-    },
-    ExportDefaultDeclaration(path: NodePath<t.ExportDefaultDeclaration>) {
-      if (path.node.start != null && path.node.end != null) {
-        ranges.push([path.node.start, path.node.end]);
-      }
-    },
-    ExportAllDeclaration(path: NodePath<t.ExportAllDeclaration>) {
-      if (path.node.start != null && path.node.end != null) {
-        ranges.push([path.node.start, path.node.end]);
-      }
+    ImportDeclaration(path: NodePath<t.ImportDeclaration>) {
+      path.remove();
     },
   });
-  return ranges;
 }
 
 function resolveImportForHash(
@@ -835,6 +921,26 @@ function isAssignmentTarget(memberPath: NodePath<t.MemberExpression>): boolean {
     return true;
   }
   return false;
+}
+
+function conditionalImportTarget(
+  entry: ImportEntry,
+  spec: ImportSpecifier,
+  depPrefix: string,
+): string {
+  if (entry.isNamespace) {
+    return `__NS__${depPrefix}`;
+  }
+  const importName = spec.imported === "default" ? "default" : spec.imported;
+  return `${depPrefix}_${importName}`;
+}
+
+function emitConditionalStart(condition: ConditionalImport["condition"]): string {
+  return `/////##CONDITION_START##${JSON.stringify(condition)}`;
+}
+
+function emitConditionalEnd(): string {
+  return "/////##CONDITION_END##";
 }
 
 function exportDefaultToExpression(

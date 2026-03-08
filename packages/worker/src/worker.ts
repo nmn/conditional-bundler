@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import { parentPort } from "node:worker_threads";
 import path from "node:path";
 import { filePrefix, contentHash, normalizePosixPath } from "@bundler/shared";
@@ -6,7 +7,11 @@ import type {
   TransformResult,
   TransformMultiResult,
 } from "@bundler/shared";
-import { writeFileAtomic, ensureDir } from "@bundler/shared";
+import {
+  writeFileAtomic,
+  ensureDir,
+  readFileIfExists,
+} from "@bundler/shared";
 
 if (!parentPort) {
   throw new Error("Worker must be spawned with parentPort.");
@@ -24,6 +29,7 @@ type WorkerRequest = {
 
 type WorkerResponse = {
   ok: boolean;
+  cacheHit?: boolean;
   contentHash: string;
   prefix: string;
   irHeader: {
@@ -51,14 +57,41 @@ type WorkerResponse = {
   };
 };
 
+type CacheRecord = {
+  cacheKey: string;
+  irHeader: WorkerResponse["irHeader"];
+};
+
 async function handleTransform(
   request: WorkerRequest,
 ): Promise<WorkerResponse> {
   const fileHash = contentHash(request.code);
+  const cacheKey = buildCacheKey(request);
+  const recordPath = path.join(
+    request.cacheDir,
+    "records",
+    `${contentHash(normalizePosixPath(request.realPath))}.json`,
+  );
+  const cached = await readCacheRecord(recordPath);
+  if (
+    cached &&
+    cached.cacheKey === cacheKey &&
+    (await hasCachedArtifacts(cached.irHeader))
+  ) {
+    return {
+      ok: true,
+      cacheHit: true,
+      contentHash: cached.irHeader.contentHash,
+      prefix: cached.irHeader.prefix,
+      irHeader: cached.irHeader,
+    };
+  }
+
   const parsedByEnv = request.codeByEnv;
   const normalizedPath = normalizePosixPath(request.realPath);
   const relPath = path.posix.relative(request.pkg.root, normalizedPath);
   const prefix = filePrefix(request.pkg.name, request.pkg.version, relPath);
+  const artifactHash = contentHash(cacheKey);
 
   const result = await transformFile(request, parsedByEnv);
   const resultsByEnv = (
@@ -69,18 +102,18 @@ async function handleTransform(
   const mapByEnv: Record<string, string> = {};
 
   for (const [envId, envResult] of Object.entries(resultsByEnv)) {
-    const result = envResult as TransformResult;
+    const envTransform = envResult as TransformResult;
     const codePath = path.join(
       request.cacheDir,
       "code",
-      `${fileHash}.${envId}.js`,
+      `${artifactHash}.${envId}.js`,
     );
-    const mapPath = result.map
-      ? path.join(request.cacheDir, "map", `${fileHash}.${envId}.map`)
+    const mapPath = envTransform.map
+      ? path.join(request.cacheDir, "map", `${artifactHash}.${envId}.map`)
       : undefined;
-    await writeFileAtomic(codePath, result.code);
-    if (mapPath && result.map) {
-      await writeFileAtomic(mapPath, result.map);
+    await writeFileAtomic(codePath, envTransform.code);
+    if (mapPath && envTransform.map) {
+      await writeFileAtomic(mapPath, envTransform.map);
       mapByEnv[envId] = mapPath;
     }
     codeByEnv[envId] = codePath;
@@ -111,11 +144,17 @@ async function handleTransform(
     exportRanges: first.meta.exportRanges,
   };
 
-  const irPath = path.join(request.cacheDir, "ir", `${fileHash}.json`);
+  const irPath = path.join(request.cacheDir, "ir", `${artifactHash}.json`);
+  const record: CacheRecord = {
+    cacheKey,
+    irHeader,
+  };
   await writeFileAtomic(irPath, JSON.stringify({ ...irHeader }, null, 2));
+  await writeFileAtomic(recordPath, JSON.stringify(record, null, 2));
 
   return {
     ok: true,
+    cacheHit: false,
     contentHash: fileHash,
     prefix,
     irHeader,
@@ -157,6 +196,60 @@ async function transformFile(
       importAttrAllow: ["json"],
     },
   );
+}
+
+function buildCacheKey(request: WorkerRequest): string {
+  const envHashes = Object.fromEntries(
+    Object.entries(request.codeByEnv ?? {}).map(([envId, code]) => [
+      envId,
+      contentHash(code),
+    ]),
+  );
+
+  return JSON.stringify({
+    realPath: normalizePosixPath(request.realPath),
+    pkgRoot: request.pkg.root,
+    envs: [...request.envs].sort(),
+    syntax: request.syntax,
+    codeHash: contentHash(request.code),
+    envHashes,
+  });
+}
+
+async function readCacheRecord(filePath: string): Promise<CacheRecord | null> {
+  const raw = await readFileIfExists(filePath);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as CacheRecord;
+  } catch {
+    return null;
+  }
+}
+
+async function hasCachedArtifacts(
+  irHeader: WorkerResponse["irHeader"],
+): Promise<boolean> {
+  const requiredPaths = [
+    ...Object.values(irHeader.codeByEnv),
+    ...Object.values(irHeader.mapByEnv),
+  ];
+
+  if (requiredPaths.length === 0) {
+    return false;
+  }
+
+  for (const filePath of requiredPaths) {
+    try {
+      await fs.access(filePath);
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 parentPort.on("message", async (request: WorkerRequest) => {

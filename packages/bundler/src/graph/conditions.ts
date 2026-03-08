@@ -1,45 +1,125 @@
+import type { Diagnostic, ConditionExpr, ModuleNode } from "@bundler/shared";
+import { combineAnd, combineOr } from "@bundler/shared";
 import type { ModuleGraph } from "./build.js";
-import type { ConditionExpr, ModuleNode } from "@bundler/shared";
-import { combineOr } from "@bundler/shared";
+
+type ConditionState = {
+  unconditional: boolean;
+  conditional: ConditionExpr[];
+};
+
+export type GraphConditionResolution = {
+  conditions: Map<string, ConditionExpr | undefined>;
+  diagnostics: Diagnostic[];
+};
 
 export function normalizeGraphConditions(graph: ModuleGraph): void {
-  const conditionCounts = new Map<string, ConditionExpr[]>();
-  const unconditional = new Set<string>();
-
   for (const node of graph.nodes.values()) {
-    for (const dep of node.deps) {
-      const condition = node.conditionalDeps.get(dep);
-      if (!condition) {
-        unconditional.add(dep);
-        continue;
-      }
-      const list = conditionCounts.get(dep) ?? [];
-      list.push(condition);
-      conditionCounts.set(dep, list);
-    }
-  }
-
-  for (const node of graph.nodes.values()) {
-    const condition = resolveNodeCondition(
-      node,
-      conditionCounts,
-      unconditional,
-    );
-    node.condition = condition;
+    node.condition = undefined;
   }
 }
 
-function resolveNodeCondition(
-  node: ModuleNode,
-  conditionCounts: Map<string, ConditionExpr[]>,
-  unconditional: Set<string>,
-): ConditionExpr | undefined {
-  if (unconditional.has(node.id)) {
-    return undefined;
+export function resolveEntryConditions(
+  graph: ModuleGraph,
+  entryId: string,
+): GraphConditionResolution {
+  const ordered = topoSortReachable(graph, entryId).reverse();
+  const states = new Map<string, ConditionState>();
+  const conditions = new Map<string, ConditionExpr | undefined>();
+  const diagnostics: Diagnostic[] = [];
+
+  if (!graph.nodes.has(entryId)) {
+    return { conditions, diagnostics };
   }
-  const conditions = conditionCounts.get(node.id);
-  if (!conditions || conditions.length === 0) {
-    return undefined;
+
+  mergeState(states, entryId, undefined);
+
+  for (const node of ordered) {
+    const state = states.get(node.id);
+    if (!state) {
+      continue;
+    }
+
+    const nodeCondition = state.unconditional
+      ? undefined
+      : state.conditional.length > 0
+        ? combineOr(state.conditional)
+        : undefined;
+    conditions.set(node.id, nodeCondition);
+    node.condition = nodeCondition;
+
+    if (state.unconditional && state.conditional.length > 0) {
+      diagnostics.push({
+        code: "W_CONDITIONAL_ESCAPED",
+        message:
+          "Module is reachable both conditionally and unconditionally; emitting it unconditionally.",
+        severity: "warning",
+        file: node.id,
+        envId: graph.envId,
+      });
+    }
+
+    for (const dep of node.deps) {
+      if (node.unconditionalDeps.has(dep)) {
+        mergeState(states, dep, nodeCondition);
+      }
+
+      const edgeCondition = node.conditionalDeps.get(dep);
+      if (edgeCondition) {
+        mergeState(states, dep, combinePathCondition(nodeCondition, edgeCondition));
+      }
+    }
   }
-  return combineOr(conditions);
+
+  return { conditions, diagnostics };
+}
+
+function combinePathCondition(
+  inherited: ConditionExpr | undefined,
+  edgeCondition: ConditionExpr,
+): ConditionExpr {
+  return inherited
+    ? combineAnd([inherited, edgeCondition])
+    : edgeCondition;
+}
+
+function mergeState(
+  states: Map<string, ConditionState>,
+  moduleId: string,
+  condition: ConditionExpr | undefined,
+): void {
+  const current = states.get(moduleId) ?? {
+    unconditional: false,
+    conditional: [],
+  };
+
+  if (condition === undefined) {
+    current.unconditional = true;
+  } else {
+    current.conditional.push(condition);
+  }
+
+  states.set(moduleId, current);
+}
+
+function topoSortReachable(graph: ModuleGraph, entryId: string): ModuleNode[] {
+  const visited = new Set<string>();
+  const ordered: ModuleNode[] = [];
+
+  function visit(id: string): void {
+    if (visited.has(id)) {
+      return;
+    }
+    visited.add(id);
+    const node = graph.nodes.get(id);
+    if (!node) {
+      return;
+    }
+    for (const dep of node.deps) {
+      visit(dep);
+    }
+    ordered.push(node);
+  }
+
+  visit(entryId);
+  return ordered;
 }

@@ -11,6 +11,7 @@ export default tseslint.config(
       "**/*.d.ts",
       "test/.out/**",
       "test/fixtures/**",
+      "tmp/**",
     ],
   },
   {

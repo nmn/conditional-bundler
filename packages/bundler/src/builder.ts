@@ -1,12 +1,20 @@
 import fs from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import path from "node:path";
 import { WorkerPool } from "./worker-pool.js";
 import { resolveWorkerPath } from "./worker-path.js";
-import { createResolver } from "./resolver.js";
+import {
+  createResolver,
+  type ResolveResult,
+  type Resolver,
+} from "./resolver.js";
 import { buildGraph } from "./graph/build.js";
 import { resolveExportTables } from "./exports/resolve.js";
 import { findCycles } from "./graph/scc.js";
-import { normalizeGraphConditions } from "./graph/conditions.js";
+import {
+  normalizeGraphConditions,
+  resolveEntryConditions,
+} from "./graph/conditions.js";
 import { applyReplacements } from "./linker/rewriter.js";
 import {
   emitConditionalStart,
@@ -18,7 +26,12 @@ import { stripImportStatements } from "./linker/strip-imports.js";
 import { concatParts } from "./concat.js";
 import { runTransformModule, runTransformModuleGraph } from "./plugins/run.js";
 import type { BundlerConfig, EntrySpec } from "./config.js";
-import { readPkgSafe, findPkgRoot, contentHashShort } from "@bundler/shared";
+import {
+  readPkgSafe,
+  findPkgRoot,
+  contentHashShort,
+  type Diagnostic,
+} from "@bundler/shared";
 import type { BundlerPlugin } from "./plugins/types.js";
 import type { ModuleGraph } from "./graph/build.js";
 import type {
@@ -31,11 +44,13 @@ import type {
 export type BuildResult = {
   bundles: Array<{ envId: string; entryId: string; fileName: string }>;
   manifest: Record<string, unknown>;
+  diagnostics: Diagnostic[];
 };
 
 type DynamicImportRef = {
   hashKey: string;
   source: string;
+  request?: string;
   fromId: string;
 };
 
@@ -45,153 +60,53 @@ type BundlePlan = {
   fileName: string;
   parts: string[];
   dynamicImports: DynamicImportRef[];
-  preserveExports: boolean;
+  diagnostics: Diagnostic[];
+};
+
+type WorkerTransformResponse = {
+  irHeader: IRHeader;
+};
+
+type DynamicEntryDiscovery = ResolveResult & {
+  envId: string;
+};
+
+type ModuleCollection = {
+  headers: IRHeader[];
+  dynamicEntries: EntrySpec[];
+  resolvedMap: Map<string, string>;
 };
 
 export async function buildProject(
   config: BundlerConfig,
   plugins: BundlerPlugin[],
 ): Promise<BuildResult> {
-  const cacheDir = path.resolve(
-    config.cacheDir ?? "node_modules/.bundler-cache",
-  );
+  const cacheDir = path.resolve(config.cacheDir ?? path.join("tmp", ".bundler-cache"));
+  const explicitEntries = collectEntries(config.entries);
+  const envs = Object.keys(config.envs);
   const pool = new WorkerPool({
     workerPath: resolveWorkerPath(),
-    size: config.maxWorkers,
+    size: resolveWorkerCount(config.maxWorkers),
   });
   const cleanup = async () => {
     await pool.close();
   };
   const resolver = createResolver();
 
-  const envs = Object.keys(config.envs);
-  const headers: IRHeader[] = [];
-  const seen = new Set<string>();
-  const entryQueue = collectEntries(config.entries);
-  const entrySet = new Set(entryQueue.map((entry) => entry.path));
-  const dynamicEntries: EntrySpec[] = [];
-  const resolvedMap = new Map<string, string>();
-
   try {
-    while (entryQueue.length > 0) {
-      const entry = entryQueue.shift();
-      if (!entry || seen.has(entry.path)) {
-        continue;
-      }
-      seen.add(entry.path);
-      const code = await fs.readFile(entry.path, "utf8");
-      const pkgRoot = findPkgRoot(entry.path) ?? path.dirname(entry.path);
-      const pkg = readPkgSafe(pkgRoot);
-      const pluginResult = await runTransformModule(plugins, {
-        code,
-        realPath: entry.path,
-        pkg,
-        syntax: {
-          jsx: entry.path.endsWith(".jsx") || entry.path.endsWith(".tsx"),
-          ts: entry.path.endsWith(".ts") || entry.path.endsWith(".tsx"),
-        },
-        envs,
-      });
-      if (pluginResult && (pluginResult as { skipCore?: boolean }).skipCore) {
-        throw new Error("Custom transform cannot skip core analysis in v1.");
-      }
-      const multiEnvCode =
-        pluginResult && "codeByEnv" in pluginResult
-          ? pluginResult.codeByEnv
-          : undefined;
-      const fallbackCode =
-        pluginResult && "code" in pluginResult ? pluginResult.code : code;
-      const response = await pool.run({
-        realPath: entry.path,
-        code: fallbackCode,
-        pkg,
-        envs,
-        cacheDir,
-        syntax: {
-          jsx: entry.path.endsWith(".jsx") || entry.path.endsWith(".tsx"),
-          ts: entry.path.endsWith(".ts") || entry.path.endsWith(".tsx"),
-        },
-        codeByEnv: multiEnvCode,
-      });
-      const irHeader = (response as { irHeader: IRHeader }).irHeader;
-      headers.push(irHeader);
+    await fs.mkdir(cacheDir, { recursive: true });
+    const { headers, dynamicEntries, resolvedMap } = await collectTransformedModules(
+      explicitEntries,
+      envs,
+      cacheDir,
+      plugins,
+      pool,
+      resolver,
+    );
 
-      if (irHeader.flags.hasTopLevelAwait) {
-        throw new Error(
-          `E_TLA: Top-level 'await' is not supported (v1). at ${entry.path}`,
-        );
-      }
-
-      for (const dynamic of irHeader.dynamicImports) {
-        const resolved = resolveRelative(entry.path, dynamic.source);
-        if (!entrySet.has(resolved)) {
-          const dyn = { id: dynamic.hashKey, path: resolved };
-          entryQueue.push(dyn);
-          dynamicEntries.push(dyn);
-          entrySet.add(resolved);
-        }
-      }
-
-      for (const importEntry of irHeader.imports) {
-        if (importEntry.kind === "type") {
-          continue;
-        }
-        for (const envId of envs) {
-          const resolved = await resolver(
-            entry.path,
-            importEntry.source,
-            envId,
-          );
-          resolvedMap.set(resolved.id, resolved.resolvedPath);
-          if (!entrySet.has(resolved.resolvedPath)) {
-            const next = { id: resolved.id, path: resolved.resolvedPath };
-            entryQueue.push(next);
-            entrySet.add(resolved.resolvedPath);
-          }
-        }
-      }
-
-      for (const conditionalImport of irHeader.conditionalImports) {
-        if (!conditionalImport.elseSource) {
-          continue;
-        }
-        for (const envId of envs) {
-          const resolved = await resolver(
-            entry.path,
-            conditionalImport.elseSource,
-            envId,
-          );
-          resolvedMap.set(resolved.id, resolved.resolvedPath);
-          if (!entrySet.has(resolved.resolvedPath)) {
-            const next = { id: resolved.id, path: resolved.resolvedPath };
-            entryQueue.push(next);
-            entrySet.add(resolved.resolvedPath);
-          }
-        }
-      }
-
-      for (const reexport of [
-        ...irHeader.exportStars,
-        ...irHeader.reexportsNamed,
-      ]) {
-        for (const envId of envs) {
-          const resolved = await resolver(entry.path, reexport.source, envId);
-          resolvedMap.set(resolved.id, resolved.resolvedPath);
-          if (!entrySet.has(resolved.resolvedPath)) {
-            const next = { id: resolved.id, path: resolved.resolvedPath };
-            entryQueue.push(next);
-            entrySet.add(resolved.resolvedPath);
-          }
-        }
-      }
-    }
-
-    const graphs: ModuleGraph[] = [];
-    for (const envId of envs) {
-      const graph = await buildGraph({ envId, headers, resolver });
-      graphs.push(graph);
-    }
-
+    const graphs = await Promise.all(
+      envs.map((envId) => buildGraph({ envId, headers, resolver })),
+    );
     const transformedGraphs = await runTransformModuleGraph(plugins, graphs);
 
     for (const graph of transformedGraphs) {
@@ -207,10 +122,7 @@ export async function buildProject(
 
     const bundlePlans: BundlePlan[] = [];
     for (const graph of transformedGraphs) {
-      const entries = pickEntriesForEnv(
-        collectEntries(config.entries),
-        graph.envId,
-      );
+      const entries = pickEntriesForEnv(explicitEntries, graph.envId);
       for (const entry of entries) {
         bundlePlans.push(
           await createBundlePlan(graph, entry.path, config, {
@@ -218,6 +130,7 @@ export async function buildProject(
           }),
         );
       }
+
       const dynamicForEnv = dynamicEntries.filter(
         (entry) => entry.envs?.includes(graph.envId) || !entry.envs,
       );
@@ -239,6 +152,7 @@ export async function buildProject(
       bundleMap.set(resolved, plan.fileName);
     }
 
+    await fs.mkdir(config.outputs.outDir, { recursive: true });
     const bundles: Array<{ envId: string; entryId: string; fileName: string }> =
       [];
     for (const plan of bundlePlans) {
@@ -256,7 +170,6 @@ export async function buildProject(
       const patchedBundle = concatParts([header, ...plan.parts]);
 
       const outputPath = path.join(config.outputs.outDir, plan.fileName);
-      await fs.mkdir(config.outputs.outDir, { recursive: true });
       await fs.writeFile(outputPath, patchedBundle, "utf8");
       bundles.push({
         envId: plan.envId,
@@ -265,7 +178,13 @@ export async function buildProject(
       });
     }
 
-    return { bundles, manifest: {} };
+    return {
+      bundles,
+      manifest: {},
+      diagnostics: dedupeDiagnostics(
+        bundlePlans.flatMap((plan) => plan.diagnostics),
+      ),
+    };
   } finally {
     await cleanup();
   }
@@ -290,6 +209,7 @@ async function createBundlePlan(
     throw new Error(`Entry not found in graph: ${entryPath}`);
   }
 
+  const { conditions, diagnostics } = resolveEntryConditions(graph, entryPath);
   const parts: string[] = [];
   const dynamicImports: DynamicImportRef[] = [];
 
@@ -325,14 +245,9 @@ async function createBundlePlan(
       processed = stripImportStatements(processed, node.irHeader.exportRanges);
     }
 
-    const condition = node.condition;
+    const condition = conditions.get(node.id);
     if (condition) {
       parts.push(emitConditionalStart(condition));
-    }
-
-    const conditionalBindings = buildConditionalBindings(graph, node);
-    for (const binding of conditionalBindings) {
-      parts.push(binding);
     }
 
     parts.push(processed);
@@ -349,6 +264,7 @@ async function createBundlePlan(
       dynamicImports.push({
         hashKey: dyn.hashKey,
         source: dyn.source,
+        request: dyn.request,
         fromId: node.id,
       });
     }
@@ -381,7 +297,211 @@ async function createBundlePlan(
     fileName,
     parts,
     dynamicImports,
-    preserveExports: options.preserveExports,
+    diagnostics,
+  };
+}
+
+async function collectTransformedModules(
+  entries: EntrySpec[],
+  envs: string[],
+  cacheDir: string,
+  plugins: BundlerPlugin[],
+  pool: WorkerPool,
+  resolver: Resolver,
+): Promise<ModuleCollection> {
+  const headers = new Map<string, IRHeader>();
+  const resolvedMap = new Map<string, string>();
+  const scheduled = new Set<string>();
+  const dynamicEntryEnvs = new Map<string, Set<string>>();
+  const inFlight = new Set<Promise<void>>();
+
+  const schedule = (modulePath: string) => {
+    if (scheduled.has(modulePath)) {
+      return;
+    }
+    scheduled.add(modulePath);
+    const task = transformModule(
+      modulePath,
+      envs,
+      cacheDir,
+      plugins,
+      pool,
+      resolver,
+      headers,
+      resolvedMap,
+      dynamicEntryEnvs,
+      schedule,
+    ).finally(() => {
+      inFlight.delete(task);
+    });
+    inFlight.add(task);
+  };
+
+  for (const entry of entries) {
+    schedule(entry.path);
+  }
+
+  while (inFlight.size > 0) {
+    await Promise.race(inFlight);
+  }
+
+  return {
+    headers: Array.from(headers.values()),
+    dynamicEntries: Array.from(dynamicEntryEnvs.entries()).map(([entryPath, envSet]) => ({
+      id: entryPath,
+      path: entryPath,
+      envs: Array.from(envSet),
+    })),
+    resolvedMap,
+  };
+}
+
+async function transformModule(
+  modulePath: string,
+  envs: string[],
+  cacheDir: string,
+  plugins: BundlerPlugin[],
+  pool: WorkerPool,
+  resolver: Resolver,
+  headers: Map<string, IRHeader>,
+  resolvedMap: Map<string, string>,
+  dynamicEntryEnvs: Map<string, Set<string>>,
+  schedule: (modulePath: string) => void,
+): Promise<void> {
+  const code = await fs.readFile(modulePath, "utf8");
+  const pkgRoot = findPkgRoot(modulePath) ?? path.dirname(modulePath);
+  const pkg = readPkgSafe(pkgRoot);
+  const syntax = {
+    jsx: modulePath.endsWith(".jsx") || modulePath.endsWith(".tsx"),
+    ts: modulePath.endsWith(".ts") || modulePath.endsWith(".tsx"),
+  };
+  const pluginResult = await runTransformModule(plugins, {
+    code,
+    realPath: modulePath,
+    pkg,
+    syntax,
+    envs,
+  });
+  if (pluginResult && (pluginResult as { skipCore?: boolean }).skipCore) {
+    throw new Error("Custom transform cannot skip core analysis in v1.");
+  }
+
+  const multiEnvCode =
+    pluginResult && "codeByEnv" in pluginResult
+      ? pluginResult.codeByEnv
+      : undefined;
+  const fallbackCode =
+    pluginResult && "code" in pluginResult ? pluginResult.code : code;
+  const response = (await pool.run({
+    realPath: modulePath,
+    code: fallbackCode,
+    pkg,
+    envs,
+    cacheDir,
+    syntax,
+    codeByEnv: multiEnvCode,
+  })) as WorkerTransformResponse;
+  const irHeader = response.irHeader;
+  headers.set(irHeader.id, irHeader);
+
+  if (irHeader.flags.hasTopLevelAwait) {
+    throw new Error(
+      `E_TLA: Top-level 'await' is not supported (v1). at ${modulePath}`,
+    );
+  }
+
+  const { dependencies, dynamicEntries } = await discoverModulesFromHeader(
+    irHeader,
+    envs,
+    resolver,
+  );
+
+  for (const resolved of dependencies) {
+    resolvedMap.set(resolved.id, resolved.resolvedPath);
+    schedule(resolved.resolvedPath);
+  }
+
+  for (const dynamicEntry of dynamicEntries) {
+    resolvedMap.set(dynamicEntry.id, dynamicEntry.resolvedPath);
+    const envSet = dynamicEntryEnvs.get(dynamicEntry.resolvedPath) ?? new Set<string>();
+    envSet.add(dynamicEntry.envId);
+    dynamicEntryEnvs.set(dynamicEntry.resolvedPath, envSet);
+    schedule(dynamicEntry.resolvedPath);
+  }
+}
+
+async function discoverModulesFromHeader(
+  irHeader: IRHeader,
+  envs: string[],
+  resolver: Resolver,
+): Promise<{
+  dependencies: ResolveResult[];
+  dynamicEntries: DynamicEntryDiscovery[];
+}> {
+  const dependencyPromises: Array<Promise<ResolveResult>> = [];
+  const dynamicPromises: Array<Promise<DynamicEntryDiscovery>> = [];
+
+  for (const importEntry of irHeader.imports) {
+    if (importEntry.kind === "type") {
+      continue;
+    }
+    for (const envId of envs) {
+      dependencyPromises.push(
+        resolver(
+          irHeader.id,
+          importEntry.request ?? importEntry.source,
+          envId,
+        ),
+      );
+    }
+  }
+
+  for (const conditionalImport of irHeader.conditionalImports) {
+    if (!conditionalImport.elseSource) {
+      continue;
+    }
+    for (const envId of envs) {
+      dependencyPromises.push(
+        resolver(
+          irHeader.id,
+          conditionalImport.elseRequest ?? conditionalImport.elseSource,
+          envId,
+        ),
+      );
+    }
+  }
+
+  for (const reexport of [...irHeader.exportStars, ...irHeader.reexportsNamed]) {
+    for (const envId of envs) {
+      dependencyPromises.push(
+        resolver(irHeader.id, reexport.request ?? reexport.source, envId),
+      );
+    }
+  }
+
+  for (const dynamicImport of irHeader.dynamicImports) {
+    for (const envId of envs) {
+      dynamicPromises.push(
+        resolver(
+          irHeader.id,
+          dynamicImport.request ?? dynamicImport.source,
+          envId,
+        ).then((resolved) => ({
+          ...resolved,
+          envId,
+        })),
+      );
+    }
+  }
+
+  const [dependencies, dynamicEntries] = await Promise.all([
+    Promise.all(dependencyPromises),
+    Promise.all(dynamicPromises),
+  ]);
+
+  return {
+    dependencies: dedupeResolved(dependencies),
+    dynamicEntries: dedupeDynamicEntries(dynamicEntries),
   };
 }
 
@@ -451,62 +571,49 @@ function resolveDynamicImports(
 ): Record<string, string> {
   const mapping: Record<string, string> = {};
   for (const dyn of imports) {
-    const resolved = resolveRelative(dyn.fromId, dyn.source);
+    const resolved = resolveRelative(dyn.fromId, dyn.request ?? dyn.source);
     mapping[dyn.hashKey] = bundleMap.get(resolved) ?? "";
   }
   return mapping;
 }
 
-function buildConditionalBindings(
-  graph: ModuleGraph,
-  node: ModuleNode,
-): string[] {
-  const bindings: string[] = [];
-  for (const importEntry of node.irHeader.imports) {
-    if (!importEntry.condition) {
-      continue;
-    }
-    const sourceId = node.resolvedSources.get(importEntry.source);
-    const sourceNode = sourceId ? graph.nodes.get(sourceId) : undefined;
-    if (!sourceNode) {
-      continue;
-    }
-    const conditionExpr = importEntry.condition;
-    for (const spec of importEntry.specifiers) {
-      const localName = `${node.prefix}_${spec.local}`;
-      const importName =
-        spec.imported === "default" ? "default" : spec.imported;
-      const primaryName = `${sourceNode.prefix}_${importName}`;
-      const thenBlock =
-        emitConditionalStart(conditionExpr) +
-        "\n" +
-        `const ${localName} = ${primaryName};` +
-        "\n" +
-        emitConditionalEnd();
-      bindings.push(thenBlock);
-
-      const elseSource = node.irHeader.conditionalImports.find(
-        (item) => item.source === importEntry.source,
-      )?.elseSource;
-      const elseCondition = { NOT: conditionExpr };
-      let fallback = "undefined";
-      if (elseSource) {
-        const elseId = node.resolvedSources.get(elseSource);
-        const elseNode = elseId ? graph.nodes.get(elseId) : undefined;
-        if (elseNode) {
-          const elseImportName =
-            spec.imported === "default" ? "default" : spec.imported;
-          fallback = `${elseNode.prefix}_${elseImportName}`;
-        }
-      }
-      const elseBlock =
-        emitConditionalStart(elseCondition) +
-        "\n" +
-        `const ${localName} = ${fallback};` +
-        "\n" +
-        emitConditionalEnd();
-      bindings.push(elseBlock);
-    }
+function dedupeResolved(results: ResolveResult[]): ResolveResult[] {
+  const deduped = new Map<string, ResolveResult>();
+  for (const result of results) {
+    deduped.set(result.resolvedPath, result);
   }
-  return bindings;
+  return Array.from(deduped.values());
+}
+
+function dedupeDynamicEntries(
+  results: DynamicEntryDiscovery[],
+): DynamicEntryDiscovery[] {
+  const deduped = new Map<string, DynamicEntryDiscovery>();
+  for (const result of results) {
+    deduped.set(`${result.envId}:${result.resolvedPath}`, result);
+  }
+  return Array.from(deduped.values());
+}
+
+function dedupeDiagnostics(diagnostics: Diagnostic[]): Diagnostic[] {
+  const deduped = new Map<string, Diagnostic>();
+  for (const diagnostic of diagnostics) {
+    deduped.set(
+      JSON.stringify([
+        diagnostic.code,
+        diagnostic.message,
+        diagnostic.file,
+        diagnostic.line,
+        diagnostic.column,
+        diagnostic.envId,
+      ]),
+      diagnostic,
+    );
+  }
+  return Array.from(deduped.values());
+}
+
+function resolveWorkerCount(configured: number): number {
+  const cpuCount = Math.max(1, availableParallelism());
+  return Math.max(1, Math.min(configured, cpuCount));
 }

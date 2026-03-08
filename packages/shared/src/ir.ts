@@ -8,6 +8,7 @@ export type ImportSpecifier = {
 
 export type ImportEntry = {
   source: string;
+  request?: string;
   kind: "value" | "type" | "side-effect";
   isNamespace: boolean;
   isDefault: boolean;
@@ -25,6 +26,7 @@ export type ExportLocal = {
 
 export type ReexportNamed = {
   source: string;
+  request?: string;
   imported: string;
   exported: string;
   isNamespace?: boolean;
@@ -32,18 +34,22 @@ export type ReexportNamed = {
 
 export type ExportStar = {
   source: string;
+  request?: string;
 };
 
 export type DynamicImport = {
   source: string;
+  request?: string;
   hashKey: string;
   moduleId?: string;
 };
 
 export type ConditionalImport = {
   source: string;
+  request?: string;
   condition: ConditionExpr;
   elseSource?: string;
+  elseRequest?: string;
 };
 
 export type FileFlags = {
@@ -105,6 +111,7 @@ export type ModuleNode = {
   id: string;
   prefix: string;
   deps: string[];
+  unconditionalDeps: Set<string>;
   conditionalDeps: Map<string, ConditionExpr>;
   resolvedSources: Map<string, string>;
   condition?: ConditionExpr;

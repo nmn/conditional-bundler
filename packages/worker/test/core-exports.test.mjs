@@ -110,7 +110,8 @@ test("records export stars and reexports", async () => {
   "exportRanges": [],
   "exportStars": [
     {
-      "source": "./dep.js",
+      "request": "./dep.js",
+      "source": "src/dep.js",
     },
   ],
   "exportsLocal": [
@@ -131,7 +132,8 @@ test("records export stars and reexports", async () => {
     {
       "exported": "bar",
       "imported": "foo",
-      "source": "./dep.js",
+      "request": "./dep.js",
+      "source": "src/dep.js",
     },
   ],
 }

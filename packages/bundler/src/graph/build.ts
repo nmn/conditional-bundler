@@ -21,6 +21,7 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
       id: header.id,
       prefix: header.prefix,
       deps: [],
+      unconditionalDeps: new Set<string>(),
       conditionalDeps: new Map<string, ConditionExpr>(),
       resolvedSources: new Map<string, string>(),
       irHeader: header,
@@ -34,7 +35,7 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
       }
       const resolved = await input.resolver(
         node.irHeader.id,
-        importEntry.source,
+        importEntry.request ?? importEntry.source,
         input.envId,
       );
       node.deps.push(resolved.id);
@@ -47,14 +48,14 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
             ? combineOr([existing, importEntry.condition])
             : importEntry.condition,
         );
-
-        const elseSource = node.irHeader.conditionalImports.find(
+        const conditionalImport = node.irHeader.conditionalImports.find(
           (item) => item.source === importEntry.source,
-        )?.elseSource;
+        );
+        const elseSource = conditionalImport?.elseSource;
         if (elseSource) {
           const elseResolved = await input.resolver(
             node.irHeader.id,
-            elseSource,
+            conditionalImport?.elseRequest ?? elseSource,
             input.envId,
           );
           node.deps.push(elseResolved.id);
@@ -68,24 +69,28 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
               : elseCondition,
           );
         }
+      } else {
+        node.unconditionalDeps.add(resolved.id);
       }
     }
     for (const star of node.irHeader.exportStars) {
       const resolved = await input.resolver(
         node.irHeader.id,
-        star.source,
+        star.request ?? star.source,
         input.envId,
       );
       node.deps.push(resolved.id);
+      node.unconditionalDeps.add(resolved.id);
       node.resolvedSources.set(star.source, resolved.id);
     }
     for (const reexport of node.irHeader.reexportsNamed) {
       const resolved = await input.resolver(
         node.irHeader.id,
-        reexport.source,
+        reexport.request ?? reexport.source,
         input.envId,
       );
       node.deps.push(resolved.id);
+      node.unconditionalDeps.add(resolved.id);
       node.resolvedSources.set(reexport.source, resolved.id);
     }
   }

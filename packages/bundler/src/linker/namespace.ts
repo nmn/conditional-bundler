@@ -9,9 +9,6 @@ export function emitNamespaceObject(node: ModuleNode): string {
     `Object.defineProperty(${nsVar}, Symbol.toStringTag, { value: "Module" });`,
   );
   for (const name of entries) {
-    if (name === "default") {
-      continue;
-    }
     lines.push(
       `Object.defineProperty(${nsVar}, "${name}", { enumerable: true, get: () => ${node.prefix}_${name} });`,
     );

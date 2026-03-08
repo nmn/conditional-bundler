@@ -3,6 +3,7 @@
 ## Transform
 
 - Each module is parsed with Babel and transformed once per file.
+- Worker results are cached on disk in `tmp/.bundler-cache` and reused while inputs are unchanged.
 - Top-level bindings are renamed with a deterministic prefix.
 - Import use-sites are rewritten to provider symbols.
 - Dynamic imports are rewritten to `FILEHASH__IMPORT` constants.

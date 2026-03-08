@@ -35,7 +35,7 @@ export const defaultConfig: BundlerConfig = {
     outDir: "dist",
     fileName: "bundle.[env].[hash].js",
   },
-  cacheDir: "node_modules/.bundler-cache",
+  cacheDir: "tmp/.bundler-cache",
   maxWorkers: 4,
   diagnostics: "human",
 };

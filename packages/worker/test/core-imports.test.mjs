@@ -35,10 +35,7 @@ test("records import use ranges", async () => {
   const result = await transformSnapshot(
     "import { foo } from './dep.js'; const value = foo + 1;",
   );
-  expect(result.code).toMatchInlineSnapshot(`
-"
-const ji19ybwd_value = a4tfu7r6i_foo + 1;"
-`);
+  expect(result.code).toBe("const ji19ybwd_value = a4tfu7r6i_foo + 1;");
   expect(result.meta).toMatchInlineSnapshot(`
 {
   "conditionalImports": [],
@@ -60,7 +57,8 @@ const ji19ybwd_value = a4tfu7r6i_foo + 1;"
       "isDefault": false,
       "isNamespace": false,
       "kind": "value",
-      "source": "./dep.js",
+      "request": "./dep.js",
+      "source": "src/dep.js",
       "specifiers": [
         {
           "imported": "foo",
@@ -80,7 +78,12 @@ test("captures conditional import attributes", async () => {
     "import { foo } from './dep.js' with { condition: 'COND_A' }; export const value = foo;",
   );
   expect(result.code).toMatchInlineSnapshot(`
-"
+"/////##CONDITION_START##"COND_A"
+const ji19ybwd_foo = a4tfu7r6i_foo;
+/////##CONDITION_END##
+/////##CONDITION_START##{"NOT":"COND_A"}
+const ji19ybwd_foo = undefined;
+/////##CONDITION_END##
 const ji19ybwd_value = ji19ybwd_foo;"
 `);
   expect(result.meta).toMatchInlineSnapshot(`
@@ -88,8 +91,10 @@ const ji19ybwd_value = ji19ybwd_foo;"
   "conditionalImports": [
     {
       "condition": "COND_A",
+      "elseRequest": undefined,
       "elseSource": undefined,
-      "source": "./dep.js",
+      "request": "./dep.js",
+      "source": "src/dep.js",
     },
   ],
   "discoveredEntrypoints": [],
@@ -116,7 +121,8 @@ const ji19ybwd_value = ji19ybwd_foo;"
       "isDefault": false,
       "isNamespace": false,
       "kind": "value",
-      "source": "./dep.js",
+      "request": "./dep.js",
+      "source": "src/dep.js",
       "specifiers": [
         {
           "imported": "foo",
@@ -136,7 +142,12 @@ test("handles conditional else attributes", async () => {
     "import { foo } from './dep.js' with { condition: 'COND_A', else: './alt.js' }; export const value = foo;",
   );
   expect(result.code).toMatchInlineSnapshot(`
-"
+"/////##CONDITION_START##"COND_A"
+const ji19ybwd_foo = a4tfu7r6i_foo;
+/////##CONDITION_END##
+/////##CONDITION_START##{"NOT":"COND_A"}
+const ji19ybwd_foo = a594tohci_foo;
+/////##CONDITION_END##
 const ji19ybwd_value = ji19ybwd_foo;"
 `);
   expect(result.meta).toMatchInlineSnapshot(`
@@ -144,8 +155,10 @@ const ji19ybwd_value = ji19ybwd_foo;"
   "conditionalImports": [
     {
       "condition": "COND_A",
-      "elseSource": "./alt.js",
-      "source": "./dep.js",
+      "elseRequest": "./alt.js",
+      "elseSource": "src/alt.js",
+      "request": "./dep.js",
+      "source": "src/dep.js",
     },
   ],
   "discoveredEntrypoints": [],
@@ -172,7 +185,8 @@ const ji19ybwd_value = ji19ybwd_foo;"
       "isDefault": false,
       "isNamespace": false,
       "kind": "value",
-      "source": "./dep.js",
+      "request": "./dep.js",
+      "source": "src/dep.js",
       "specifiers": [
         {
           "imported": "foo",
@@ -191,10 +205,7 @@ test("marks namespace dynamic usage", async () => {
   const result = await transformSnapshot(
     "import * as ns from './dep.js'; const value = ns['foo'];",
   );
-  expect(result.code).toMatchInlineSnapshot(`
-"
-const ji19ybwd_value = __NS__a4tfu7r6i['foo'];"
-`);
+  expect(result.code).toBe("const ji19ybwd_value = __NS__a4tfu7r6i['foo'];");
   expect(result.meta).toMatchInlineSnapshot(`
 {
   "conditionalImports": [],
@@ -217,7 +228,8 @@ const ji19ybwd_value = __NS__a4tfu7r6i['foo'];"
       "isNamespace": true,
       "kind": "value",
       "namespaceUsage": "dynamic",
-      "source": "./dep.js",
+      "request": "./dep.js",
+      "source": "src/dep.js",
       "specifiers": [
         {
           "imported": "*",
@@ -236,10 +248,9 @@ test("captures namespace import static usage", async () => {
   const result = await transformSnapshot(
     "import * as ns from './dep.js'; const value = ns.foo + ns.bar;",
   );
-  expect(result.code).toMatchInlineSnapshot(`
-"
-const ji19ybwd_value = a4tfu7r6i_foo + a4tfu7r6i_bar;"
-`);
+  expect(result.code).toBe(
+    "const ji19ybwd_value = a4tfu7r6i_foo + a4tfu7r6i_bar;",
+  );
   expect(result.meta).toMatchInlineSnapshot(`
 {
   "conditionalImports": [],
@@ -262,7 +273,8 @@ const ji19ybwd_value = a4tfu7r6i_foo + a4tfu7r6i_bar;"
       "isNamespace": true,
       "kind": "value",
       "namespaceUsage": "static",
-      "source": "./dep.js",
+      "request": "./dep.js",
+      "source": "src/dep.js",
       "specifiers": [
         {
           "imported": "foo",
