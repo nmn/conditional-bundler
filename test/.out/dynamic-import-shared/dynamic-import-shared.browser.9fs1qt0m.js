@@ -1,10 +1,4 @@
-const __IMPORT_s5ot8viw = () => import("./dynamic-import-shared.browser.v345apxf.js").then((mod) => {
-  const ns = Object.create(null);
-  Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });
-  Object.defineProperty(ns, "shared", { enumerable: true, get: () => mod["s5ot8viw_shared"] });
-  Object.preventExtensions(ns);
-  return ns;
-});
+const __IMPORT_s5ot8viw = () => import("./dynamic-import-shared.browser.v345apxf.js").then((mod) => Object.freeze({ "shared": mod["s5ot8viw_shared"] }));
 async function pjxrtv5k_loadA() {
   return __IMPORT_s5ot8viw();
 }

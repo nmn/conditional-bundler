@@ -105,13 +105,7 @@ test("bundles complex dynamic imports", async () => {
   expect(snapshot).toMatchInlineSnapshot(`
 {
   "name": "complex-dynamic",
-  "output": "const __IMPORT_a7s65xr38 = () => import("./complex-dynamic.browser.3nusib50.js").then((mod) => {
-  const ns = Object.create(null);
-  Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });
-  Object.defineProperty(ns, "value", { enumerable: true, get: () => mod["a7s65xr38_value"] });
-  Object.preventExtensions(ns);
-  return ns;
-});
+  "output": "const __IMPORT_a7s65xr38 = () => import("./complex-dynamic.browser.3nusib50.js").then((mod) => Object.freeze({ "value": mod["a7s65xr38_value"] }));
 async function ia6xmlu2_load() {
   const mod = await __IMPORT_a7s65xr38();
   return mod.value;
@@ -143,13 +137,7 @@ test("bundles a hybrid graph with conditionals, barrels, and dynamic namespace u
 {
   "name": "hybrid",
   "outputs": {
-    "hybrid.browser.gfdy0l3l.js": "const __IMPORT_kh774klk = () => import("./hybrid.browser.sxouosn9.js").then((mod) => {
-  const ns = Object.create(null);
-  Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });
-  Object.defineProperty(ns, "default", { enumerable: true, get: () => mod["kh774klk_default"] });
-  Object.preventExtensions(ns);
-  return ns;
-});
+    "hybrid.browser.gfdy0l3l.js": "const __IMPORT_kh774klk = () => import("./hybrid.browser.sxouosn9.js").then((mod) => Object.freeze({ "default": mod["kh774klk_default"] }));
 const kbgjp98n_label = "base";
 const a7c4iu3zz_label = kbgjp98n_label;
 /////##CONDITION_START##"FLAG_A"

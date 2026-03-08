@@ -1,10 +1,4 @@
-const __IMPORT_kh774klk = () => import("./hybrid.browser.sxouosn9.js").then((mod) => {
-  const ns = Object.create(null);
-  Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });
-  Object.defineProperty(ns, "default", { enumerable: true, get: () => mod["kh774klk_default"] });
-  Object.preventExtensions(ns);
-  return ns;
-});
+const __IMPORT_kh774klk = () => import("./hybrid.browser.sxouosn9.js").then((mod) => Object.freeze({ "default": mod["kh774klk_default"] }));
 const kbgjp98n_label = "base";
 const a7c4iu3zz_label = kbgjp98n_label;
 /////##CONDITION_START##"FLAG_A"

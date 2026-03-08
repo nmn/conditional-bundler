@@ -35,19 +35,16 @@ export function emitDynamicImportConstants(
       continue;
     }
 
+    const exportMappings = dynamicImport.exports
+      .map(
+        (exportEntry) =>
+          `${JSON.stringify(exportEntry.exported)}: mod[${JSON.stringify(exportEntry.symbol)}]`,
+      )
+      .join(", ");
+
     lines.push(
-      `const ${dynamicImport.hashKey} = () => import(${JSON.stringify(specifier)}).then((mod) => {`,
-      "  const ns = Object.create(null);",
-      '  Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });',
+      `const ${dynamicImport.hashKey} = () => import(${JSON.stringify(specifier)}).then((mod) => Object.freeze({ ${exportMappings} }));`,
     );
-
-    for (const exportEntry of dynamicImport.exports) {
-      lines.push(
-        `  Object.defineProperty(ns, ${JSON.stringify(exportEntry.exported)}, { enumerable: true, get: () => mod[${JSON.stringify(exportEntry.symbol)}] });`,
-      );
-    }
-
-    lines.push("  Object.preventExtensions(ns);", "  return ns;", "});");
   }
 
   return lines.join("\n");

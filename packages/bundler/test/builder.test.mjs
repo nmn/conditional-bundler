@@ -176,13 +176,7 @@ test("rewrites dynamic import to constant", async () => {
   expect(snapshot).toMatchInlineSnapshot(`
 {
   "name": "dynamic-import",
-  "output": "const __IMPORT_ra8btrgq = () => import("./dynamic-import.browser.sp6pcy52.js").then((mod) => {
-  const ns = Object.create(null);
-  Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });
-  Object.defineProperty(ns, "foo", { enumerable: true, get: () => mod["ra8btrgq_foo"] });
-  Object.preventExtensions(ns);
-  return ns;
-});
+  "output": "const __IMPORT_ra8btrgq = () => import("./dynamic-import.browser.sp6pcy52.js").then((mod) => Object.freeze({ "foo": mod["ra8btrgq_foo"] }));
 async function ogy9gk4r_loadFoo() {
   const mod = await __IMPORT_ra8btrgq();
   return mod.foo;
@@ -197,13 +191,7 @@ test("dedupes dynamic import constants", async () => {
   expect(snapshot).toMatchInlineSnapshot(`
 {
   "name": "dynamic-import-shared",
-  "output": "const __IMPORT_s5ot8viw = () => import("./dynamic-import-shared.browser.v345apxf.js").then((mod) => {
-  const ns = Object.create(null);
-  Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });
-  Object.defineProperty(ns, "shared", { enumerable: true, get: () => mod["s5ot8viw_shared"] });
-  Object.preventExtensions(ns);
-  return ns;
-});
+  "output": "const __IMPORT_s5ot8viw = () => import("./dynamic-import-shared.browser.v345apxf.js").then((mod) => Object.freeze({ "shared": mod["s5ot8viw_shared"] }));
 async function pjxrtv5k_loadA() {
   return __IMPORT_s5ot8viw();
 }
