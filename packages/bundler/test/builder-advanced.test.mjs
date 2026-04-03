@@ -65,10 +65,12 @@ const a11gvr3t_shared = 2;
 const juo8zpng_foo = 10;
 const a60qcqth9_thing = "ok";
 const a60qcqth9_default = a60qcqth9_thing;
+const rgvw7xif_local = 1;
 const rgvw7xif_foo = juo8zpng_foo;
 const rgvw7xif_Thing = a60qcqth9_default;
-const rgvw7xif_local = 1;
-export { rgvw7xif_foo as foo, rgvw7xif_Thing as Thing, rgvw7xif_local as local, a11gvr3t_star as star, a11gvr3t_shared as shared };",
+const rgvw7xif_star = a11gvr3t_star;
+const rgvw7xif_shared = a11gvr3t_shared;
+export { rgvw7xif_local as local, rgvw7xif_star as star, rgvw7xif_shared as shared, rgvw7xif_foo as foo, rgvw7xif_Thing as Thing };",
 }
 `);
 });
@@ -82,10 +84,10 @@ test("bundles complex conditional imports", async () => {
 /////##CONDITION_START##"COND_A"
 const a7fe542m3_pick = value => \`pick:\${value}\`;
 /////##CONDITION_END##
+const mag3x3is_shared = "shared";
 /////##CONDITION_START##{"NOT":"COND_A"}
 const m1lyft9j_pick = value => \`alt:\${value}\`;
 /////##CONDITION_END##
-const mag3x3is_shared = "shared";
 /////##CONDITION_START##"COND_A"
 const a1wam17ob_pick = a7fe542m3_pick;
 /////##CONDITION_END##
@@ -131,13 +133,45 @@ export { s509r9pf_run as run };",
 `);
 });
 
+test("treeshakes unrelated exports within a single module", async () => {
+  const snapshot = await snapshotFixture("tree-shake-cells");
+  expect(snapshot).toMatchInlineSnapshot(`
+{
+  "name": "tree-shake-cells",
+  "output": "
+function g9pzx5of_helper() {
+  return "used";
+}
+function g9pzx5of_used() {
+  return g9pzx5of_helper();
+}
+const a8vmhxs1s_value = g9pzx5of_used();
+export { a8vmhxs1s_value as value };",
+}
+`);
+});
+
+test("only includes demanded reexports from a barrel", async () => {
+  const snapshot = await snapshotFixture("barrel-selective");
+  expect(snapshot).toMatchInlineSnapshot(`
+{
+  "name": "barrel-selective",
+  "output": "
+const rlqi3qi7_alpha = 1;
+const r4a3qt0n_alpha = rlqi3qi7_alpha;
+const a1z0h9fqf_value = r4a3qt0n_alpha;
+export { a1z0h9fqf_value as value };",
+}
+`);
+});
+
 test("bundles a hybrid graph with conditionals, barrels, and dynamic namespace usage", async () => {
   const snapshot = await snapshotAllBundles("hybrid");
   expect(snapshot).toMatchInlineSnapshot(`
 {
   "name": "hybrid",
   "outputs": {
-    "hybrid.browser.gfdy0l3l.js": "const __IMPORT_kh774klk = () => import("./hybrid.browser.sxouosn9.js").then((mod) => Object.freeze({ "default": mod["kh774klk_default"] }));
+    "hybrid.browser.gfdy0l3l.js": "const __IMPORT_kh774klk = () => import("./hybrid.browser.n3gd2izo.js").then((mod) => Object.freeze({ "default": mod["kh774klk_default"] }));
 const kbgjp98n_label = "base";
 const a7c4iu3zz_label = kbgjp98n_label;
 /////##CONDITION_START##"FLAG_A"
@@ -157,15 +191,15 @@ async function a54u0cy4f_run(key) {
   return mod.default(\`\${a7c4iu3zz_label}:\${a54u0cy4f_feature}:\${key}\`);
 }
 export { a54u0cy4f_run as run };",
-    "hybrid.browser.sxouosn9.js": "
+    "hybrid.browser.n3gd2izo.js": "
 const o5ufutef_suffix = "tail";
+const __NS__o5ufutef = Object.create(null);
+Object.defineProperty(__NS__o5ufutef, Symbol.toStringTag, { value: "Module" });
+Object.defineProperty(__NS__o5ufutef, "suffix", { enumerable: true, get: () => o5ufutef_suffix });
+Object.preventExtensions(__NS__o5ufutef);
 const kh774klk_default = function kh774klk_finish(input) {
   return \`\${input}:\${__NS__o5ufutef.suffix}:\${__NS__o5ufutef["suffix"]}\`;
 };
-const __NS__kh774klk = Object.create(null);
-Object.defineProperty(__NS__kh774klk, Symbol.toStringTag, { value: "Module" });
-Object.defineProperty(__NS__kh774klk, "default", { enumerable: true, get: () => kh774klk_default });
-Object.preventExtensions(__NS__kh774klk);
 export { o5ufutef_suffix, kh774klk_default };",
   },
 }

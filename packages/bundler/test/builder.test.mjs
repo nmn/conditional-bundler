@@ -49,8 +49,8 @@ test("bundles simple module graph", async () => {
 {
   "name": "simple",
   "output": "
-const k7isotkd_foo = 2;
 globalThis.__SIDE_EFFECT__ = true;
+const k7isotkd_foo = 2;
 const a33jpi1jb_value = k7isotkd_foo + 1;
 export { a33jpi1jb_value as value };",
 }
@@ -145,13 +145,13 @@ test("emits namespace object for namespace imports", async () => {
   "output": "
 const rpl9aoch_answer = 7;
 const rpl9aoch_name = "ns";
+const __NS__rpl9aoch = Object.create(null);
+Object.defineProperty(__NS__rpl9aoch, Symbol.toStringTag, { value: "Module" });
+Object.defineProperty(__NS__rpl9aoch, "answer", { enumerable: true, get: () => rpl9aoch_answer });
+Object.defineProperty(__NS__rpl9aoch, "name", { enumerable: true, get: () => rpl9aoch_name });
+Object.preventExtensions(__NS__rpl9aoch);
 const a5wvqoyh8_value = __NS__rpl9aoch.answer;
 const a5wvqoyh8_dynamic = __NS__rpl9aoch["answer"];
-const __NS__a5wvqoyh8 = Object.create(null);
-Object.defineProperty(__NS__a5wvqoyh8, Symbol.toStringTag, { value: "Module" });
-Object.defineProperty(__NS__a5wvqoyh8, "value", { enumerable: true, get: () => a5wvqoyh8_value });
-Object.defineProperty(__NS__a5wvqoyh8, "dynamic", { enumerable: true, get: () => a5wvqoyh8_dynamic });
-Object.preventExtensions(__NS__a5wvqoyh8);
 export { a5wvqoyh8_value as value, a5wvqoyh8_dynamic as dynamic };",
 }
 `);
@@ -165,8 +165,9 @@ test("handles export star with override", async () => {
   "output": "
 const a8h9vqgv5_value = "a";
 const kzk1bb96_value = "b";
+const d3sn4zje_value = a8h9vqgv5_value;
 const d3sn4zje_bValue = kzk1bb96_value;
-export { d3sn4zje_bValue as bValue, a8h9vqgv5_value as value };",
+export { d3sn4zje_value as value, d3sn4zje_bValue as bValue };",
 }
 `);
 });

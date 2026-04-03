@@ -30,11 +30,13 @@ export type ReexportNamed = {
   imported: string;
   exported: string;
   isNamespace?: boolean;
+  sourceOrder?: number;
 };
 
 export type ExportStar = {
   source: string;
   request?: string;
+  sourceOrder?: number;
 };
 
 export type DynamicImport = {
@@ -42,6 +44,32 @@ export type DynamicImport = {
   request?: string;
   hashKey: string;
   moduleId?: string;
+};
+
+export type CellExternalDep =
+  | {
+      kind: "import";
+      source: string;
+      request?: string;
+      imported: string;
+    }
+  | {
+      kind: "side-effect";
+      source: string;
+      request?: string;
+    };
+
+export type CellRecord = {
+  id: string;
+  fileId: string;
+  sourceOrder: number;
+  kind: "worker" | "conditional" | "generated";
+  code: string;
+  provides: string[];
+  internalDeps: string[];
+  externalDeps: CellExternalDep[];
+  providerDeps?: Provider[];
+  eager: boolean;
 };
 
 export type ConditionalImport = {
@@ -73,6 +101,7 @@ export type FileIR = {
   dynamicImports: DynamicImport[];
   conditionalImports: ConditionalImport[];
   discoveredEntrypoints: string[];
+  cells: CellRecord[];
   importRanges: Array<[number, number]>;
   exportRanges: Array<[number, number]>;
   codeByEnv: Record<string, string>;
@@ -80,7 +109,7 @@ export type FileIR = {
   diagnostics: { errors: string[]; warnings: string[] };
 };
 
-export type IRHeader = Pick<
+export type FileRecord = Pick<
   FileIR,
   | "id"
   | "prefix"
@@ -93,6 +122,7 @@ export type IRHeader = Pick<
   | "dynamicImports"
   | "conditionalImports"
   | "discoveredEntrypoints"
+  | "cells"
   | "importRanges"
   | "exportRanges"
   | "pkg"
@@ -102,8 +132,11 @@ export type IRHeader = Pick<
   mapByEnv: Record<string, string>;
 };
 
+export type IRHeader = FileRecord;
+
 export type Provider = {
   moduleId: string;
+  cellId: string;
   symbol: string;
 };
 
@@ -115,7 +148,8 @@ export type ModuleNode = {
   conditionalDeps: Map<string, ConditionExpr>;
   resolvedSources: Map<string, string>;
   condition?: ConditionExpr;
-  irHeader: IRHeader;
+  irHeader: FileRecord;
+  generatedCells?: CellRecord[];
   exportTable?: Map<string, Provider>;
   ambiguous?: Set<string>;
 };

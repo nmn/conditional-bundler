@@ -14,6 +14,9 @@ import type {
   ReexportNamed,
   DynamicImport,
   ConditionalImport,
+  CellRecord,
+  FileRecord,
+  CellExternalDep,
 } from "@bundler/shared";
 import {
   importConstKey,
@@ -21,6 +24,7 @@ import {
   findPkgRoot,
   readPkgSafe,
   normalizePosixPath,
+  contentHash,
 } from "@bundler/shared";
 
 export type CoreTransformOptions = {
@@ -217,54 +221,33 @@ export function transformWithCore(
       if (path.node.source) {
         const request = path.node.source.value;
         const resolved = resolveImportForHash(input, request);
-        const depPrefix = filePrefix(
-          resolved.pkg.name,
-          resolved.pkg.version,
-          resolved.relPath,
-        );
-        const declarations: t.VariableDeclarator[] = [];
+        const sourceOrder = path.node.start ?? 0;
         for (const spec of path.node.specifiers) {
           if (t.isExportNamespaceSpecifier(spec)) {
             const exported = spec.exported.name;
-            const localName = `${prefix}_${exported}`;
-            const init = t.identifier(`__NS__${depPrefix}`);
-            declarations.push(
-              t.variableDeclarator(t.identifier(localName), init),
-            );
-            exportsLocal.push({ local: exported, exported, kind: "var" });
             reexportsNamed.push({
               source: resolved.relPath,
               request,
               imported: "*",
               exported,
               isNamespace: true,
+              sourceOrder,
             });
           } else if (t.isExportSpecifier(spec)) {
             const imported = t.isIdentifier(spec.local) ? spec.local.name : "";
             const exported = t.isIdentifier(spec.exported)
               ? spec.exported.name
               : "";
-            const localName = `${prefix}_${exported}`;
-            declarations.push(
-              t.variableDeclarator(
-                t.identifier(localName),
-                t.identifier(`${depPrefix}_${imported}`),
-              ),
-            );
-            exportsLocal.push({ local: exported, exported, kind: "var" });
             reexportsNamed.push({
               source: resolved.relPath,
               request,
               imported,
               exported,
+              sourceOrder,
             });
           }
         }
-        if (declarations.length > 0) {
-          path.replaceWith(t.variableDeclaration("const", declarations));
-        } else {
-          path.remove();
-        }
+        path.remove();
         return;
       }
       if (path.node.declaration) {
@@ -310,14 +293,16 @@ export function transformWithCore(
             const localRenamed = renameMap.get(local) ?? local;
             const originalLocal =
               renameReverse.get(localRenamed) ?? localRenamed;
-            exportsLocal.push({ local: originalLocal, exported, kind: "var" });
             if (exported && originalLocal !== exported) {
+              exportsLocal.push({ local: exported, exported, kind: "var" });
               declarations.push(
                 t.variableDeclarator(
                   t.identifier(`${prefix}_${exported}`),
                   t.identifier(localRenamed),
                 ),
               );
+            } else {
+              exportsLocal.push({ local: originalLocal, exported, kind: "var" });
             }
           }
         }
@@ -358,6 +343,7 @@ export function transformWithCore(
       const exported = (
         path.node as t.ExportAllDeclaration & { exported?: t.Identifier }
       ).exported;
+      const sourceOrder = path.node.start ?? 0;
       if (exported && t.isIdentifier(exported)) {
         reexportsNamed.push({
           source: resolved.relPath,
@@ -365,11 +351,12 @@ export function transformWithCore(
           imported: "*",
           exported: exported.name,
           isNamespace: true,
+          sourceOrder,
         });
         path.remove();
         return;
       }
-      exportStars.push({ source: resolved.relPath, request });
+      exportStars.push({ source: resolved.relPath, request, sourceOrder });
       path.remove();
     },
   });
@@ -397,23 +384,61 @@ export function transformWithCore(
   }));
 
   let transformedCode = output.code;
-  const conditionalBindings = buildConditionalBindings(
+  const conditionalBindingCells = buildConditionalBindingCells(
     importMeta.imports,
     importMeta.conditionalImports,
     input,
     prefix,
   );
-  if (conditionalBindings.length > 0) {
-    transformedCode = `${conditionalBindings.join("\n")}\n${transformedCode}`;
+  if (conditionalBindingCells.length > 0) {
+    transformedCode = `${conditionalBindingCells.map((cell) => cell.code).join("\n")}\n${transformedCode}`;
   }
   const imports = importMeta.imports.map((entry) => ({
     ...entry,
     specifiers: entry.specifiers.map((spec) => ({ ...spec, useRanges: [] })),
   }));
+  const statementCells = collectStatementCells(
+    ast,
+    input,
+    prefix,
+    imports,
+    exportsLocal,
+    conditionalBindingCells,
+    generate,
+    traverse,
+  );
+  const cells = [...conditionalBindingCells, ...statementCells].sort(
+    (left, right) => left.sourceOrder - right.sourceOrder,
+  );
+  const fileRecord: FileRecord = {
+    id: input.realPath,
+    prefix,
+    contentHash: contentHash(input.code),
+    envs: ["default"],
+    codeByEnv: {},
+    mapByEnv: {},
+    pkg: input.pkg,
+    imports,
+    reexportsNamed,
+    exportStars,
+    exportsLocal,
+    flags: {
+      hasTopLevelAwait,
+      sideEffects: true,
+      needsNamespaceObject: importMeta.needsNamespaceObject,
+    },
+    dynamicImports,
+    conditionalImports: importMeta.conditionalImports,
+    discoveredEntrypoints: dynamicImports.map((entry) => entry.source),
+    cells,
+    importRanges: [],
+    exportRanges: [],
+  };
 
   return {
     code: transformedCode,
     map: output.map ? JSON.stringify(output.map) : undefined,
+    fileRecord,
     meta: {
       imports,
       exportsLocal,
@@ -622,13 +647,15 @@ function collectImports(
   return { imports, conditionalImports, needsNamespaceObject };
 }
 
-function buildConditionalBindings(
+function buildConditionalBindingCells(
   imports: ImportEntry[],
   conditionalImports: ConditionalImport[],
   input: TransformInput,
   prefix: string,
-): string[] {
-  const bindings: string[] = [];
+): CellRecord[] {
+  const cells: CellRecord[] = [];
+  let sourceOrder = -1000;
+
   for (const entry of imports) {
     if (!entry.condition) {
       continue;
@@ -651,13 +678,21 @@ function buildConditionalBindings(
         continue;
       }
       const localName = `${prefix}_${namespaceLocal}`;
-      bindings.push(
+      const lines = [
         emitConditionalStart(entry.condition),
         `const ${localName} = __NS__${depPrefix};`,
         emitConditionalEnd(),
-      );
+      ];
 
       let fallback = "undefined";
+      const externalDeps: CellExternalDep[] = [
+        {
+          kind: "import",
+          source: entry.source,
+          request: entry.request,
+          imported: "*",
+        },
+      ];
       if (conditionalImport?.elseSource) {
         const elseResolved = resolveImportForHash(
           input,
@@ -669,24 +704,50 @@ function buildConditionalBindings(
           elseResolved.relPath,
         );
         fallback = `__NS__${elsePrefix}`;
+        externalDeps.push({
+          kind: "import",
+          source: conditionalImport.elseSource,
+          request: conditionalImport.elseRequest,
+          imported: "*",
+        });
       }
-      bindings.push(
+      lines.push(
         emitConditionalStart({ NOT: entry.condition }),
         `const ${localName} = ${fallback};`,
         emitConditionalEnd(),
       );
+      cells.push({
+        id: `${input.realPath}#cond:${sourceOrder}`,
+        fileId: input.realPath,
+        sourceOrder,
+        kind: "conditional",
+        code: lines.join("\n"),
+        provides: [localName],
+        internalDeps: [],
+        externalDeps,
+        eager: false,
+      });
+      sourceOrder += 1;
       continue;
     }
 
     for (const spec of entry.specifiers) {
       const localName = `${prefix}_${spec.local}`;
-      bindings.push(
+      const lines = [
         emitConditionalStart(entry.condition),
         `const ${localName} = ${conditionalImportTarget(entry, spec, depPrefix)};`,
         emitConditionalEnd(),
-      );
+      ];
 
       let fallback = "undefined";
+      const externalDeps: CellExternalDep[] = [
+        {
+          kind: "import",
+          source: entry.source,
+          request: entry.request,
+          imported: spec.imported,
+        },
+      ];
       if (conditionalImport?.elseSource) {
         const elseResolved = resolveImportForHash(
           input,
@@ -698,15 +759,33 @@ function buildConditionalBindings(
           elseResolved.relPath,
         );
         fallback = conditionalImportTarget(entry, spec, elsePrefix);
+        externalDeps.push({
+          kind: "import",
+          source: conditionalImport.elseSource,
+          request: conditionalImport.elseRequest,
+          imported: spec.imported,
+        });
       }
-      bindings.push(
+      lines.push(
         emitConditionalStart({ NOT: entry.condition }),
         `const ${localName} = ${fallback};`,
         emitConditionalEnd(),
       );
+      cells.push({
+        id: `${input.realPath}#cond:${sourceOrder}`,
+        fileId: input.realPath,
+        sourceOrder,
+        kind: "conditional",
+        code: lines.join("\n"),
+        provides: [localName],
+        internalDeps: [],
+        externalDeps,
+        eager: false,
+      });
+      sourceOrder += 1;
     }
   }
-  return bindings;
+  return cells;
 }
 
 function rewriteImportsInAst(
@@ -786,6 +865,403 @@ function rewriteImportsInAst(
       }
     }
   }
+}
+
+function collectStatementCells(
+  ast: t.File,
+  input: TransformInput,
+  prefix: string,
+  imports: ImportEntry[],
+  exportsLocal: ExportLocal[],
+  conditionalCells: CellRecord[],
+  generate: typeof import("@babel/generator").default,
+  traverse: typeof import("@babel/traverse").default,
+): CellRecord[] {
+  const programPath = getProgramPath(ast, traverse);
+  if (!programPath) {
+    return [];
+  }
+
+  const internalSymbols = new Set<string>();
+  for (const statement of programPath.node.body) {
+    for (const symbol of collectDeclaredTopLevelSymbols(statement)) {
+      internalSymbols.add(symbol);
+    }
+  }
+  for (const cell of conditionalCells) {
+    for (const symbol of cell.provides) {
+      internalSymbols.add(symbol);
+    }
+  }
+
+  const externalSymbolMap = createExternalSymbolMap(imports, input, prefix);
+  const exportSymbols = new Set(
+    exportsLocal.map((entry) =>
+      `${prefix}_${entry.local === "default" ? "default" : entry.local}`,
+    ),
+  );
+
+  const cells: CellRecord[] = programPath.get("body").map((statementPath, index) => {
+    const statement = statementPath.node as t.Statement;
+    const provides = collectDeclaredTopLevelSymbols(statement);
+    const { internalDeps, externalDeps } = collectStatementDeps(
+      statementPath as NodePath<t.Statement>,
+      new Set(provides),
+      internalSymbols,
+      externalSymbolMap,
+    );
+    const code = generate(statement, { sourceMaps: false }).code;
+
+    return {
+      id: `${input.realPath}#stmt:${index}`,
+      fileId: input.realPath,
+      sourceOrder: index,
+      kind: "worker",
+      code,
+      provides,
+      internalDeps,
+      externalDeps,
+      eager: isEagerStatement(statement, exportSymbols),
+    };
+  });
+
+  return mergeAdjacentStatementCells(cells);
+}
+
+function mergeAdjacentStatementCells(cells: CellRecord[]): CellRecord[] {
+  const merged: Array<CellRecord & { endSourceOrder: number }> = [];
+
+  for (const cell of cells) {
+    const previous = merged.at(-1);
+    if (!previous || !shouldMergeIntoPrevious(previous, cell)) {
+      merged.push({ ...cell, endSourceOrder: cell.sourceOrder });
+      continue;
+    }
+
+    const previousProvides = new Set(previous.provides);
+    previous.code = `${previous.code}\n${cell.code}`;
+    previous.provides = dedupeStrings([...previous.provides, ...cell.provides]);
+    previous.internalDeps = dedupeStrings([
+      ...previous.internalDeps,
+      ...cell.internalDeps.filter((dep) => !previousProvides.has(dep)),
+    ]);
+    previous.externalDeps = dedupeExternalDeps([
+      ...previous.externalDeps,
+      ...cell.externalDeps,
+    ]);
+    previous.eager = previous.eager || cell.eager;
+    previous.endSourceOrder = cell.sourceOrder;
+  }
+
+  return merged.map((cell) => ({
+    id: cell.id,
+    fileId: cell.fileId,
+    sourceOrder: cell.sourceOrder,
+    kind: cell.kind,
+    code: cell.code,
+    provides: cell.provides,
+    internalDeps: cell.internalDeps,
+    externalDeps: cell.externalDeps,
+    providerDeps: cell.providerDeps,
+    eager: cell.eager,
+  }));
+}
+
+function shouldMergeIntoPrevious(
+  previous: CellRecord & { endSourceOrder: number },
+  current: CellRecord,
+): boolean {
+  if (!current.eager) {
+    return false;
+  }
+  if (current.sourceOrder !== previous.endSourceOrder + 1) {
+    return false;
+  }
+  const previousProvides = new Set(previous.provides);
+  return current.internalDeps.some((dep) => previousProvides.has(dep));
+}
+
+function dedupeStrings(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+function dedupeExternalDeps(values: CellExternalDep[]): CellExternalDep[] {
+  const deduped = new Map<string, CellExternalDep>();
+  for (const value of values) {
+    deduped.set(JSON.stringify(value), value);
+  }
+  return Array.from(deduped.values());
+}
+
+function createExternalSymbolMap(
+  imports: ImportEntry[],
+  input: TransformInput,
+  prefix: string,
+): Map<string, CellExternalDep> {
+  const externalSymbols = new Map<string, CellExternalDep>();
+
+  for (const entry of imports) {
+    if (entry.kind !== "value" || entry.condition) {
+      continue;
+    }
+    const resolved = resolveImportForHash(input, entry.request ?? entry.source);
+    const depPrefix = filePrefix(
+      resolved.pkg.name,
+      resolved.pkg.version,
+      resolved.relPath,
+    );
+
+    if (entry.isNamespace) {
+      if (entry.namespaceUsage === "dynamic") {
+        externalSymbols.set(`__NS__${depPrefix}`, {
+          kind: "import",
+          source: entry.source,
+          request: entry.request,
+          imported: "*",
+        });
+        continue;
+      }
+
+      for (const spec of entry.specifiers) {
+        externalSymbols.set(`${depPrefix}_${spec.imported}`, {
+          kind: "import",
+          source: entry.source,
+          request: entry.request,
+          imported: spec.imported,
+        });
+      }
+      continue;
+    }
+
+    for (const spec of entry.specifiers) {
+      const importName = spec.imported === "default" ? "default" : spec.imported;
+      externalSymbols.set(`${depPrefix}_${importName}`, {
+        kind: "import",
+        source: entry.source,
+        request: entry.request,
+        imported: importName,
+      });
+    }
+  }
+
+  for (const entry of imports) {
+    if (entry.kind === "side-effect" && !entry.condition) {
+      externalSymbols.set(`${prefix}#side-effect:${entry.source}`, {
+        kind: "side-effect",
+        source: entry.source,
+        request: entry.request,
+      });
+    }
+  }
+
+  return externalSymbols;
+}
+
+function collectStatementDeps(
+  statementPath: NodePath<t.Statement>,
+  providedSymbols: Set<string>,
+  internalSymbols: Set<string>,
+  externalSymbols: Map<string, CellExternalDep>,
+): {
+  internalDeps: string[];
+  externalDeps: CellExternalDep[];
+} {
+  const internalDeps = new Set<string>();
+  const externalDeps = new Map<string, CellExternalDep>();
+  const programScope = statementPath.scope.getProgramParent();
+
+  statementPath.traverse({
+    ReferencedIdentifier(path) {
+      if (!path.isIdentifier()) {
+        return;
+      }
+      const name = path.node.name;
+      const binding = path.scope.getBinding(name);
+      if (binding) {
+        if (
+          binding.scope === programScope &&
+          internalSymbols.has(name) &&
+          !providedSymbols.has(name)
+        ) {
+          internalDeps.add(name);
+        }
+        return;
+      }
+      if (internalSymbols.has(name)) {
+        internalDeps.add(name);
+        return;
+      }
+      const external = externalSymbols.get(name);
+      if (external) {
+        externalDeps.set(JSON.stringify(external), external);
+      }
+    },
+  });
+
+  return {
+    internalDeps: Array.from(internalDeps),
+    externalDeps: Array.from(externalDeps.values()),
+  };
+}
+
+function collectDeclaredTopLevelSymbols(statement: t.Statement): string[] {
+  if (t.isFunctionDeclaration(statement) && statement.id) {
+    return [statement.id.name];
+  }
+  if (t.isClassDeclaration(statement) && statement.id) {
+    return [statement.id.name];
+  }
+  if (t.isVariableDeclaration(statement)) {
+    const symbols: string[] = [];
+    for (const declaration of statement.declarations) {
+      collectPatternIdentifiers(declaration.id, symbols);
+    }
+    return symbols;
+  }
+  return [];
+}
+
+function collectPatternIdentifiers(
+  pattern: t.LVal | t.VoidPattern,
+  out: string[],
+): void {
+  if (t.isVoidPattern(pattern)) {
+    return;
+  }
+  if (t.isIdentifier(pattern)) {
+    out.push(pattern.name);
+    return;
+  }
+  if (t.isObjectPattern(pattern)) {
+    for (const property of pattern.properties) {
+      if (t.isObjectProperty(property)) {
+        if (t.isLVal(property.value) || t.isVoidPattern(property.value)) {
+          collectPatternIdentifiers(property.value, out);
+        }
+      } else if (t.isRestElement(property)) {
+        collectPatternIdentifiers(property.argument, out);
+      }
+    }
+    return;
+  }
+  if (t.isArrayPattern(pattern)) {
+    for (const element of pattern.elements) {
+      if (element && (t.isLVal(element) || t.isVoidPattern(element))) {
+        collectPatternIdentifiers(element, out);
+      }
+    }
+    return;
+  }
+  if (t.isAssignmentPattern(pattern)) {
+    collectPatternIdentifiers(pattern.left, out);
+    return;
+  }
+  if (t.isRestElement(pattern)) {
+    collectPatternIdentifiers(pattern.argument, out);
+  }
+}
+
+function isEagerStatement(
+  statement: t.Statement,
+  exportSymbols: Set<string>,
+): boolean {
+  if (t.isFunctionDeclaration(statement) || t.isClassDeclaration(statement)) {
+    return false;
+  }
+
+  if (t.isVariableDeclaration(statement) && statement.kind === "const") {
+    const declared = collectDeclaredTopLevelSymbols(statement);
+    if (
+      declared.length > 0 &&
+      declared.every((symbol) => exportSymbols.has(symbol)) &&
+      statement.declarations.every((declaration) =>
+        declaration.init ? isSafeInitializer(declaration.init) : true,
+      )
+    ) {
+      return false;
+    }
+    if (
+      declared.length > 0 &&
+      statement.declarations.every((declaration) =>
+        declaration.init ? isSafeInitializer(declaration.init) : true,
+      )
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isSafeInitializer(expression: t.Expression): boolean {
+  if (
+    t.isIdentifier(expression) ||
+    t.isStringLiteral(expression) ||
+    t.isNumericLiteral(expression) ||
+    t.isBooleanLiteral(expression) ||
+    t.isNullLiteral(expression) ||
+    t.isBigIntLiteral(expression) ||
+    t.isRegExpLiteral(expression) ||
+    t.isArrowFunctionExpression(expression) ||
+    t.isFunctionExpression(expression) ||
+    t.isClassExpression(expression)
+  ) {
+    return true;
+  }
+  if (t.isTemplateLiteral(expression)) {
+    return expression.expressions.every(
+      (item) => t.isExpression(item) && isSafeInitializer(item),
+    );
+  }
+  if (t.isArrayExpression(expression)) {
+    return expression.elements.every((item) =>
+      item == null
+        ? true
+        : t.isSpreadElement(item)
+          ? false
+          : isSafeInitializer(item),
+    );
+  }
+  if (t.isObjectExpression(expression)) {
+    return expression.properties.every((property) => {
+      if (t.isSpreadElement(property)) {
+        return false;
+      }
+      if (t.isObjectMethod(property)) {
+        return true;
+      }
+      return isSafeInitializer(property.value as t.Expression);
+    });
+  }
+  if (t.isUnaryExpression(expression)) {
+    return isSafeInitializer(expression.argument as t.Expression);
+  }
+  if (t.isBinaryExpression(expression) || t.isLogicalExpression(expression)) {
+    return (
+      isSafeInitializer(expression.left as t.Expression) &&
+      isSafeInitializer(expression.right as t.Expression)
+    );
+  }
+  if (t.isConditionalExpression(expression)) {
+    return (
+      isSafeInitializer(expression.test) &&
+      isSafeInitializer(expression.consequent) &&
+      isSafeInitializer(expression.alternate)
+    );
+  }
+  if (t.isSequenceExpression(expression)) {
+    return expression.expressions.every((item) => isSafeInitializer(item));
+  }
+  if (t.isMemberExpression(expression)) {
+    return (
+      t.isIdentifier(expression.object) &&
+      (!expression.computed ||
+        (expression.property != null &&
+          t.isExpression(expression.property) &&
+          isSafeInitializer(expression.property)))
+    );
+  }
+  return false;
 }
 
 function removeImportDeclarations(

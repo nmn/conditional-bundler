@@ -6,6 +6,7 @@ import type {
   ReexportNamed,
   DynamicImport,
   ConditionalImport,
+  FileRecord,
 } from "./ir.js";
 
 export type TransformInput = {
@@ -44,6 +45,7 @@ export type TransformResult = {
   code: string;
   map?: string;
   meta?: TransformMeta;
+  fileRecord?: FileRecord;
   codeByEnv?: Record<string, string>;
   diagnostics?: Diagnostic[];
   skipCore?: boolean;

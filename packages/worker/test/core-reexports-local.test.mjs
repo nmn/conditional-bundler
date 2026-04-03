@@ -14,7 +14,7 @@ test("creates a prefixed alias for renamed local re-exports", async () => {
 const ${prefix}_renamed = ${prefix}_local;`,
   );
   expect(result.meta.exportsLocal).toEqual([
-    { local: "local", exported: "renamed", kind: "var" },
+    { local: "renamed", exported: "renamed", kind: "var" },
   ]);
 });
 

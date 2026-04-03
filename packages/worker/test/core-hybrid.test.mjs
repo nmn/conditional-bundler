@@ -41,7 +41,6 @@ const ji19ybwd_pick = rzh0ycy4_pick;
 /////##CONDITION_START##{"NOT":"COND_A"}
 const ji19ybwd_pick = gb2g3nny_pick;
 /////##CONDITION_END##
-const ji19ybwd_renamedHelper = acugkg94_helper;
 const ji19ybwd_default = async function ji19ybwd_run(key) {
   const mod = await __IMPORT_a38syydlx();
   return a4tfu7r6i_default + a4tfu7r6i_foo + __NS__aykq3vp9[key] + ji19ybwd_pick + mod.value;
@@ -67,11 +66,6 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
       exportRanges: [],
       exportStars: [],
       exportsLocal: [
-        {
-          exported: "renamedHelper",
-          kind: "var",
-          local: "renamedHelper",
-        },
         {
           exported: "default",
           kind: "default",
@@ -146,6 +140,7 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           imported: "helper",
           request: "./helpers.js",
           source: "src/helpers.js",
+          sourceOrder: 183,
         },
       ],
     },

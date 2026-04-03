@@ -1,4 +1,4 @@
-import type { ModuleNode, Provider } from "@bundler/shared";
+import type { CellRecord, ModuleNode, Provider } from "@bundler/shared";
 
 export function resolveExportTables(
   nodes: ModuleNode[],
@@ -35,15 +35,26 @@ export function resolveExportTables(
         remaining.delete(id);
         continue;
       }
+
       const table = new Map<string, Provider>();
       const ambiguous = new Set<string>();
+      const generatedCells: CellRecord[] = [];
+      const localCellMap = new Map<string, string>();
+
+      for (const cell of node.irHeader.cells) {
+        for (const symbol of cell.provides) {
+          localCellMap.set(symbol, cell.id);
+        }
+      }
 
       for (const localExport of node.irHeader.exportsLocal) {
         const localName =
           localExport.local === "default" ? "default" : localExport.local;
+        const symbol = `${node.prefix}_${localName}`;
         table.set(localExport.exported, {
           moduleId: node.id,
-          symbol: `${node.prefix}_${localName}`,
+          cellId: localCellMap.get(symbol) ?? symbol,
+          symbol,
         });
       }
 
@@ -56,20 +67,40 @@ export function resolveExportTables(
         if (!sourceNode?.exportTable) {
           continue;
         }
+
         for (const [name, provider] of sourceNode.exportTable.entries()) {
           if (name === "default") {
             continue;
           }
-          if (!table.has(name)) {
-            table.set(name, provider);
-          } else if (table.get(name)?.symbol !== provider.symbol) {
+          if (ambiguous.has(name)) {
+            continue;
+          }
+          if (table.has(name)) {
             table.delete(name);
             ambiguous.add(name);
+            continue;
           }
+
+          const aliasCell = createAliasCell(
+            node,
+            star.sourceOrder ?? 0,
+            name,
+            provider,
+          );
+          generatedCells.push(aliasCell);
+          table.set(name, {
+            moduleId: node.id,
+            cellId: aliasCell.id,
+            symbol: `${node.prefix}_${name}`,
+          });
         }
       }
 
       for (const reexport of node.irHeader.reexportsNamed) {
+        if (ambiguous.has(reexport.exported) || table.has(reexport.exported)) {
+          continue;
+        }
+
         const sourceId = node.resolvedSources.get(reexport.source);
         if (!sourceId) {
           continue;
@@ -78,25 +109,93 @@ export function resolveExportTables(
         if (!sourceNode?.exportTable) {
           continue;
         }
-        if (table.has(reexport.exported)) {
-          continue;
-        }
+
         if (reexport.isNamespace) {
+          const namespaceCell = createNamespaceCell(node, reexport, sourceNode);
+          generatedCells.push(namespaceCell);
           table.set(reexport.exported, {
-            moduleId: sourceId,
-            symbol: `__NS__${sourceNode.prefix}`,
+            moduleId: node.id,
+            cellId: namespaceCell.id,
+            symbol: `${node.prefix}_${reexport.exported}`,
           });
           continue;
         }
+
         const provider = sourceNode.exportTable.get(reexport.imported);
-        if (provider) {
-          table.set(reexport.exported, provider);
+        if (!provider) {
+          continue;
         }
+
+        const aliasCell = createAliasCell(
+          node,
+          reexport.sourceOrder ?? 0,
+          reexport.exported,
+          provider,
+        );
+        generatedCells.push(aliasCell);
+        table.set(reexport.exported, {
+          moduleId: node.id,
+          cellId: aliasCell.id,
+          symbol: `${node.prefix}_${reexport.exported}`,
+        });
       }
 
+      node.generatedCells = generatedCells;
       node.exportTable = table;
       node.ambiguous = ambiguous;
       remaining.delete(id);
     }
   }
+}
+
+function createAliasCell(
+  node: ModuleNode,
+  sourceOrder: number,
+  exported: string,
+  provider: Provider,
+): CellRecord {
+  const symbol = `${node.prefix}_${exported}`;
+  return {
+    id: `${node.id}#generated:alias:${sourceOrder}:${exported}`,
+    fileId: node.id,
+    sourceOrder: 10000 + sourceOrder,
+    kind: "generated",
+    code: `const ${symbol} = ${provider.symbol};`,
+    provides: [symbol],
+    internalDeps: [],
+    externalDeps: [],
+    providerDeps: [provider],
+    eager: false,
+  };
+}
+
+function createNamespaceCell(
+  node: ModuleNode,
+  reexport: ModuleNode["irHeader"]["reexportsNamed"][number],
+  sourceNode: ModuleNode,
+): CellRecord {
+  const symbol = `${node.prefix}_${reexport.exported}`;
+  const lines = [`const ${symbol} = Object.create(null);`];
+  const providerDeps: Provider[] = [];
+
+  for (const [name, provider] of sourceNode.exportTable?.entries() ?? []) {
+    lines.push(
+      `Object.defineProperty(${symbol}, ${JSON.stringify(name)}, { enumerable: true, get: () => ${provider.symbol} });`,
+    );
+    providerDeps.push(provider);
+  }
+  lines.push(`Object.freeze(${symbol});`);
+
+  return {
+    id: `${node.id}#generated:ns:${reexport.sourceOrder ?? 0}:${reexport.exported}`,
+    fileId: node.id,
+    sourceOrder: 10000 + (reexport.sourceOrder ?? 0),
+    kind: "generated",
+    code: lines.join("\n"),
+    provides: [symbol],
+    internalDeps: [],
+    externalDeps: [],
+    providerDeps,
+    eager: false,
+  };
 }

@@ -1,7 +1,4 @@
 import {
-  defaultFilePath,
-  prefixFor,
-  prefixForSource,
   transform,
   trimCode,
 } from "./helpers/transform.mjs";
@@ -9,15 +6,14 @@ import {
 test("rewrites named re-exports from another module to the imported module prefix", async () => {
   const result = await transform("export { foo as bar } from './dep.js';");
 
-  expect(trimCode(result)).toBe(
-    `const ${prefixFor(defaultFilePath)}_bar = ${prefixForSource("./dep.js")}_foo;`,
-  );
+  expect(trimCode(result)).toBe("");
   expect(result.meta.reexportsNamed).toEqual([
     {
       source: "src/dep.js",
       request: "./dep.js",
       imported: "foo",
       exported: "bar",
+      sourceOrder: 0,
     },
   ]);
 });
@@ -25,9 +21,7 @@ test("rewrites named re-exports from another module to the imported module prefi
 test("rewrites namespace re-exports from another module to the namespace object", async () => {
   const result = await transform("export * as ns from './dep.js';");
 
-  expect(trimCode(result)).toBe(
-    `const ${prefixFor(defaultFilePath)}_ns = __NS__${prefixForSource("./dep.js")};`,
-  );
+  expect(trimCode(result)).toBe("");
   expect(result.meta.reexportsNamed).toEqual([
     {
       source: "src/dep.js",
@@ -35,11 +29,10 @@ test("rewrites namespace re-exports from another module to the namespace object"
       imported: "*",
       exported: "ns",
       isNamespace: true,
+      sourceOrder: 0,
     },
   ]);
-  expect(result.meta.exportsLocal).toEqual([
-    { local: "ns", exported: "ns", kind: "var" },
-  ]);
+  expect(result.meta.exportsLocal).toEqual([]);
 });
 
 test("records export star metadata without leaving export syntax behind", async () => {
@@ -47,6 +40,6 @@ test("records export star metadata without leaving export syntax behind", async 
 
   expect(trimCode(result)).toBe("");
   expect(result.meta.exportStars).toEqual([
-    { source: "src/dep.js", request: "./dep.js" },
+    { source: "src/dep.js", request: "./dep.js", sourceOrder: 0 },
   ]);
 });

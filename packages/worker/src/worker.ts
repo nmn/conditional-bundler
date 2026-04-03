@@ -1,11 +1,10 @@
-import fs from "node:fs/promises";
 import { parentPort } from "node:worker_threads";
 import path from "node:path";
 import { filePrefix, contentHash, normalizePosixPath } from "@bundler/shared";
 import type {
-  TransformInput,
   TransformResult,
   TransformMultiResult,
+  FileRecord,
 } from "@bundler/shared";
 import {
   writeFileAtomic,
@@ -32,34 +31,12 @@ type WorkerResponse = {
   cacheHit?: boolean;
   contentHash: string;
   prefix: string;
-  irHeader: {
-    id: string;
-    prefix: string;
-    contentHash: string;
-    envs: string[];
-    codeByEnv: Record<string, string>;
-    mapByEnv: Record<string, string>;
-    pkg: TransformInput["pkg"];
-    imports: NonNullable<TransformResult["meta"]>["imports"];
-    reexportsNamed: NonNullable<TransformResult["meta"]>["reexportsNamed"];
-    exportStars: NonNullable<TransformResult["meta"]>["exportStars"];
-    exportsLocal: NonNullable<TransformResult["meta"]>["exportsLocal"];
-    flags: NonNullable<TransformResult["meta"]>["flags"];
-    dynamicImports: NonNullable<TransformResult["meta"]>["dynamicImports"];
-    conditionalImports: NonNullable<
-      TransformResult["meta"]
-    >["conditionalImports"];
-    discoveredEntrypoints: NonNullable<
-      TransformResult["meta"]
-    >["discoveredEntrypoints"];
-    importRanges: NonNullable<TransformResult["meta"]>["importRanges"];
-    exportRanges: NonNullable<TransformResult["meta"]>["exportRanges"];
-  };
+  fileRecord: FileRecord;
 };
 
 type CacheRecord = {
   cacheKey: string;
-  irHeader: WorkerResponse["irHeader"];
+  fileRecord: FileRecord;
 };
 
 async function handleTransform(
@@ -75,15 +52,16 @@ async function handleTransform(
   const cached = await readCacheRecord(recordPath);
   if (
     cached &&
+    cached.fileRecord &&
     cached.cacheKey === cacheKey &&
-    (await hasCachedArtifacts(cached.irHeader))
+    (await hasCachedArtifacts())
   ) {
     return {
       ok: true,
       cacheHit: true,
-      contentHash: cached.irHeader.contentHash,
-      prefix: cached.irHeader.prefix,
-      irHeader: cached.irHeader,
+      contentHash: cached.fileRecord.contentHash,
+      prefix: cached.fileRecord.prefix,
+      fileRecord: cached.fileRecord,
     };
   }
 
@@ -98,58 +76,28 @@ async function handleTransform(
     "code" in result ? { default: result } : result
   ) as TransformMultiResult;
 
-  const codeByEnv: Record<string, string> = {};
-  const mapByEnv: Record<string, string> = {};
-
-  for (const [envId, envResult] of Object.entries(resultsByEnv)) {
-    const envTransform = envResult as TransformResult;
-    const codePath = path.join(
-      request.cacheDir,
-      "code",
-      `${artifactHash}.${envId}.js`,
-    );
-    const mapPath = envTransform.map
-      ? path.join(request.cacheDir, "map", `${artifactHash}.${envId}.map`)
-      : undefined;
-    await writeFileAtomic(codePath, envTransform.code);
-    if (mapPath && envTransform.map) {
-      await writeFileAtomic(mapPath, envTransform.map);
-      mapByEnv[envId] = mapPath;
-    }
-    codeByEnv[envId] = codePath;
-  }
-
   const first = Object.values(resultsByEnv)[0] as TransformResult;
-  if (!first.meta) {
-    throw new Error("Transform result missing metadata.");
+  if (!first.fileRecord) {
+    throw new Error("Transform result missing file record.");
   }
 
-  const irHeader = {
+  const fileRecord = {
+    ...first.fileRecord,
     id: request.realPath,
     prefix,
     contentHash: fileHash,
     envs: Object.keys(resultsByEnv),
-    codeByEnv,
-    mapByEnv,
+    codeByEnv: {},
+    mapByEnv: {},
     pkg: request.pkg,
-    imports: first.meta.imports,
-    reexportsNamed: first.meta.reexportsNamed,
-    exportStars: first.meta.exportStars,
-    exportsLocal: first.meta.exportsLocal,
-    flags: first.meta.flags,
-    dynamicImports: first.meta.dynamicImports,
-    conditionalImports: first.meta.conditionalImports,
-    discoveredEntrypoints: first.meta.discoveredEntrypoints,
-    importRanges: first.meta.importRanges,
-    exportRanges: first.meta.exportRanges,
   };
 
   const irPath = path.join(request.cacheDir, "ir", `${artifactHash}.json`);
   const record: CacheRecord = {
     cacheKey,
-    irHeader,
+    fileRecord,
   };
-  await writeFileAtomic(irPath, JSON.stringify({ ...irHeader }, null, 2));
+  await writeFileAtomic(irPath, JSON.stringify({ ...fileRecord }, null, 2));
   await writeFileAtomic(recordPath, JSON.stringify(record, null, 2));
 
   return {
@@ -157,7 +105,7 @@ async function handleTransform(
     cacheHit: false,
     contentHash: fileHash,
     prefix,
-    irHeader,
+    fileRecord,
   };
 }
 
@@ -223,32 +171,23 @@ async function readCacheRecord(filePath: string): Promise<CacheRecord | null> {
   }
 
   try {
-    return JSON.parse(raw) as CacheRecord;
+    const parsed = JSON.parse(raw) as Partial<CacheRecord> & {
+      irHeader?: FileRecord;
+    };
+    const fileRecord = parsed.fileRecord ?? parsed.irHeader;
+    if (!parsed.cacheKey || !fileRecord) {
+      return null;
+    }
+    return {
+      cacheKey: parsed.cacheKey,
+      fileRecord,
+    };
   } catch {
     return null;
   }
 }
 
-async function hasCachedArtifacts(
-  irHeader: WorkerResponse["irHeader"],
-): Promise<boolean> {
-  const requiredPaths = [
-    ...Object.values(irHeader.codeByEnv),
-    ...Object.values(irHeader.mapByEnv),
-  ];
-
-  if (requiredPaths.length === 0) {
-    return false;
-  }
-
-  for (const filePath of requiredPaths) {
-    try {
-      await fs.access(filePath);
-    } catch {
-      return false;
-    }
-  }
-
+async function hasCachedArtifacts(): Promise<boolean> {
   return true;
 }
 

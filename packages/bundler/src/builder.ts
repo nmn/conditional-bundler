@@ -15,7 +15,6 @@ import {
   normalizeGraphConditions,
   resolveEntryConditions,
 } from "./graph/conditions.js";
-import { applyReplacements } from "./linker/rewriter.js";
 import {
   emitConditionalStart,
   emitConditionalEnd,
@@ -25,7 +24,6 @@ import {
   emitDynamicImportConstants,
   type BundleTarget,
 } from "./linker/dynamic-import-constants.js";
-import { stripImportStatements } from "./linker/strip-imports.js";
 import { concatParts } from "./concat.js";
 import { runTransformModule, runTransformModuleGraph } from "./plugins/run.js";
 import type { BundlerConfig, EntrySpec } from "./config.js";
@@ -38,10 +36,10 @@ import {
 import type { BundlerPlugin } from "./plugins/types.js";
 import type { ModuleGraph } from "./graph/build.js";
 import type {
+  CellRecord,
   ModuleNode,
   Provider,
-  IRHeader,
-  ImportSpecifier,
+  FileRecord,
 } from "@bundler/shared";
 
 export type BuildResult = {
@@ -67,7 +65,7 @@ type BundlePlan = {
 };
 
 type WorkerTransformResponse = {
-  irHeader: IRHeader;
+  fileRecord: FileRecord;
 };
 
 type DynamicEntryDiscovery = ResolveResult & {
@@ -75,7 +73,7 @@ type DynamicEntryDiscovery = ResolveResult & {
 };
 
 type ModuleCollection = {
-  headers: IRHeader[];
+  headers: FileRecord[];
   dynamicEntries: EntrySpec[];
   resolvedMap: Map<string, string>;
 };
@@ -203,53 +201,35 @@ async function createBundlePlan(
   resolver: Resolver,
   exportMode: "entry" | "dynamic",
 ): Promise<BundlePlan> {
-  const ordered = topoSort(graph, entryPath);
-  if (ordered.length === 0) {
+  const entryNode = graph.nodes.get(entryPath);
+  if (!entryNode) {
     throw new Error(`Entry not found in graph: ${entryPath}`);
   }
 
   const { conditions, diagnostics } = resolveEntryConditions(graph, entryPath);
+  const selection = collectBundleSelection(graph, entryPath);
+  const orderedFiles = orderSelectedFiles(graph, selection);
   const parts: string[] = [];
   const dynamicImports: DynamicImportRef[] = [];
+  const namespaceDemanded = collectNamespaceDemands(selection, graph);
 
-  for (const node of ordered) {
-    const codePath =
-      node.irHeader.codeByEnv[graph.envId] ?? node.irHeader.codeByEnv.default;
-    const code = await fs.readFile(codePath, "utf8");
-
-    const replacements: Array<{ start: number; end: number; text: string }> =
-      [];
-    for (const importEntry of node.irHeader.imports) {
-      for (const spec of importEntry.specifiers) {
-        const provider = resolveProvider(graph, node, importEntry, spec);
-        if (!provider) {
-          continue;
-        }
-        const targetSymbol = importEntry.condition
-          ? `${node.prefix}_${spec.local}`
-          : provider.symbol;
-        for (const [start, end] of spec.useRanges) {
-          replacements.push({ start, end, text: targetSymbol });
-        }
-      }
+  for (const node of orderedFiles) {
+    const selectedCells = selection.get(node.id);
+    if (!selectedCells || selectedCells.size === 0) {
+      continue;
     }
-
-    let processed = code;
-    if (replacements.length > 0) {
-      processed = applyReplacements(processed, replacements);
-    }
-
-    processed = stripImportStatements(processed, node.irHeader.importRanges);
-    processed = stripImportStatements(processed, node.irHeader.exportRanges);
-
     const condition = conditions.get(node.id);
     if (condition) {
       parts.push(emitConditionalStart(condition));
     }
 
-    parts.push(processed);
+    for (const cell of collectOrderedCells(node, selectedCells)) {
+      if (cell.code) {
+        parts.push(cell.code);
+      }
+    }
 
-    if (node.irHeader.flags.needsNamespaceObject && node.exportTable) {
+    if (namespaceDemanded.has(node.id) && node.exportTable) {
       parts.push(emitNamespaceObject(node));
     }
 
@@ -274,7 +254,7 @@ async function createBundlePlan(
   const exportFooter =
     exportMode === "entry"
       ? emitEntryExports(graph.nodes.get(entryPath))
-      : emitDynamicBundleExports(ordered);
+      : emitDynamicBundleExports(orderedFiles, selection);
   if (exportFooter) {
     parts.push(exportFooter);
   }
@@ -305,7 +285,7 @@ async function collectTransformedModules(
   pool: WorkerPool,
   resolver: Resolver,
 ): Promise<ModuleCollection> {
-  const headers = new Map<string, IRHeader>();
+  const headers = new Map<string, FileRecord>();
   const resolvedMap = new Map<string, string>();
   const scheduled = new Set<string>();
   const dynamicEntryEnvs = new Map<string, Set<string>>();
@@ -359,7 +339,7 @@ async function transformModule(
   plugins: BundlerPlugin[],
   pool: WorkerPool,
   resolver: Resolver,
-  headers: Map<string, IRHeader>,
+  headers: Map<string, FileRecord>,
   resolvedMap: Map<string, string>,
   dynamicEntryEnvs: Map<string, Set<string>>,
   schedule: (modulePath: string) => void,
@@ -397,17 +377,17 @@ async function transformModule(
     syntax,
     codeByEnv: multiEnvCode,
   })) as WorkerTransformResponse;
-  const irHeader = response.irHeader;
-  headers.set(irHeader.id, irHeader);
+  const fileRecord = response.fileRecord;
+  headers.set(fileRecord.id, fileRecord);
 
-  if (irHeader.flags.hasTopLevelAwait) {
+  if (fileRecord.flags.hasTopLevelAwait) {
     throw new Error(
       `E_TLA: Top-level 'await' is not supported (v1). at ${modulePath}`,
     );
   }
 
   const { dependencies, dynamicEntries } = await discoverModulesFromHeader(
-    irHeader,
+    fileRecord,
     envs,
     resolver,
   );
@@ -427,7 +407,7 @@ async function transformModule(
 }
 
 async function discoverModulesFromHeader(
-  irHeader: IRHeader,
+  irHeader: FileRecord,
   envs: string[],
   resolver: Resolver,
 ): Promise<{
@@ -501,57 +481,296 @@ async function discoverModulesFromHeader(
   };
 }
 
-function topoSort(graph: ModuleGraph, entryId: string): ModuleNode[] {
-  const visited = new Set<string>();
-  const stack: ModuleNode[] = [];
+function collectBundleSelection(
+  graph: ModuleGraph,
+  entryId: string,
+): Map<string, Set<string>> {
+  const entryNode = graph.nodes.get(entryId);
+  if (!entryNode) {
+    throw new Error(`Entry not found in graph: ${entryId}`);
+  }
 
-  function visit(id: string) {
-    if (visited.has(id)) {
+  const selection = new Map<string, Set<string>>();
+  const activatedFiles = new Set<string>();
+  const queuedCells = new Set<string>();
+  const workQueue: Array<{ nodeId: string; cellId: string }> = [];
+
+  const enqueueCell = (node: ModuleNode, cellId: string) => {
+    activateFile(node);
+    const selected = selection.get(node.id) ?? new Set<string>();
+    if (selected.has(cellId)) {
+      if (!selection.has(node.id)) {
+        selection.set(node.id, selected);
+      }
       return;
     }
-    visited.add(id);
-    const node = graph.nodes.get(id);
+    selected.add(cellId);
+    selection.set(node.id, selected);
+    const key = `${node.id}:${cellId}`;
+    if (!queuedCells.has(key)) {
+      queuedCells.add(key);
+      workQueue.push({ nodeId: node.id, cellId });
+    }
+  };
+
+  const enqueueProvider = (provider: Provider) => {
+    const providerNode = graph.nodes.get(provider.moduleId);
+    if (!providerNode) {
+      return;
+    }
+    enqueueCell(providerNode, provider.cellId);
+  };
+
+  const activateFile = (node: ModuleNode) => {
+    if (activatedFiles.has(node.id)) {
+      return;
+    }
+    activatedFiles.add(node.id);
+
+    for (const cell of getAllCells(node)) {
+      if (cell.eager) {
+        enqueueCell(node, cell.id);
+      }
+    }
+
+    for (const importEntry of node.irHeader.imports) {
+      if (importEntry.kind === "type") {
+        continue;
+      }
+      const sourceId = node.resolvedSources.get(importEntry.source);
+      if (!sourceId) {
+        continue;
+      }
+      const sourceNode = graph.nodes.get(sourceId);
+      if (sourceNode) {
+        activateFile(sourceNode);
+      }
+    }
+
+    for (const conditionalImport of node.irHeader.conditionalImports) {
+      if (!conditionalImport.elseSource) {
+        continue;
+      }
+      const elseId = node.resolvedSources.get(conditionalImport.elseSource);
+      if (!elseId) {
+        continue;
+      }
+      const elseNode = graph.nodes.get(elseId);
+      if (elseNode) {
+        activateFile(elseNode);
+      }
+    }
+  };
+
+  activateFile(entryNode);
+  for (const provider of entryNode.exportTable?.values() ?? []) {
+    enqueueProvider(provider);
+  }
+
+  while (workQueue.length > 0) {
+    const next = workQueue.pop();
+    if (!next) {
+      continue;
+    }
+    const node = graph.nodes.get(next.nodeId);
+    if (!node) {
+      continue;
+    }
+    const cell = getCellById(node, next.cellId);
+    if (!cell) {
+      throw new Error(`Missing cell '${next.cellId}' in '${node.id}'.`);
+    }
+
+    for (const symbol of cell.internalDeps) {
+      const dependencyCell = findCellProvidingSymbol(node, symbol);
+      if (dependencyCell) {
+        enqueueCell(node, dependencyCell.id);
+      }
+    }
+
+    for (const provider of cell.providerDeps ?? []) {
+      enqueueProvider(provider);
+    }
+
+    for (const dependency of cell.externalDeps) {
+      const sourceId = node.resolvedSources.get(dependency.source);
+      if (!sourceId) {
+        continue;
+      }
+      const sourceNode = graph.nodes.get(sourceId);
+      if (!sourceNode) {
+        continue;
+      }
+      activateFile(sourceNode);
+
+      if (dependency.kind === "side-effect") {
+        continue;
+      }
+
+      if (dependency.imported === "*") {
+        for (const provider of sourceNode.exportTable?.values() ?? []) {
+          enqueueProvider(provider);
+        }
+        continue;
+      }
+
+      const provider = sourceNode.exportTable?.get(dependency.imported);
+      if (!provider) {
+        if (sourceNode.ambiguous?.has(dependency.imported)) {
+          throw new Error(
+            `E_EXPORT_AMBIGUOUS: '${dependency.imported}' is ambiguous in '${sourceNode.id}'.`,
+          );
+        }
+        throw new Error(
+          `E_EXPORT_MISSING: '${dependency.imported}' is not exported by '${sourceNode.id}'.`,
+        );
+      }
+      enqueueProvider(provider);
+    }
+  }
+
+  return selection;
+}
+
+function orderSelectedFiles(
+  graph: ModuleGraph,
+  selection: Map<string, Set<string>>,
+): ModuleNode[] {
+  const ordered: ModuleNode[] = [];
+  const visited = new Set<string>();
+
+  const visit = (nodeId: string) => {
+    if (visited.has(nodeId)) {
+      return;
+    }
+    visited.add(nodeId);
+    const node = graph.nodes.get(nodeId);
     if (!node) {
       return;
     }
-    for (const dep of node.deps) {
-      visit(dep);
+    for (const dependencyId of collectSelectedFileDeps(node, selection)) {
+      if (selection.has(dependencyId)) {
+        visit(dependencyId);
+      }
     }
-    stack.push(node);
+    ordered.push(node);
+  };
+
+  for (const nodeId of selection.keys()) {
+    visit(nodeId);
   }
 
-  const entryNode = graph.nodes.get(entryId);
-  if (entryNode) {
-    visit(entryNode.id);
-  }
-  return stack;
+  return ordered;
 }
 
-function resolveProvider(
-  graph: ModuleGraph,
+function collectSelectedFileDeps(
   node: ModuleNode,
-  importEntry: IRHeader["imports"][number],
-  spec: ImportSpecifier,
-): Provider | undefined {
-  const sourceId = node.resolvedSources.get(importEntry.source);
-  if (!sourceId) {
-    return undefined;
+  selection: Map<string, Set<string>>,
+): string[] {
+  const deps = new Set<string>();
+
+  for (const importEntry of node.irHeader.imports) {
+    if (importEntry.kind === "type") {
+      continue;
+    }
+    const sourceId = node.resolvedSources.get(importEntry.source);
+    if (sourceId && selection.has(sourceId)) {
+      deps.add(sourceId);
+    }
   }
-  const sourceNode = graph.nodes.get(sourceId);
-  if (!sourceNode?.exportTable) {
-    return undefined;
+
+  for (const conditionalImport of node.irHeader.conditionalImports) {
+    if (!conditionalImport.elseSource) {
+      continue;
+    }
+    const elseId = node.resolvedSources.get(conditionalImport.elseSource);
+    if (elseId && selection.has(elseId)) {
+      deps.add(elseId);
+    }
   }
-  if (importEntry.isNamespace && importEntry.namespaceUsage === "dynamic") {
-    return {
-      moduleId: sourceNode.id,
-      symbol: `__NS__${sourceNode.prefix}`,
-    };
+
+  const selectedCells = selection.get(node.id);
+  if (!selectedCells) {
+    return Array.from(deps);
   }
-  const provider = sourceNode.exportTable.get(spec.imported);
-  if (!provider) {
-    return undefined;
+
+  for (const cellId of selectedCells) {
+    const cell = getCellById(node, cellId);
+    if (!cell) {
+      continue;
+    }
+
+    for (const provider of cell.providerDeps ?? []) {
+      if (selection.has(provider.moduleId)) {
+        deps.add(provider.moduleId);
+      }
+    }
+
+    for (const dependency of cell.externalDeps) {
+      const sourceId = node.resolvedSources.get(dependency.source);
+      if (sourceId && selection.has(sourceId)) {
+        deps.add(sourceId);
+      }
+    }
   }
-  return provider;
+
+  deps.delete(node.id);
+  return Array.from(deps);
+}
+
+function collectNamespaceDemands(
+  selection: Map<string, Set<string>>,
+  graph: ModuleGraph,
+): Set<string> {
+  const demanded = new Set<string>();
+
+  for (const [nodeId, selectedCells] of selection.entries()) {
+    const node = graph.nodes.get(nodeId);
+    if (!node) {
+      continue;
+    }
+    for (const cellId of selectedCells) {
+      const cell = getCellById(node, cellId);
+      if (!cell) {
+        continue;
+      }
+      for (const dependency of cell.externalDeps) {
+        if (dependency.kind !== "import" || dependency.imported !== "*") {
+          continue;
+        }
+        const sourceId = node.resolvedSources.get(dependency.source);
+        if (sourceId) {
+          demanded.add(sourceId);
+        }
+      }
+    }
+  }
+
+  return demanded;
+}
+
+function collectOrderedCells(
+  node: ModuleNode,
+  selectedCells: Set<string>,
+): CellRecord[] {
+  return getAllCells(node)
+    .filter((cell) => selectedCells.has(cell.id))
+    .sort((left, right) => left.sourceOrder - right.sourceOrder);
+}
+
+function getAllCells(node: ModuleNode): CellRecord[] {
+  return [...node.irHeader.cells, ...(node.generatedCells ?? [])];
+}
+
+function getCellById(node: ModuleNode, cellId: string): CellRecord | undefined {
+  return getAllCells(node).find((cell) => cell.id === cellId);
+}
+
+function findCellProvidingSymbol(
+  node: ModuleNode,
+  symbol: string,
+): CellRecord | undefined {
+  return getAllCells(node).find((cell) => cell.provides.includes(symbol));
 }
 
 function collectDynamicImportExports(
@@ -584,15 +803,24 @@ function emitEntryExports(node: ModuleNode | undefined): string {
   return `export { ${parts.join(", ")} };`;
 }
 
-function emitDynamicBundleExports(nodes: ModuleNode[]): string {
+function emitDynamicBundleExports(
+  nodes: ModuleNode[],
+  selection: Map<string, Set<string>>,
+): string {
   const exportedSymbols = new Set<string>();
 
   for (const node of nodes) {
     if (!node.exportTable) {
       continue;
     }
+    const selectedCells = selection.get(node.id);
+    if (!selectedCells) {
+      continue;
+    }
     for (const provider of node.exportTable.values()) {
-      exportedSymbols.add(provider.symbol);
+      if (selectedCells.has(provider.cellId)) {
+        exportedSymbols.add(provider.symbol);
+      }
     }
   }
 

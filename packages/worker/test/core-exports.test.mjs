@@ -99,9 +99,7 @@ test("records export stars and reexports", async () => {
   const result = await transformSnapshot(
     "export * from './dep.js'; export { foo as bar } from './dep.js';",
   );
-  expect(result.code).toMatchInlineSnapshot(
-    `"const ji19ybwd_bar = a4tfu7r6i_foo;"`,
-  );
+  expect(result.code).toMatchInlineSnapshot(`""`);
   expect(result.meta).toMatchInlineSnapshot(`
 {
   "conditionalImports": [],
@@ -112,15 +110,10 @@ test("records export stars and reexports", async () => {
     {
       "request": "./dep.js",
       "source": "src/dep.js",
+      "sourceOrder": 0,
     },
   ],
-  "exportsLocal": [
-    {
-      "exported": "bar",
-      "kind": "var",
-      "local": "bar",
-    },
-  ],
+  "exportsLocal": [],
   "flags": {
     "hasTopLevelAwait": false,
     "needsNamespaceObject": false,
@@ -134,6 +127,7 @@ test("records export stars and reexports", async () => {
       "imported": "foo",
       "request": "./dep.js",
       "source": "src/dep.js",
+      "sourceOrder": 26,
     },
   ],
 }

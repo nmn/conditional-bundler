@@ -2,10 +2,10 @@
 /////##CONDITION_START##"COND_A"
 const a7fe542m3_pick = value => `pick:${value}`;
 /////##CONDITION_END##
+const mag3x3is_shared = "shared";
 /////##CONDITION_START##{"NOT":"COND_A"}
 const m1lyft9j_pick = value => `alt:${value}`;
 /////##CONDITION_END##
-const mag3x3is_shared = "shared";
 /////##CONDITION_START##"COND_A"
 const a1wam17ob_pick = a7fe542m3_pick;
 /////##CONDITION_END##
