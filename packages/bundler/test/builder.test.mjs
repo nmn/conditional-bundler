@@ -3,6 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { contentHash, normalizePosixPath } from "@bundler/shared";
 
 const rootDir = path.resolve(process.cwd());
 const fixturesDir = path.join(rootDir, "test/fixtures");
@@ -225,18 +226,74 @@ test("reuses cached worker artifacts for unchanged modules", async () => {
   await fs.rm(cacheDir, { recursive: true, force: true });
 
   await buildFixture("simple", { cacheDir });
-  const recordDir = path.join(cacheDir, "records");
-  const recordFiles = await fs.readdir(recordDir);
-  expect(recordFiles.length).toBeGreaterThan(0);
+  const v2Dir = path.join(cacheDir, "v2");
+  const configRoots = (await fs.readdir(v2Dir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  expect(configRoots).toHaveLength(1);
 
-  const recordPath = path.join(recordDir, recordFiles[0]);
-  const firstStat = await fs.stat(recordPath);
+  const activeRoot = path.join(v2Dir, configRoots[0]);
+  const configJson = JSON.parse(
+    await fs.readFile(path.join(activeRoot, "config.json"), "utf8"),
+  );
+  expect(configJson.configHash).toBe(configRoots[0]);
+
+  const entryPath = path.join(fixturesDir, "simple", "src/index.js");
+  const entryFileHash = contentHash(normalizePosixPath(entryPath));
+  const entryModulePath = path.join(
+    activeRoot,
+    "files",
+    entryFileHash,
+    "module.json",
+  );
+  const moduleJson = JSON.parse(await fs.readFile(entryModulePath, "utf8"));
+  const artifactPaths = moduleJson.fileRecord.cells
+    .map((cell) => cell.artifactPath)
+    .filter(Boolean);
+  expect(artifactPaths.length).toBeGreaterThan(0);
+  await Promise.all(artifactPaths.map((artifactPath) => fs.stat(artifactPath)));
+
+  const firstModuleStat = await fs.stat(entryModulePath);
+  const firstArtifactStat = await fs.stat(artifactPaths[0]);
 
   await new Promise((resolve) => setTimeout(resolve, 25));
   await buildFixture("simple", { cacheDir });
 
-  const secondStat = await fs.stat(recordPath);
-  expect(secondStat.mtimeMs).toBe(firstStat.mtimeMs);
+  const secondModuleStat = await fs.stat(entryModulePath);
+  const secondArtifactStat = await fs.stat(artifactPaths[0]);
+  expect(secondModuleStat.mtimeMs).toBe(firstModuleStat.mtimeMs);
+  expect(secondArtifactStat.mtimeMs).toBe(firstArtifactStat.mtimeMs);
+});
+
+test("uses different config roots when the bundler config changes", async () => {
+  const cacheDir = path.join(cacheRoot, "config-roots");
+  await fs.rm(cacheDir, { recursive: true, force: true });
+
+  await buildFixture("simple", { cacheDir });
+
+  const entry = path.join(fixturesDir, "simple", "src/index.js");
+  const outDir = path.join(outRoot, "simple-alt-config");
+  await fs.rm(outDir, { recursive: true, force: true });
+  await fs.mkdir(outDir, { recursive: true });
+  const { buildProject } = await import("../dist/builder.js");
+  await buildProject(
+    {
+      envs: { browser: { conditions: ["default"], target: "browser" } },
+      entries: [{ id: "simple", path: entry }],
+      outputs: { outDir, fileName: "alt.[env].[hash].js" },
+      cacheDir,
+      maxWorkers: 2,
+      diagnostics: "human",
+    },
+    [],
+  );
+
+  const v2Dir = path.join(cacheDir, "v2");
+  const configRoots = (await fs.readdir(v2Dir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  expect(configRoots).toHaveLength(2);
 });
 
 test("executes dynamically imported bundles with the expected exports", async () => {

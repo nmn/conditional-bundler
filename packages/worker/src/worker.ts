@@ -1,15 +1,19 @@
+import fs from "node:fs/promises";
 import { parentPort } from "node:worker_threads";
 import path from "node:path";
 import { filePrefix, contentHash, normalizePosixPath } from "@bundler/shared";
 import type {
+  CellRecord,
   TransformResult,
   TransformMultiResult,
   FileRecord,
 } from "@bundler/shared";
 import {
   writeFileAtomic,
+  writeJsonAtomic,
   ensureDir,
-  readFileIfExists,
+  readJsonIfExists,
+  fileExists,
 } from "@bundler/shared";
 
 if (!parentPort) {
@@ -34,27 +38,30 @@ type WorkerResponse = {
   fileRecord: FileRecord;
 };
 
-type CacheRecord = {
-  cacheKey: string;
+type ModuleCacheRecord = {
+  moduleKey: string;
   fileRecord: FileRecord;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type FileCachePaths = {
+  fileHash: string;
+  fileDir: string;
+  modulePath: string;
 };
 
 async function handleTransform(
   request: WorkerRequest,
 ): Promise<WorkerResponse> {
+  const moduleKey = buildModuleKey(request);
   const fileHash = contentHash(request.code);
-  const cacheKey = buildCacheKey(request);
-  const recordPath = path.join(
-    request.cacheDir,
-    "records",
-    `${contentHash(normalizePosixPath(request.realPath))}.json`,
-  );
-  const cached = await readCacheRecord(recordPath);
+  const cachePaths = buildFileCachePaths(request.cacheDir, request.realPath);
+  const cached = await readModuleCache(cachePaths.modulePath);
   if (
     cached &&
-    cached.fileRecord &&
-    cached.cacheKey === cacheKey &&
-    (await hasCachedArtifacts())
+    cached.moduleKey === moduleKey &&
+    (await hasCachedArtifacts(cached.fileRecord))
   ) {
     return {
       ok: true,
@@ -69,7 +76,6 @@ async function handleTransform(
   const normalizedPath = normalizePosixPath(request.realPath);
   const relPath = path.posix.relative(request.pkg.root, normalizedPath);
   const prefix = filePrefix(request.pkg.name, request.pkg.version, relPath);
-  const artifactHash = contentHash(cacheKey);
 
   const result = await transformFile(request, parsedByEnv);
   const resultsByEnv = (
@@ -81,24 +87,21 @@ async function handleTransform(
     throw new Error("Transform result missing file record.");
   }
 
-  const fileRecord = {
-    ...first.fileRecord,
-    id: request.realPath,
-    prefix,
-    contentHash: fileHash,
-    envs: Object.keys(resultsByEnv),
-    codeByEnv: {},
-    mapByEnv: {},
-    pkg: request.pkg,
-  };
+  const fileRecord = finalizeFileRecord(
+    {
+      ...first.fileRecord,
+      id: request.realPath,
+      prefix,
+      contentHash: fileHash,
+      envs: Object.keys(resultsByEnv),
+      codeByEnv: {},
+      mapByEnv: {},
+      pkg: request.pkg,
+    },
+    cachePaths.fileDir,
+  );
 
-  const irPath = path.join(request.cacheDir, "ir", `${artifactHash}.json`);
-  const record: CacheRecord = {
-    cacheKey,
-    fileRecord,
-  };
-  await writeFileAtomic(irPath, JSON.stringify({ ...fileRecord }, null, 2));
-  await writeFileAtomic(recordPath, JSON.stringify(record, null, 2));
+  await writeFileCache(cachePaths, first.fileRecord.cells, fileRecord, moduleKey);
 
   return {
     ok: true,
@@ -146,7 +149,7 @@ async function transformFile(
   );
 }
 
-function buildCacheKey(request: WorkerRequest): string {
+function buildModuleKey(request: WorkerRequest): string {
   const envHashes = Object.fromEntries(
     Object.entries(request.codeByEnv ?? {}).map(([envId, code]) => [
       envId,
@@ -156,7 +159,7 @@ function buildCacheKey(request: WorkerRequest): string {
 
   return JSON.stringify({
     realPath: normalizePosixPath(request.realPath),
-    pkgRoot: request.pkg.root,
+    pkg: request.pkg,
     envs: [...request.envs].sort(),
     syntax: request.syntax,
     codeHash: contentHash(request.code),
@@ -164,30 +167,102 @@ function buildCacheKey(request: WorkerRequest): string {
   });
 }
 
-async function readCacheRecord(filePath: string): Promise<CacheRecord | null> {
-  const raw = await readFileIfExists(filePath);
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<CacheRecord> & {
-      irHeader?: FileRecord;
-    };
-    const fileRecord = parsed.fileRecord ?? parsed.irHeader;
-    if (!parsed.cacheKey || !fileRecord) {
-      return null;
-    }
-    return {
-      cacheKey: parsed.cacheKey,
-      fileRecord,
-    };
-  } catch {
-    return null;
-  }
+function buildFileCachePaths(cacheRoot: string, realPath: string): FileCachePaths {
+  const fileHash = contentHash(normalizePosixPath(realPath));
+  const fileDir = path.join(cacheRoot, "files", fileHash);
+  return {
+    fileHash,
+    fileDir,
+    modulePath: path.join(fileDir, "module.json"),
+  };
 }
 
-async function hasCachedArtifacts(): Promise<boolean> {
+function finalizeFileRecord(fileRecord: FileRecord, fileDir: string): FileRecord {
+  return {
+    ...fileRecord,
+    cells: fileRecord.cells.map((cell, index) =>
+      cell.kind === "generated"
+        ? cell
+        : {
+            ...cell,
+            artifactPath: path.join(fileDir, toCellArtifactFileName(index)),
+            code: undefined,
+          },
+    ),
+  };
+}
+
+function toCellArtifactFileName(index: number): string {
+  return `${String(index).padStart(3, "0")}.js`;
+}
+
+async function writeFileCache(
+  cachePaths: FileCachePaths,
+  sourceCells: CellRecord[],
+  fileRecord: FileRecord,
+  moduleKey: string,
+): Promise<void> {
+  const existing = await readModuleCache(cachePaths.modulePath);
+  await fs.rm(cachePaths.fileDir, { recursive: true, force: true });
+  await ensureDir(cachePaths.fileDir);
+
+  for (const [index, cell] of sourceCells.entries()) {
+    if (cell.kind === "generated") {
+      continue;
+    }
+    const artifactPath = path.join(
+      cachePaths.fileDir,
+      toCellArtifactFileName(index),
+    );
+    await writeFileAtomic(artifactPath, cell.code ?? "");
+  }
+
+  const now = new Date().toISOString();
+  const moduleRecord: ModuleCacheRecord = {
+    moduleKey,
+    fileRecord,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+  await writeJsonAtomic(cachePaths.modulePath, moduleRecord);
+}
+
+async function readModuleCache(
+  filePath: string,
+): Promise<ModuleCacheRecord | null> {
+  const parsed = await readJsonIfExists<
+    Partial<ModuleCacheRecord> & { irHeader?: FileRecord; cacheKey?: string }
+  >(filePath);
+  if (!parsed) {
+    return null;
+  }
+
+  const fileRecord = parsed.fileRecord ?? parsed.irHeader;
+  const moduleKey = parsed.moduleKey ?? parsed.cacheKey;
+  if (!moduleKey || !fileRecord) {
+    return null;
+  }
+
+  return {
+    moduleKey,
+    fileRecord,
+    createdAt: parsed.createdAt ?? new Date(0).toISOString(),
+    updatedAt: parsed.updatedAt ?? new Date(0).toISOString(),
+  };
+}
+
+async function hasCachedArtifacts(fileRecord: FileRecord): Promise<boolean> {
+  for (const cell of fileRecord.cells) {
+    if (cell.kind === "generated") {
+      continue;
+    }
+    if (!cell.artifactPath) {
+      return false;
+    }
+    if (!(await fileExists(cell.artifactPath))) {
+      return false;
+    }
+  }
   return true;
 }
 

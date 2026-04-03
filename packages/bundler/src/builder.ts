@@ -30,7 +30,11 @@ import type { BundlerConfig, EntrySpec } from "./config.js";
 import {
   readPkgSafe,
   findPkgRoot,
+  contentHash,
   contentHashShort,
+  readJsonIfExists,
+  writeJsonAtomic,
+  ensureDir,
   type Diagnostic,
 } from "@bundler/shared";
 import type { BundlerPlugin } from "./plugins/types.js";
@@ -78,12 +82,26 @@ type ModuleCollection = {
   resolvedMap: Map<string, string>;
 };
 
+type CacheRootInfo = {
+  activeRoot: string;
+  configHash: string;
+};
+
+type CacheRootMetadata = {
+  configHash: string;
+  config: unknown;
+  createdAt: string;
+  lastUsedAt: string;
+};
+
 export async function buildProject(
   config: BundlerConfig,
   plugins: BundlerPlugin[],
 ): Promise<BuildResult> {
-  const cacheDir = path.resolve(config.cacheDir ?? path.join("tmp", ".bundler-cache"));
   const explicitEntries = collectEntries(config.entries);
+  const cacheBaseDir = path.resolve(
+    config.cacheDir ?? path.join("tmp", ".bundler-cache"),
+  );
   const envs = Object.keys(config.envs);
   const pool = new WorkerPool({
     workerPath: resolveWorkerPath(),
@@ -95,11 +113,15 @@ export async function buildProject(
   const resolver = createResolver();
 
   try {
-    await fs.mkdir(cacheDir, { recursive: true });
+    const cacheRoot = await prepareCacheRoot(
+      cacheBaseDir,
+      config,
+      explicitEntries,
+    );
     const { headers, dynamicEntries, resolvedMap } = await collectTransformedModules(
       explicitEntries,
       envs,
-      cacheDir,
+      cacheRoot.activeRoot,
       plugins,
       pool,
       resolver,
@@ -186,6 +208,106 @@ export async function buildProject(
   }
 }
 
+async function prepareCacheRoot(
+  cacheBaseDir: string,
+  config: BundlerConfig,
+  entries: EntrySpec[],
+): Promise<CacheRootInfo> {
+  const v2Dir = path.join(cacheBaseDir, "v2");
+  await ensureDir(v2Dir);
+
+  const normalizedConfig = normalizeConfigForCache(config, entries, cacheBaseDir);
+  const configHash = contentHash(JSON.stringify(normalizedConfig));
+  const activeRoot = path.join(v2Dir, configHash);
+  await ensureDir(activeRoot);
+
+  const configPath = path.join(activeRoot, "config.json");
+  const existing = await readJsonIfExists<CacheRootMetadata>(configPath);
+  const now = new Date().toISOString();
+  await writeJsonAtomic(configPath, {
+    configHash,
+    config: normalizedConfig,
+    createdAt: existing?.createdAt ?? now,
+    lastUsedAt: now,
+  });
+
+  void cleanupObsoleteCacheRoots(v2Dir, activeRoot, now);
+
+  return { activeRoot, configHash };
+}
+
+function normalizeConfigForCache(
+  config: BundlerConfig,
+  entries: EntrySpec[],
+  cacheBaseDir: string,
+): unknown {
+  return {
+    envs: Object.fromEntries(
+      Object.entries(config.envs)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([envId, envConfig]) => [
+          envId,
+          {
+            conditions: [...envConfig.conditions],
+            target: envConfig.target,
+          },
+        ]),
+    ),
+    entries: entries.map((entry) => ({
+      id: entry.id,
+      path: path.resolve(entry.path),
+      envs: entry.envs ? [...entry.envs] : undefined,
+    })),
+    outputs: {
+      outDir: path.resolve(config.outputs.outDir),
+      fileName: config.outputs.fileName,
+    },
+    cacheDir: cacheBaseDir,
+    maxWorkers: config.maxWorkers,
+    diagnostics: config.diagnostics,
+  };
+}
+
+async function cleanupObsoleteCacheRoots(
+  v2Dir: string,
+  activeRoot: string,
+  nowIso: string,
+): Promise<void> {
+  try {
+    const entries = await fs.readdir(v2Dir, { withFileTypes: true });
+    const cutoff = new Date(nowIso).getTime() - 7 * 24 * 60 * 60 * 1000;
+
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (!entry.isDirectory()) {
+          return;
+        }
+
+        const candidate = path.join(v2Dir, entry.name);
+        if (candidate === activeRoot) {
+          return;
+        }
+
+        const metadata =
+          await readJsonIfExists<Partial<CacheRootMetadata>>(
+            path.join(candidate, "config.json"),
+          );
+        const lastUsedTime = metadata?.lastUsedAt
+          ? Date.parse(metadata.lastUsedAt)
+          : Number.NaN;
+        const staleTime = Number.isFinite(lastUsedTime)
+          ? lastUsedTime
+          : (await fs.stat(candidate)).mtimeMs;
+        if (staleTime < cutoff) {
+          await fs.rm(candidate, { recursive: true, force: true });
+        }
+      }),
+    );
+  } catch {
+    // Best-effort cleanup only.
+  }
+}
+
 function collectEntries(entries: EntrySpec[]): EntrySpec[] {
   return entries.map((entry) => ({ ...entry, id: entry.id || entry.path }));
 }
@@ -220,37 +342,36 @@ async function createBundlePlan(
     }
     const condition = conditions.get(node.id);
     if (condition) {
-      parts.push(emitConditionalStart(condition));
-    }
+        parts.push(emitConditionalStart(condition));
+      }
 
-    for (const cell of collectOrderedCells(node, selectedCells)) {
-      if (cell.code) {
-        parts.push(cell.code);
+      const cellParts = await Promise.all(
+        collectOrderedCells(node, selectedCells).map(readCellSource),
+      );
+      parts.push(...cellParts.filter((part): part is string => part.length > 0));
+
+      if (namespaceDemanded.has(node.id) && node.exportTable) {
+        parts.push(emitNamespaceObject(node));
+      }
+
+      if (condition) {
+        parts.push(emitConditionalEnd());
+      }
+
+      for (const dyn of node.irHeader.dynamicImports) {
+        const resolved = await resolver(
+          node.id,
+          dyn.request ?? dyn.source,
+          graph.envId,
+        );
+        const targetNode = graph.nodes.get(resolved.id);
+        dynamicImports.push({
+          hashKey: dyn.hashKey,
+          resolvedId: resolved.id,
+          exports: collectDynamicImportExports(targetNode),
+        });
       }
     }
-
-    if (namespaceDemanded.has(node.id) && node.exportTable) {
-      parts.push(emitNamespaceObject(node));
-    }
-
-    if (condition) {
-      parts.push(emitConditionalEnd());
-    }
-
-    for (const dyn of node.irHeader.dynamicImports) {
-      const resolved = await resolver(
-        node.id,
-        dyn.request ?? dyn.source,
-        graph.envId,
-      );
-      const targetNode = graph.nodes.get(resolved.id);
-      dynamicImports.push({
-        hashKey: dyn.hashKey,
-        resolvedId: resolved.id,
-        exports: collectDynamicImportExports(targetNode),
-      });
-    }
-  }
   const exportFooter =
     exportMode === "entry"
       ? emitEntryExports(graph.nodes.get(entryPath))
@@ -764,6 +885,16 @@ function getAllCells(node: ModuleNode): CellRecord[] {
 
 function getCellById(node: ModuleNode, cellId: string): CellRecord | undefined {
   return getAllCells(node).find((cell) => cell.id === cellId);
+}
+
+async function readCellSource(cell: CellRecord): Promise<string> {
+  if (cell.code != null) {
+    return cell.code;
+  }
+  if (cell.artifactPath) {
+    return fs.readFile(cell.artifactPath, "utf8");
+  }
+  throw new Error(`Cell '${cell.id}' is missing code and artifactPath.`);
 }
 
 function findCellProvidingSymbol(
