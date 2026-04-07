@@ -1,45 +1,108 @@
-import type { BundlerPlugin, TransformModuleHookWithContext } from "./types.js";
-import type { TransformInput } from "@bundler/shared";
-import type { ModuleGraph } from "../graph/build.js";
+import { getEnvListValue, getEnvValue } from "./normalize.js";
+import type {
+  AfterCombineContext,
+  BeforeCombineContext,
+  BuildEndContext,
+  BuildStartContext,
+  BundlePlanDraft,
+  LoadContext,
+  LoadResult,
+  NormalizedPlugin,
+  ResolveImportContext,
+  ResolveImportResult,
+} from "./types.js";
 
-export async function runTransformModule(
-  plugins: BundlerPlugin[],
-  input: TransformInput,
-): Promise<ReturnType<TransformModuleHookWithContext> | undefined> {
-  let current: Awaited<ReturnType<TransformModuleHookWithContext>> | undefined;
+export async function runBuildStart(
+  plugins: NormalizedPlugin[],
+  context: BuildStartContext,
+): Promise<void> {
   for (const plugin of plugins) {
-    if (plugin.transformModule) {
-      current = await plugin.transformModule({
-        ...input,
-        previousResult: current,
-      });
+    await plugin.buildStart?.(context);
+  }
+}
+
+export async function runResolveImport(
+  plugins: NormalizedPlugin[],
+  envId: string,
+  context: ResolveImportContext,
+): Promise<ResolveImportResult | undefined> {
+  for (const plugin of plugins) {
+    const hook = getEnvValue(plugin.resolveImport, envId);
+    if (!hook) {
+      continue;
+    }
+    const result = await hook(context);
+    if (result !== undefined) {
+      return result;
+    }
+  }
+  return undefined;
+}
+
+export async function runLoad(
+  plugins: NormalizedPlugin[],
+  envId: string,
+  context: LoadContext,
+): Promise<LoadResult | undefined> {
+  for (const plugin of plugins) {
+    const hook = getEnvValue(plugin.load, envId);
+    if (!hook) {
+      continue;
+    }
+    const result = await hook(context);
+    if (result !== undefined) {
+      return result;
+    }
+  }
+  return undefined;
+}
+
+export async function runBeforeCombine(
+  plugins: NormalizedPlugin[],
+  context: BeforeCombineContext,
+): Promise<BundlePlanDraft[]> {
+  let current = context.plans;
+  for (const plugin of plugins) {
+    const hooks = getEnvListValue(plugin.beforeCombine, context.envId);
+    for (const hook of hooks) {
+      const next = await hook({ ...context, plans: current });
+      if (next) {
+        current = next;
+      }
     }
   }
   return current;
 }
 
-export async function runTransformModuleGraph(
-  plugins: BundlerPlugin[],
-  graphs: ModuleGraph[],
-): Promise<ModuleGraph[]> {
-  let current = graphs;
+export async function runAfterCombine(
+  plugins: NormalizedPlugin[],
+  context: AfterCombineContext,
+): Promise<{ code: string; map?: string }> {
+  let current = { code: context.code, map: context.map };
   for (const plugin of plugins) {
-    if (plugin.transformModuleGraph) {
-      current = await plugin.transformModuleGraph(current);
+    const hooks = getEnvListValue(plugin.afterCombine, context.envId);
+    for (const hook of hooks) {
+      const next = await hook({ ...context, ...current });
+      if (typeof next === "string") {
+        current = { code: next, map: current.map };
+        continue;
+      }
+      if (next) {
+        current = {
+          code: next.code,
+          map: next.map ?? current.map,
+        };
+      }
     }
   }
   return current;
 }
 
-export async function runTransformAssets(
-  plugins: BundlerPlugin[],
-  assets: Record<string, string>,
-): Promise<Record<string, string>> {
-  let current = assets;
+export async function runBuildEnd(
+  plugins: NormalizedPlugin[],
+  context: BuildEndContext,
+): Promise<void> {
   for (const plugin of plugins) {
-    if (plugin.transformAssets) {
-      current = await plugin.transformAssets(current);
-    }
+    await plugin.buildEnd?.(context);
   }
-  return current;
 }

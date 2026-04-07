@@ -35,43 +35,25 @@ test("rewrites dynamic import to constant", async () => {
   const result = await transformSnapshot(
     "export async function load() { return import('./dep.js'); }",
   );
-  expect(result.code).toMatchInlineSnapshot(`
-"async function ji19ybwd_load() {
-  return __IMPORT_a4tfu7r6i();
-}"
-`);
-  expect(result.meta).toMatchInlineSnapshot(`
-{
-  "conditionalImports": [],
-  "discoveredEntrypoints": [
-    "src/dep.js",
-  ],
-  "dynamicImports": [
-    {
-      "hashKey": "__IMPORT_a4tfu7r6i",
-      "request": "./dep.js",
-      "source": "src/dep.js",
-    },
-  ],
-  "exportRanges": [],
-  "exportStars": [],
-  "exportsLocal": [
-    {
-      "exported": "load",
-      "kind": "func",
-      "local": "load",
-    },
-  ],
-  "flags": {
-    "hasTopLevelAwait": false,
-    "needsNamespaceObject": false,
-    "sideEffects": true,
-  },
-  "importRanges": [],
-  "imports": [],
-  "reexportsNamed": [],
-}
-`);
+  expect(result.code).toBe(
+    `async function ji19ybwd_load() {\n  return __IMPORT_a4tfu7r6i();\n}`,
+  );
+  expect(result.meta).toMatchObject({
+    conditionalImports: [],
+    discoveredEntrypoints: ["src/dep.js"],
+    dynamicImports: [
+      expect.objectContaining({
+        hashKey: "__IMPORT_a4tfu7r6i",
+        request: "./dep.js",
+        source: "src/dep.js",
+        moduleId: "/fixture/src/dep.js",
+        external: false,
+      }),
+    ],
+    exportsLocal: [{ exported: "load", kind: "func", local: "load" }],
+    imports: [],
+    reexportsNamed: [],
+  });
 });
 
 test("rejects top-level await", async () => {

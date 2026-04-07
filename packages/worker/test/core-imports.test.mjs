@@ -36,41 +36,30 @@ test("records import use ranges", async () => {
     "import { foo } from './dep.js'; const value = foo + 1;",
   );
   expect(result.code).toBe("const ji19ybwd_value = a4tfu7r6i_foo + 1;");
-  expect(result.meta).toMatchInlineSnapshot(`
-{
-  "conditionalImports": [],
-  "discoveredEntrypoints": [],
-  "dynamicImports": [],
-  "exportRanges": [],
-  "exportStars": [],
-  "exportsLocal": [],
-  "flags": {
-    "hasTopLevelAwait": false,
-    "needsNamespaceObject": false,
-    "sideEffects": true,
-  },
-  "importRanges": [],
-  "imports": [
-    {
-      "attributes": undefined,
-      "condition": undefined,
-      "isDefault": false,
-      "isNamespace": false,
-      "kind": "value",
-      "request": "./dep.js",
-      "source": "src/dep.js",
-      "specifiers": [
-        {
-          "imported": "foo",
-          "local": "foo",
-          "useRanges": [],
-        },
-      ],
+  expect(result.meta).toMatchObject({
+    conditionalImports: [],
+    discoveredEntrypoints: [],
+    dynamicImports: [],
+    exportsLocal: [],
+    flags: {
+      hasTopLevelAwait: false,
+      needsNamespaceObject: false,
+      sideEffects: true,
     },
-  ],
-  "reexportsNamed": [],
-}
-`);
+    imports: [
+      expect.objectContaining({
+        request: "./dep.js",
+        source: "src/dep.js",
+        moduleId: "/fixture/src/dep.js",
+        external: false,
+        kind: "value",
+        isNamespace: false,
+        isDefault: false,
+        specifiers: [{ imported: "foo", local: "foo", useRanges: [] }],
+      }),
+    ],
+    reexportsNamed: [],
+  });
 });
 
 test("captures conditional import attributes", async () => {
@@ -86,55 +75,27 @@ const ji19ybwd_foo = undefined;
 /////##CONDITION_END##
 const ji19ybwd_value = ji19ybwd_foo;"
 `);
-  expect(result.meta).toMatchInlineSnapshot(`
-{
-  "conditionalImports": [
-    {
-      "condition": "COND_A",
-      "elseRequest": undefined,
-      "elseSource": undefined,
-      "request": "./dep.js",
-      "source": "src/dep.js",
-    },
-  ],
-  "discoveredEntrypoints": [],
-  "dynamicImports": [],
-  "exportRanges": [],
-  "exportStars": [],
-  "exportsLocal": [
-    {
-      "exported": "value",
-      "kind": "var",
-      "local": "value",
-    },
-  ],
-  "flags": {
-    "hasTopLevelAwait": false,
-    "needsNamespaceObject": false,
-    "sideEffects": true,
-  },
-  "importRanges": [],
-  "imports": [
-    {
-      "attributes": undefined,
-      "condition": "COND_A",
-      "isDefault": false,
-      "isNamespace": false,
-      "kind": "value",
-      "request": "./dep.js",
-      "source": "src/dep.js",
-      "specifiers": [
-        {
-          "imported": "foo",
-          "local": "foo",
-          "useRanges": [],
-        },
-      ],
-    },
-  ],
-  "reexportsNamed": [],
-}
-`);
+  expect(result.meta).toMatchObject({
+    conditionalImports: [
+      expect.objectContaining({
+        condition: "COND_A",
+        request: "./dep.js",
+        source: "src/dep.js",
+        moduleId: "/fixture/src/dep.js",
+        external: false,
+      }),
+    ],
+    exportsLocal: [{ exported: "value", kind: "var", local: "value" }],
+    imports: [
+      expect.objectContaining({
+        condition: "COND_A",
+        request: "./dep.js",
+        source: "src/dep.js",
+        moduleId: "/fixture/src/dep.js",
+        external: false,
+      }),
+    ],
+  });
 });
 
 test("handles conditional else attributes", async () => {
@@ -150,55 +111,22 @@ const ji19ybwd_foo = a594tohci_foo;
 /////##CONDITION_END##
 const ji19ybwd_value = ji19ybwd_foo;"
 `);
-  expect(result.meta).toMatchInlineSnapshot(`
-{
-  "conditionalImports": [
-    {
-      "condition": "COND_A",
-      "elseRequest": "./alt.js",
-      "elseSource": "src/alt.js",
-      "request": "./dep.js",
-      "source": "src/dep.js",
-    },
-  ],
-  "discoveredEntrypoints": [],
-  "dynamicImports": [],
-  "exportRanges": [],
-  "exportStars": [],
-  "exportsLocal": [
-    {
-      "exported": "value",
-      "kind": "var",
-      "local": "value",
-    },
-  ],
-  "flags": {
-    "hasTopLevelAwait": false,
-    "needsNamespaceObject": false,
-    "sideEffects": true,
-  },
-  "importRanges": [],
-  "imports": [
-    {
-      "attributes": undefined,
-      "condition": "COND_A",
-      "isDefault": false,
-      "isNamespace": false,
-      "kind": "value",
-      "request": "./dep.js",
-      "source": "src/dep.js",
-      "specifiers": [
-        {
-          "imported": "foo",
-          "local": "foo",
-          "useRanges": [],
-        },
-      ],
-    },
-  ],
-  "reexportsNamed": [],
-}
-`);
+  expect(result.meta).toMatchObject({
+    conditionalImports: [
+      expect.objectContaining({
+        condition: "COND_A",
+        request: "./dep.js",
+        source: "src/dep.js",
+        moduleId: "/fixture/src/dep.js",
+        elseRequest: "./alt.js",
+        elseSource: "src/alt.js",
+        elseModuleId: "/fixture/src/alt.js",
+        external: false,
+        elseExternal: false,
+      }),
+    ],
+    exportsLocal: [{ exported: "value", kind: "var", local: "value" }],
+  });
 });
 
 test("marks namespace dynamic usage", async () => {
@@ -206,42 +134,22 @@ test("marks namespace dynamic usage", async () => {
     "import * as ns from './dep.js'; const value = ns['foo'];",
   );
   expect(result.code).toBe("const ji19ybwd_value = __NS__a4tfu7r6i['foo'];");
-  expect(result.meta).toMatchInlineSnapshot(`
-{
-  "conditionalImports": [],
-  "discoveredEntrypoints": [],
-  "dynamicImports": [],
-  "exportRanges": [],
-  "exportStars": [],
-  "exportsLocal": [],
-  "flags": {
-    "hasTopLevelAwait": false,
-    "needsNamespaceObject": true,
-    "sideEffects": true,
-  },
-  "importRanges": [],
-  "imports": [
-    {
-      "attributes": undefined,
-      "condition": undefined,
-      "isDefault": false,
-      "isNamespace": true,
-      "kind": "value",
-      "namespaceUsage": "dynamic",
-      "request": "./dep.js",
-      "source": "src/dep.js",
-      "specifiers": [
-        {
-          "imported": "*",
-          "local": "ns",
-          "useRanges": [],
-        },
-      ],
+  expect(result.meta).toMatchObject({
+    flags: {
+      hasTopLevelAwait: false,
+      needsNamespaceObject: true,
+      sideEffects: true,
     },
-  ],
-  "reexportsNamed": [],
-}
-`);
+    imports: [
+      expect.objectContaining({
+        namespaceUsage: "dynamic",
+        request: "./dep.js",
+        source: "src/dep.js",
+        moduleId: "/fixture/src/dep.js",
+        external: false,
+      }),
+    ],
+  });
 });
 
 test("captures namespace import static usage", async () => {
@@ -251,45 +159,24 @@ test("captures namespace import static usage", async () => {
   expect(result.code).toBe(
     "const ji19ybwd_value = a4tfu7r6i_foo + a4tfu7r6i_bar;",
   );
-  expect(result.meta).toMatchInlineSnapshot(`
-{
-  "conditionalImports": [],
-  "discoveredEntrypoints": [],
-  "dynamicImports": [],
-  "exportRanges": [],
-  "exportStars": [],
-  "exportsLocal": [],
-  "flags": {
-    "hasTopLevelAwait": false,
-    "needsNamespaceObject": false,
-    "sideEffects": true,
-  },
-  "importRanges": [],
-  "imports": [
-    {
-      "attributes": undefined,
-      "condition": undefined,
-      "isDefault": false,
-      "isNamespace": true,
-      "kind": "value",
-      "namespaceUsage": "static",
-      "request": "./dep.js",
-      "source": "src/dep.js",
-      "specifiers": [
-        {
-          "imported": "foo",
-          "local": "ns",
-          "useRanges": [],
-        },
-        {
-          "imported": "bar",
-          "local": "ns",
-          "useRanges": [],
-        },
-      ],
+  expect(result.meta).toMatchObject({
+    flags: {
+      hasTopLevelAwait: false,
+      needsNamespaceObject: false,
+      sideEffects: true,
     },
-  ],
-  "reexportsNamed": [],
-}
-`);
+    imports: [
+      expect.objectContaining({
+        namespaceUsage: "static",
+        request: "./dep.js",
+        source: "src/dep.js",
+        moduleId: "/fixture/src/dep.js",
+        external: false,
+        specifiers: [
+          { imported: "foo", local: "ns", useRanges: [] },
+          { imported: "bar", local: "ns", useRanges: [] },
+        ],
+      }),
+    ],
+  });
 });

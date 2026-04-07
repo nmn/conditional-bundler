@@ -9,12 +9,23 @@ import type {
   FileRecord,
 } from "./ir.js";
 
+export type TransformResolvedImport = {
+  id: string | null;
+  filePath: string | null;
+  external: boolean;
+  virtual?: boolean;
+  meta?: Record<string, unknown>;
+};
+
 export type TransformInput = {
+  id?: string;
   code: string;
   realPath: string;
   pkg: { name: string; version: string; root: string };
   syntax: { jsx: boolean; ts: boolean };
   envs: string[];
+  envId?: string;
+  resolvedImports?: Record<string, TransformResolvedImport>;
 };
 
 export type TransformMeta = {

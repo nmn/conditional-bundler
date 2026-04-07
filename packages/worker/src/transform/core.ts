@@ -31,6 +31,15 @@ export type CoreTransformOptions = {
   importAttrAllow: string[];
 };
 
+type ResolvedImportInfo = {
+  source: string;
+  request: string;
+  moduleId?: string | null;
+  external: boolean;
+  pkg: TransformInput["pkg"];
+  relPath: string;
+};
+
 function getParserPlugins(input: TransformInput): ParserPlugin[] {
   const plugins: ParserPlugin[] = ["importAttributes"];
   if (input.syntax.ts) {
@@ -46,7 +55,15 @@ export function transformWithCore(
   input: TransformInput,
   options: CoreTransformOptions,
 ): TransformResult {
-  const dynamicImportMap = new Map<string, { source: string; request: string }>();
+  const dynamicImportMap = new Map<
+    string,
+    {
+      source: string;
+      request: string;
+      moduleId?: string | null;
+      external: boolean;
+    }
+  >();
 
   const ast = parse(input.code, {
     sourceType: "module",
@@ -177,7 +194,20 @@ export function transformWithCore(
       if (t.isCallExpression(parent) && parent.arguments.length === 1) {
         const arg = parent.arguments[0];
         if (t.isStringLiteral(arg)) {
-          const resolved = resolveImportForHash(input, arg.value);
+          const resolved = resolveImportForHash(
+            input,
+            arg.value,
+            "dynamic-import",
+          );
+          if (resolved.external) {
+            dynamicImportMap.set(arg.value, {
+              source: arg.value,
+              request: arg.value,
+              moduleId: null,
+              external: true,
+            });
+            return;
+          }
           const key = importConstKey(
             resolved.pkg.name,
             resolved.pkg.version,
@@ -186,6 +216,8 @@ export function transformWithCore(
           dynamicImportMap.set(key, {
             source: resolved.relPath,
             request: arg.value,
+            moduleId: resolved.moduleId,
+            external: false,
           });
           parentPath.replaceWith(
             t.callExpression(t.identifier(`__IMPORT_${key}`), []),
@@ -220,7 +252,7 @@ export function transformWithCore(
     ExportNamedDeclaration(path: NodePath<t.ExportNamedDeclaration>) {
       if (path.node.source) {
         const request = path.node.source.value;
-        const resolved = resolveImportForHash(input, request);
+        const resolved = resolveImportForHash(input, request, "reexport");
         const sourceOrder = path.node.start ?? 0;
         for (const spec of path.node.specifiers) {
           if (t.isExportNamespaceSpecifier(spec)) {
@@ -228,6 +260,8 @@ export function transformWithCore(
             reexportsNamed.push({
               source: resolved.relPath,
               request,
+              moduleId: resolved.moduleId,
+              external: resolved.external,
               imported: "*",
               exported,
               isNamespace: true,
@@ -241,13 +275,17 @@ export function transformWithCore(
             reexportsNamed.push({
               source: resolved.relPath,
               request,
+              moduleId: resolved.moduleId,
+              external: resolved.external,
               imported,
               exported,
               sourceOrder,
             });
           }
         }
-        path.remove();
+        if (!resolved.external) {
+          path.remove();
+        }
         return;
       }
       if (path.node.declaration) {
@@ -302,7 +340,11 @@ export function transformWithCore(
                 ),
               );
             } else {
-              exportsLocal.push({ local: originalLocal, exported, kind: "var" });
+              exportsLocal.push({
+                local: originalLocal,
+                exported,
+                kind: "var",
+              });
             }
           }
         }
@@ -339,7 +381,7 @@ export function transformWithCore(
     },
     ExportAllDeclaration(path: NodePath<t.ExportAllDeclaration>) {
       const request = path.node.source.value;
-      const resolved = resolveImportForHash(input, request);
+      const resolved = resolveImportForHash(input, request, "reexport");
       const exported = (
         path.node as t.ExportAllDeclaration & { exported?: t.Identifier }
       ).exported;
@@ -348,21 +390,33 @@ export function transformWithCore(
         reexportsNamed.push({
           source: resolved.relPath,
           request,
+          moduleId: resolved.moduleId,
+          external: resolved.external,
           imported: "*",
           exported: exported.name,
           isNamespace: true,
           sourceOrder,
         });
-        path.remove();
+        if (!resolved.external) {
+          path.remove();
+        }
         return;
       }
-      exportStars.push({ source: resolved.relPath, request, sourceOrder });
-      path.remove();
+      exportStars.push({
+        source: resolved.relPath,
+        request,
+        moduleId: resolved.moduleId,
+        external: resolved.external,
+        sourceOrder,
+      });
+      if (!resolved.external) {
+        path.remove();
+      }
     },
   });
 
   rewriteImportsInAst(ast, input, prefix, importMeta.imports, traverse);
-  removeImportDeclarations(ast, traverse);
+  removeImportDeclarations(input, ast, traverse);
 
   if (hasTopLevelAwait) {
     throw new Error(
@@ -378,9 +432,11 @@ export function transformWithCore(
   const dynamicImports: DynamicImport[] = Array.from(
     dynamicImportMap.entries(),
   ).map(([hashKey, entry]) => ({
-    hashKey: `__IMPORT_${hashKey}`,
+    hashKey: entry.external ? hashKey : `__IMPORT_${hashKey}`,
     source: entry.source,
     request: entry.request,
+    moduleId: entry.moduleId,
+    external: entry.external,
   }));
 
   let transformedCode = output.code;
@@ -411,7 +467,8 @@ export function transformWithCore(
     (left, right) => left.sourceOrder - right.sourceOrder,
   );
   const fileRecord: FileRecord = {
-    id: input.realPath,
+    id: input.id ?? input.realPath,
+    filePath: input.realPath,
     prefix,
     contentHash: contentHash(input.code),
     envs: ["default"],
@@ -475,7 +532,6 @@ function collectImports(
   traverse(ast, {
     ImportDeclaration(path: NodePath<t.ImportDeclaration>) {
       const request = path.node.source.value;
-      const resolved = resolveImportForHash(input, request);
       const attributes = readImportAttributes(path.node);
       const typeAttr = attributes.type;
       if (typeAttr && typeAttr !== "json") {
@@ -491,18 +547,27 @@ function collectImports(
 
       const conditionAttr = attributes.condition;
       const elseAttr = attributes.else;
+      const resolved = resolveImportForHash(
+        input,
+        request,
+        conditionAttr ? "conditional-import" : "import",
+      );
       let condition: ConditionalImport | undefined;
       if (conditionAttr) {
         const conditionExpr = parseCondition(conditionAttr);
         const elseResolved = elseAttr
-          ? resolveImportForHash(input, elseAttr)
+          ? resolveImportForHash(input, elseAttr, "conditional-else")
           : undefined;
         condition = {
           source: resolved.relPath,
           request,
+          moduleId: resolved.moduleId,
+          external: resolved.external,
           condition: conditionExpr,
           elseSource: elseResolved?.relPath,
           elseRequest: elseAttr,
+          elseModuleId: elseResolved?.moduleId,
+          elseExternal: elseResolved?.external,
         };
         conditionalImports.push(condition);
         delete attributes.condition;
@@ -550,6 +615,8 @@ function collectImports(
       imports.push({
         source: resolved.relPath,
         request,
+        moduleId: resolved.moduleId,
+        external: resolved.external,
         kind,
         isNamespace,
         isDefault,
@@ -657,10 +724,14 @@ function buildConditionalBindingCells(
   let sourceOrder = -1000;
 
   for (const entry of imports) {
-    if (!entry.condition) {
+    if (!entry.condition || entry.external) {
       continue;
     }
-    const resolved = resolveImportForHash(input, entry.request ?? entry.source);
+    const resolved = resolveImportForHash(
+      input,
+      entry.request ?? entry.source,
+      "conditional-import",
+    );
     const depPrefix = filePrefix(
       resolved.pkg.name,
       resolved.pkg.version,
@@ -693,10 +764,11 @@ function buildConditionalBindingCells(
           imported: "*",
         },
       ];
-      if (conditionalImport?.elseSource) {
+      if (conditionalImport?.elseSource && !conditionalImport.elseExternal) {
         const elseResolved = resolveImportForHash(
           input,
           conditionalImport.elseRequest ?? conditionalImport.elseSource,
+          "conditional-else",
         );
         const elsePrefix = filePrefix(
           elseResolved.pkg.name,
@@ -748,10 +820,11 @@ function buildConditionalBindingCells(
           imported: spec.imported,
         },
       ];
-      if (conditionalImport?.elseSource) {
+      if (conditionalImport?.elseSource && !conditionalImport.elseExternal) {
         const elseResolved = resolveImportForHash(
           input,
           conditionalImport.elseRequest ?? conditionalImport.elseSource,
+          "conditional-else",
         );
         const elsePrefix = filePrefix(
           elseResolved.pkg.name,
@@ -801,11 +874,15 @@ function rewriteImportsInAst(
   }
 
   for (const entry of imports) {
-    if (entry.kind !== "value") {
+    if (entry.kind !== "value" || entry.external) {
       continue;
     }
 
-    const resolved = resolveImportForHash(input, entry.request ?? entry.source);
+    const resolved = resolveImportForHash(
+      input,
+      entry.request ?? entry.source,
+      entry.condition ? "conditional-import" : "import",
+    );
     const depPrefix = filePrefix(
       resolved.pkg.name,
       resolved.pkg.version,
@@ -853,7 +930,8 @@ function rewriteImportsInAst(
       if (!binding) {
         continue;
       }
-      const importName = spec.imported === "default" ? "default" : spec.imported;
+      const importName =
+        spec.imported === "default" ? "default" : spec.imported;
       const targetName = entry.condition
         ? `${prefix}_${spec.local}`
         : `${depPrefix}_${importName}`;
@@ -896,34 +974,37 @@ function collectStatementCells(
 
   const externalSymbolMap = createExternalSymbolMap(imports, input, prefix);
   const exportSymbols = new Set(
-    exportsLocal.map((entry) =>
-      `${prefix}_${entry.local === "default" ? "default" : entry.local}`,
+    exportsLocal.map(
+      (entry) =>
+        `${prefix}_${entry.local === "default" ? "default" : entry.local}`,
     ),
   );
 
-  const cells: CellRecord[] = programPath.get("body").map((statementPath, index) => {
-    const statement = statementPath.node as t.Statement;
-    const provides = collectDeclaredTopLevelSymbols(statement);
-    const { internalDeps, externalDeps } = collectStatementDeps(
-      statementPath as NodePath<t.Statement>,
-      new Set(provides),
-      internalSymbols,
-      externalSymbolMap,
-    );
-    const code = generate(statement, { sourceMaps: false }).code;
+  const cells: CellRecord[] = programPath
+    .get("body")
+    .map((statementPath, index) => {
+      const statement = statementPath.node as t.Statement | t.ModuleDeclaration;
+      const provides = collectDeclaredTopLevelSymbols(statement);
+      const { internalDeps, externalDeps } = collectStatementDeps(
+        statementPath as NodePath<t.Statement | t.ModuleDeclaration>,
+        new Set(provides),
+        internalSymbols,
+        externalSymbolMap,
+      );
+      const code = generate(statement, { sourceMaps: false }).code;
 
-    return {
-      id: `${input.realPath}#stmt:${index}`,
-      fileId: input.realPath,
-      sourceOrder: index,
-      kind: "worker",
-      code,
-      provides,
-      internalDeps,
-      externalDeps,
-      eager: isEagerStatement(statement, exportSymbols),
-    };
-  });
+      return {
+        id: `${input.realPath}#stmt:${index}`,
+        fileId: input.realPath,
+        sourceOrder: index,
+        kind: "worker",
+        code,
+        provides,
+        internalDeps,
+        externalDeps,
+        eager: isEagerStatement(statement, exportSymbols),
+      };
+    });
 
   return mergeAdjacentStatementCells(cells);
 }
@@ -1001,10 +1082,14 @@ function createExternalSymbolMap(
   const externalSymbols = new Map<string, CellExternalDep>();
 
   for (const entry of imports) {
-    if (entry.kind !== "value" || entry.condition) {
+    if (entry.kind !== "value" || entry.condition || entry.external) {
       continue;
     }
-    const resolved = resolveImportForHash(input, entry.request ?? entry.source);
+    const resolved = resolveImportForHash(
+      input,
+      entry.request ?? entry.source,
+      "import",
+    );
     const depPrefix = filePrefix(
       resolved.pkg.name,
       resolved.pkg.version,
@@ -1034,7 +1119,8 @@ function createExternalSymbolMap(
     }
 
     for (const spec of entry.specifiers) {
-      const importName = spec.imported === "default" ? "default" : spec.imported;
+      const importName =
+        spec.imported === "default" ? "default" : spec.imported;
       externalSymbols.set(`${depPrefix}_${importName}`, {
         kind: "import",
         source: entry.source,
@@ -1045,7 +1131,7 @@ function createExternalSymbolMap(
   }
 
   for (const entry of imports) {
-    if (entry.kind === "side-effect" && !entry.condition) {
+    if (entry.kind === "side-effect" && !entry.condition && !entry.external) {
       externalSymbols.set(`${prefix}#side-effect:${entry.source}`, {
         kind: "side-effect",
         source: entry.source,
@@ -1058,7 +1144,7 @@ function createExternalSymbolMap(
 }
 
 function collectStatementDeps(
-  statementPath: NodePath<t.Statement>,
+  statementPath: NodePath<t.Statement | t.ModuleDeclaration>,
   providedSymbols: Set<string>,
   internalSymbols: Set<string>,
   externalSymbols: Map<string, CellExternalDep>,
@@ -1104,7 +1190,9 @@ function collectStatementDeps(
   };
 }
 
-function collectDeclaredTopLevelSymbols(statement: t.Statement): string[] {
+function collectDeclaredTopLevelSymbols(
+  statement: t.Statement | t.ModuleDeclaration,
+): string[] {
   if (t.isFunctionDeclaration(statement) && statement.id) {
     return [statement.id.name];
   }
@@ -1162,7 +1250,7 @@ function collectPatternIdentifiers(
 }
 
 function isEagerStatement(
-  statement: t.Statement,
+  statement: t.Statement | t.ModuleDeclaration,
   exportSymbols: Set<string>,
 ): boolean {
   if (t.isFunctionDeclaration(statement) || t.isClassDeclaration(statement)) {
@@ -1265,12 +1353,21 @@ function isSafeInitializer(expression: t.Expression): boolean {
 }
 
 function removeImportDeclarations(
+  input: TransformInput,
   ast: t.File,
   traverse: typeof import("@babel/traverse").default,
 ): void {
   traverse(ast, {
     ImportDeclaration(path: NodePath<t.ImportDeclaration>) {
-      path.remove();
+      const attributes = readImportAttributes(path.node);
+      const resolved = resolveImportForHash(
+        input,
+        path.node.source.value,
+        attributes.condition ? "conditional-import" : "import",
+      );
+      if (!resolved.external) {
+        path.remove();
+      }
     },
   });
 }
@@ -1278,28 +1375,67 @@ function removeImportDeclarations(
 function resolveImportForHash(
   input: TransformInput,
   source: string,
-): { pkg: TransformInput["pkg"]; relPath: string } {
+  kind:
+    | "import"
+    | "dynamic-import"
+    | "reexport"
+    | "conditional-import"
+    | "conditional-else",
+): ResolvedImportInfo {
+  const resolution =
+    input.resolvedImports?.[toImportResolutionKey(kind, source)];
+  if (resolution?.external) {
+    return {
+      source,
+      request: source,
+      moduleId: null,
+      external: true,
+      pkg: input.pkg,
+      relPath: source,
+    };
+  }
+
+  const resolvedPath = resolution?.filePath
+    ? normalizePosixPath(resolution.filePath)
+    : (resolveImportPath(input.realPath, source) ??
+      path.resolve(path.dirname(input.realPath), source));
+  const moduleId = resolution?.id ?? resolvedPath;
+
   if (source.startsWith(".")) {
-    const resolvedPath =
-      resolveImportPath(input.realPath, source) ??
-      path.resolve(path.dirname(input.realPath), source);
-    const relPath = path.posix.relative(
-      input.pkg.root,
-      normalizePosixPath(resolvedPath),
-    );
-    return { pkg: input.pkg, relPath };
+    const relPath = path.posix.relative(input.pkg.root, resolvedPath);
+    return {
+      source: relPath,
+      request: source,
+      moduleId,
+      external: false,
+      pkg: input.pkg,
+      relPath,
+    };
   }
-  const resolvedPath = resolveImportPath(input.realPath, source);
-  if (!resolvedPath) {
-    return { pkg: input.pkg, relPath: source };
-  }
+
   const pkgRoot = findPkgRoot(resolvedPath) ?? path.dirname(resolvedPath);
   const pkg = readPkgSafe(pkgRoot);
-  const relPath = path.posix.relative(
-    pkg.root,
-    normalizePosixPath(resolvedPath),
-  );
-  return { pkg, relPath };
+  const relPath = path.posix.relative(pkg.root, resolvedPath);
+  return {
+    source: relPath,
+    request: source,
+    moduleId,
+    external: false,
+    pkg,
+    relPath,
+  };
+}
+
+function toImportResolutionKey(
+  kind:
+    | "import"
+    | "dynamic-import"
+    | "reexport"
+    | "conditional-import"
+    | "conditional-else",
+  request: string,
+): string {
+  return `${kind}:${request}`;
 }
 
 function resolveImportPath(fromPath: string, source: string): string | null {
@@ -1411,7 +1547,9 @@ function conditionalImportTarget(
   return `${depPrefix}_${importName}`;
 }
 
-function emitConditionalStart(condition: ConditionalImport["condition"]): string {
+function emitConditionalStart(
+  condition: ConditionalImport["condition"],
+): string {
   return `/////##CONDITION_START##${JSON.stringify(condition)}`;
 }
 

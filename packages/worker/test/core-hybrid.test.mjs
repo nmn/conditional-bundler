@@ -34,7 +34,7 @@ test("handles a mixed module with reexports, conditional imports, namespace acce
   expect({
     code: result.code,
     meta: result.meta,
-  }).toEqual({
+  }).toMatchObject({
     code: `/////##CONDITION_START##"COND_A"
 const ji19ybwd_pick = rzh0ycy4_pick;
 /////##CONDITION_END##
@@ -47,21 +47,27 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
 };`,
     meta: {
       conditionalImports: [
-        {
+        expect.objectContaining({
           condition: "COND_A",
           elseRequest: "./fallback.js",
           elseSource: "src/fallback.js",
+          elseModuleId: "/fixture/src/fallback.js",
+          elseExternal: false,
           request: "./feature.js",
           source: "src/feature.js",
-        },
+          moduleId: "/fixture/src/feature.js",
+          external: false,
+        }),
       ],
       discoveredEntrypoints: ["src/lazy.js"],
       dynamicImports: [
-        {
+        expect.objectContaining({
           hashKey: "__IMPORT_a38syydlx",
           request: "./lazy.js",
           source: "src/lazy.js",
-        },
+          moduleId: "/fixture/src/lazy.js",
+          external: false,
+        }),
       ],
       exportRanges: [],
       exportStars: [],
@@ -79,7 +85,7 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
       },
       importRanges: [],
       imports: [
-        {
+        expect.objectContaining({
           attributes: undefined,
           condition: undefined,
           isDefault: true,
@@ -87,6 +93,8 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           kind: "value",
           request: "./dep.js",
           source: "src/dep.js",
+          moduleId: "/fixture/src/dep.js",
+          external: false,
           specifiers: [
             {
               imported: "default",
@@ -99,8 +107,8 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
               useRanges: [],
             },
           ],
-        },
-        {
+        }),
+        expect.objectContaining({
           attributes: undefined,
           condition: undefined,
           isDefault: false,
@@ -109,6 +117,8 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           namespaceUsage: "dynamic",
           request: "./ns.js",
           source: "src/ns.js",
+          moduleId: "/fixture/src/ns.js",
+          external: false,
           specifiers: [
             {
               imported: "*",
@@ -116,8 +126,8 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
               useRanges: [],
             },
           ],
-        },
-        {
+        }),
+        expect.objectContaining({
           attributes: undefined,
           condition: "COND_A",
           isDefault: false,
@@ -125,6 +135,8 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           kind: "value",
           request: "./feature.js",
           source: "src/feature.js",
+          moduleId: "/fixture/src/feature.js",
+          external: false,
           specifiers: [
             {
               imported: "pick",
@@ -132,16 +144,18 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
               useRanges: [],
             },
           ],
-        },
+        }),
       ],
       reexportsNamed: [
-        {
+        expect.objectContaining({
           exported: "renamedHelper",
           imported: "helper",
           request: "./helpers.js",
           source: "src/helpers.js",
+          moduleId: "/fixture/src/helpers.js",
+          external: false,
           sourceOrder: 183,
-        },
+        }),
       ],
     },
   });

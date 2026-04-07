@@ -3,11 +3,7 @@ import { availableParallelism } from "node:os";
 import path from "node:path";
 import { WorkerPool } from "./worker-pool.js";
 import { resolveWorkerPath } from "./worker-path.js";
-import {
-  createResolver,
-  type ResolveResult,
-  type Resolver,
-} from "./resolver.js";
+import { createResolver, type Resolver } from "./resolver.js";
 import { buildGraph } from "./graph/build.js";
 import { resolveExportTables } from "./exports/resolve.js";
 import { findCycles } from "./graph/scc.js";
@@ -25,7 +21,16 @@ import {
   type BundleTarget,
 } from "./linker/dynamic-import-constants.js";
 import { concatParts } from "./concat.js";
-import { runTransformModule, runTransformModuleGraph } from "./plugins/run.js";
+import type { BundleManifest } from "./manifest.js";
+import { normalizePlugins } from "./plugins/normalize.js";
+import { scanModuleRequests } from "./plugins/scan.js";
+import {
+  runAfterCombine,
+  runBeforeCombine,
+  runBuildEnd,
+  runBuildStart,
+  runLoad,
+} from "./plugins/run.js";
 import type { BundlerConfig, EntrySpec } from "./config.js";
 import {
   readPkgSafe,
@@ -37,7 +42,15 @@ import {
   ensureDir,
   type Diagnostic,
 } from "@bundler/shared";
-import type { BundlerPlugin } from "./plugins/types.js";
+import type {
+  BundlerPlugin,
+  BundlePlanDraft,
+  EmitFileInput,
+  LoadedModuleRecord,
+  ModuleResolution,
+  NormalizedPlugin,
+  WorkerTransformProfile,
+} from "./plugins/types.js";
 import type { ModuleGraph } from "./graph/build.js";
 import type {
   CellRecord,
@@ -48,38 +61,51 @@ import type {
 
 export type BuildResult = {
   bundles: Array<{ envId: string; entryId: string; fileName: string }>;
-  manifest: Record<string, unknown>;
+  manifest: BundleManifest;
   diagnostics: Diagnostic[];
 };
 
 type DynamicImportRef = {
   hashKey: string;
-  resolvedId: string;
+  resolvedId: string | null;
+  externalRequest?: string;
   exports: Array<{ exported: string; symbol: string }>;
 };
 
 type BundlePlan = {
   envId: string;
   entryId: string;
-  fileName: string;
   exportMode: "entry" | "dynamic";
   parts: string[];
   dynamicImports: DynamicImportRef[];
   diagnostics: Diagnostic[];
+  modules: string[];
+  map?: string;
 };
 
 type WorkerTransformResponse = {
-  fileRecord: FileRecord;
+  fileRecordsByEnv: Record<string, FileRecord>;
 };
 
-type DynamicEntryDiscovery = ResolveResult & {
+type DynamicEntryDiscovery = ModuleResolution & {
   envId: string;
 };
 
 type ModuleCollection = {
-  headers: FileRecord[];
+  headersByEnv: Map<string, Map<string, FileRecord>>;
   dynamicEntries: EntrySpec[];
-  resolvedMap: Map<string, string>;
+  resolvedMap: Map<string, ModuleResolution>;
+};
+
+type ScheduledModule = {
+  id: string;
+  filePath: string;
+  pkg: { name: string; version: string; root: string };
+  virtual?: boolean;
+};
+
+type PendingEmitFile = EmitFileInput & {
+  pluginName?: string;
 };
 
 type CacheRootInfo = {
@@ -99,6 +125,10 @@ export async function buildProject(
   plugins: BundlerPlugin[],
 ): Promise<BuildResult> {
   const explicitEntries = collectEntries(config.entries);
+  const allPlugins = [...(config.plugins ?? []), ...plugins];
+  const pendingFiles: PendingEmitFile[] = [];
+  const { plugins: normalizedPlugins, workerProfile } =
+    await normalizePlugins(allPlugins);
   const cacheBaseDir = path.resolve(
     config.cacheDir ?? path.join("tmp", ".bundler-cache"),
   );
@@ -110,29 +140,53 @@ export async function buildProject(
   const cleanup = async () => {
     await pool.close();
   };
-  const resolver = createResolver();
 
   try {
+    await runBuildStart(normalizedPlugins, {
+      addEntry(entry) {
+        explicitEntries.push({
+          ...entry,
+          path: path.resolve(entry.path),
+        });
+      },
+      emitFile(file) {
+        pendingFiles.push(file);
+      },
+    });
     const cacheRoot = await prepareCacheRoot(
       cacheBaseDir,
       config,
       explicitEntries,
+      workerProfile,
     );
-    const { headers, dynamicEntries, resolvedMap } = await collectTransformedModules(
-      explicitEntries,
-      envs,
-      cacheRoot.activeRoot,
-      plugins,
-      pool,
-      resolver,
-    );
+    const resolver = createResolver({
+      config,
+      plugins: normalizedPlugins,
+      cacheDir: cacheRoot.activeRoot,
+    });
+    const { headersByEnv, dynamicEntries, resolvedMap } =
+      await collectTransformedModules(
+        explicitEntries,
+        envs,
+        cacheRoot.activeRoot,
+        normalizedPlugins,
+        workerProfile,
+        config,
+        pool,
+        resolver,
+      );
 
     const graphs = await Promise.all(
-      envs.map((envId) => buildGraph({ envId, headers, resolver })),
+      envs.map((envId) =>
+        buildGraph({
+          envId,
+          headers: Array.from(headersByEnv.get(envId)?.values() ?? []),
+          resolver,
+        }),
+      ),
     );
-    const transformedGraphs = await runTransformModuleGraph(plugins, graphs);
 
-    for (const graph of transformedGraphs) {
+    for (const graph of graphs) {
       const cycles = findCycles(graph.nodes);
       if (cycles.length > 0) {
         throw new Error(
@@ -144,10 +198,11 @@ export async function buildProject(
     }
 
     const bundlePlans: BundlePlan[] = [];
-    for (const graph of transformedGraphs) {
+    for (const graph of graphs) {
       const entries = pickEntriesForEnv(explicitEntries, graph.envId);
+      let drafts: BundlePlanDraft[] = [];
       for (const entry of entries) {
-        bundlePlans.push(
+        drafts.push(
           await createBundlePlan(graph, entry.path, config, resolver, "entry"),
         );
       }
@@ -159,24 +214,59 @@ export async function buildProject(
         if (entries.some((explicit) => explicit.path === entry.path)) {
           continue;
         }
-        bundlePlans.push(
+        drafts.push(
           await createBundlePlan(
             graph,
-            entry.path,
+            resolvedMap.get(entry.path)?.id ?? entry.path,
             config,
             resolver,
             "dynamic",
           ),
         );
       }
+      drafts = await runBeforeCombine(normalizedPlugins, {
+        envId: graph.envId,
+        plans: drafts,
+        emitFile(file) {
+          pendingFiles.push(file);
+        },
+      });
+      bundlePlans.push(...drafts.map((draft) => fromBundleDraft(draft)));
     }
 
     const bundleMap = new Map<string, BundleTarget>();
+    const bundleOutputs = new Map<
+      string,
+      { envId: string; entryId: string; fileName: string; modules: string[] }
+    >();
     for (const plan of bundlePlans) {
-      const resolved = resolvedMap.get(plan.entryId) ?? plan.entryId;
-      bundleMap.set(resolved, {
-        fileName: plan.fileName,
+      const finalBundle = await runAfterCombine(normalizedPlugins, {
+        envId: plan.envId,
+        entryId: plan.entryId,
         exportMode: plan.exportMode,
+        code: concatParts(plan.parts),
+        map: plan.map,
+        emitFile(file) {
+          pendingFiles.push(file);
+        },
+      });
+      plan.parts = [finalBundle.code];
+      plan.map = finalBundle.map;
+      const hash = contentHashShort(finalBundle.code);
+      const fileName = config.outputs.fileName
+        ? config.outputs.fileName
+            .replace("[env]", plan.envId)
+            .replace("[hash]", hash)
+        : `bundle.${plan.envId}.${hash}.js`;
+      bundleMap.set(plan.entryId, {
+        fileName,
+        exportMode: plan.exportMode,
+      });
+      bundleOutputs.set(`${plan.envId}:${plan.entryId}`, {
+        envId: plan.envId,
+        entryId: plan.entryId,
+        fileName,
+        modules: plan.modules,
       });
     }
 
@@ -184,24 +274,60 @@ export async function buildProject(
     const bundles: Array<{ envId: string; entryId: string; fileName: string }> =
       [];
     for (const plan of bundlePlans) {
+      const bundleOutput = bundleOutputs.get(`${plan.envId}:${plan.entryId}`);
+      if (!bundleOutput) {
+        throw new Error(
+          `Missing finalized bundle output for '${plan.entryId}' in '${plan.envId}'.`,
+        );
+      }
       const header = emitDynamicImportConstants(plan.dynamicImports, bundleMap);
       const patchedBundle = concatParts([header, ...plan.parts]);
 
-      const outputPath = path.join(config.outputs.outDir, plan.fileName);
+      const outputPath = path.join(
+        config.outputs.outDir,
+        bundleOutput.fileName,
+      );
       await fs.writeFile(outputPath, patchedBundle, "utf8");
       bundles.push({
         envId: plan.envId,
         entryId: plan.entryId,
-        fileName: plan.fileName,
+        fileName: bundleOutput.fileName,
       });
     }
 
+    const diagnostics = dedupeDiagnostics(
+      bundlePlans.flatMap((plan) => plan.diagnostics),
+    );
+    const manifest: BundleManifest = {
+      bundles: bundles.map((bundle) => ({
+        ...bundle,
+        modules:
+          bundleOutputs.get(`${bundle.envId}:${bundle.entryId}`)?.modules ?? [],
+      })),
+      dynamicImports: Object.fromEntries(
+        bundles.map((bundle) => [
+          `${bundle.envId}:${bundle.entryId}`,
+          bundle.fileName,
+        ]),
+      ),
+      emittedFiles: [],
+      metadata: {},
+    };
+
+    await runBuildEnd(normalizedPlugins, {
+      bundles,
+      manifest,
+      diagnostics,
+      emitFile(file) {
+        pendingFiles.push(file);
+      },
+    });
+    await flushPendingFiles(config.outputs.outDir, pendingFiles, manifest);
+
     return {
       bundles,
-      manifest: {},
-      diagnostics: dedupeDiagnostics(
-        bundlePlans.flatMap((plan) => plan.diagnostics),
-      ),
+      manifest,
+      diagnostics,
     };
   } finally {
     await cleanup();
@@ -212,11 +338,17 @@ async function prepareCacheRoot(
   cacheBaseDir: string,
   config: BundlerConfig,
   entries: EntrySpec[],
+  workerProfile: WorkerTransformProfile,
 ): Promise<CacheRootInfo> {
   const v2Dir = path.join(cacheBaseDir, "v2");
   await ensureDir(v2Dir);
 
-  const normalizedConfig = normalizeConfigForCache(config, entries, cacheBaseDir);
+  const normalizedConfig = normalizeConfigForCache(
+    config,
+    entries,
+    cacheBaseDir,
+    workerProfile,
+  );
   const configHash = contentHash(JSON.stringify(normalizedConfig));
   const activeRoot = path.join(v2Dir, configHash);
   await ensureDir(activeRoot);
@@ -240,6 +372,7 @@ function normalizeConfigForCache(
   config: BundlerConfig,
   entries: EntrySpec[],
   cacheBaseDir: string,
+  workerProfile: WorkerTransformProfile,
 ): unknown {
   return {
     envs: Object.fromEntries(
@@ -262,6 +395,7 @@ function normalizeConfigForCache(
       outDir: path.resolve(config.outputs.outDir),
       fileName: config.outputs.fileName,
     },
+    workerProfile,
     cacheDir: cacheBaseDir,
     maxWorkers: config.maxWorkers,
     diagnostics: config.diagnostics,
@@ -288,10 +422,9 @@ async function cleanupObsoleteCacheRoots(
           return;
         }
 
-        const metadata =
-          await readJsonIfExists<Partial<CacheRootMetadata>>(
-            path.join(candidate, "config.json"),
-          );
+        const metadata = await readJsonIfExists<Partial<CacheRootMetadata>>(
+          path.join(candidate, "config.json"),
+        );
         const lastUsedTime = metadata?.lastUsedAt
           ? Date.parse(metadata.lastUsedAt)
           : Number.NaN;
@@ -318,18 +451,18 @@ function pickEntriesForEnv(entries: EntrySpec[], envId: string): EntrySpec[] {
 
 async function createBundlePlan(
   graph: ModuleGraph,
-  entryPath: string,
-  config: BundlerConfig,
-  resolver: Resolver,
+  entryId: string,
+  _config: BundlerConfig,
+  _resolver: Resolver,
   exportMode: "entry" | "dynamic",
-): Promise<BundlePlan> {
-  const entryNode = graph.nodes.get(entryPath);
+): Promise<BundlePlanDraft> {
+  const entryNode = graph.nodes.get(entryId);
   if (!entryNode) {
-    throw new Error(`Entry not found in graph: ${entryPath}`);
+    throw new Error(`Entry not found in graph: ${entryId}`);
   }
 
-  const { conditions, diagnostics } = resolveEntryConditions(graph, entryPath);
-  const selection = collectBundleSelection(graph, entryPath);
+  const { conditions, diagnostics } = resolveEntryConditions(graph, entryId);
+  const selection = collectBundleSelection(graph, entryId);
   const orderedFiles = orderSelectedFiles(graph, selection);
   const parts: string[] = [];
   const dynamicImports: DynamicImportRef[] = [];
@@ -342,57 +475,48 @@ async function createBundlePlan(
     }
     const condition = conditions.get(node.id);
     if (condition) {
-        parts.push(emitConditionalStart(condition));
-      }
-
-      const cellParts = await Promise.all(
-        collectOrderedCells(node, selectedCells).map(readCellSource),
-      );
-      parts.push(...cellParts.filter((part): part is string => part.length > 0));
-
-      if (namespaceDemanded.has(node.id) && node.exportTable) {
-        parts.push(emitNamespaceObject(node));
-      }
-
-      if (condition) {
-        parts.push(emitConditionalEnd());
-      }
-
-      for (const dyn of node.irHeader.dynamicImports) {
-        const resolved = await resolver(
-          node.id,
-          dyn.request ?? dyn.source,
-          graph.envId,
-        );
-        const targetNode = graph.nodes.get(resolved.id);
-        dynamicImports.push({
-          hashKey: dyn.hashKey,
-          resolvedId: resolved.id,
-          exports: collectDynamicImportExports(targetNode),
-        });
-      }
+      parts.push(emitConditionalStart(condition));
     }
+
+    const cellParts = await Promise.all(
+      collectOrderedCells(node, selectedCells).map(readCellSource),
+    );
+    parts.push(...cellParts.filter((part): part is string => part.length > 0));
+
+    if (namespaceDemanded.has(node.id) && node.exportTable) {
+      parts.push(emitNamespaceObject(node));
+    }
+
+    if (condition) {
+      parts.push(emitConditionalEnd());
+    }
+
+    for (const dyn of node.irHeader.dynamicImports) {
+      const targetNode = dyn.moduleId
+        ? graph.nodes.get(dyn.moduleId)
+        : undefined;
+      dynamicImports.push({
+        hashKey: dyn.hashKey,
+        resolvedId: dyn.external ? null : (dyn.moduleId ?? null),
+        externalRequest: dyn.external ? (dyn.request ?? dyn.source) : undefined,
+        exports: collectDynamicImportExports(targetNode),
+      });
+    }
+  }
   const exportFooter =
     exportMode === "entry"
-      ? emitEntryExports(graph.nodes.get(entryPath))
+      ? emitEntryExports(graph.nodes.get(entryId))
       : emitDynamicBundleExports(orderedFiles, selection);
   if (exportFooter) {
     parts.push(exportFooter);
   }
-  const bundle = concatParts(parts);
-  const hash = contentHashShort(bundle);
-  const fileName = config.outputs.fileName
-    ? config.outputs.fileName
-        .replace("[env]", graph.envId)
-        .replace("[hash]", hash)
-    : `bundle.${graph.envId}.${hash}.js`;
 
   return {
     envId: graph.envId,
-    entryId: entryPath,
-    fileName,
+    entryId,
     exportMode,
-    parts,
+    modules: orderedFiles.map((node) => node.id),
+    orderedParts: parts,
     dynamicImports,
     diagnostics,
   };
@@ -402,31 +526,45 @@ async function collectTransformedModules(
   entries: EntrySpec[],
   envs: string[],
   cacheDir: string,
-  plugins: BundlerPlugin[],
+  plugins: NormalizedPlugin[],
+  workerProfile: WorkerTransformProfile,
+  config: BundlerConfig,
   pool: WorkerPool,
   resolver: Resolver,
 ): Promise<ModuleCollection> {
-  const headers = new Map<string, FileRecord>();
-  const resolvedMap = new Map<string, string>();
+  const headersByEnv = new Map<string, Map<string, FileRecord>>();
+  for (const envId of envs) {
+    headersByEnv.set(envId, new Map<string, FileRecord>());
+  }
+  const resolvedMap = new Map<string, ModuleResolution>();
   const scheduled = new Set<string>();
-  const dynamicEntryEnvs = new Map<string, Set<string>>();
+  const dynamicEntries = new Map<string, EntrySpec>();
   const inFlight = new Set<Promise<void>>();
 
-  const schedule = (modulePath: string) => {
-    if (scheduled.has(modulePath)) {
+  const schedule = (module: ScheduledModule) => {
+    if (scheduled.has(module.id)) {
       return;
     }
-    scheduled.add(modulePath);
+    scheduled.add(module.id);
+    resolvedMap.set(module.id, {
+      id: module.id,
+      filePath: module.filePath,
+      pkg: module.pkg,
+      external: false,
+      virtual: module.virtual,
+    });
     const task = transformModule(
-      modulePath,
+      module,
       envs,
       cacheDir,
       plugins,
+      workerProfile,
+      config,
       pool,
       resolver,
-      headers,
+      headersByEnv,
       resolvedMap,
-      dynamicEntryEnvs,
+      dynamicEntries,
       schedule,
     ).finally(() => {
       inFlight.delete(task);
@@ -435,7 +573,13 @@ async function collectTransformedModules(
   };
 
   for (const entry of entries) {
-    schedule(entry.path);
+    const filePath = path.resolve(entry.path);
+    const pkgRoot = findPkgRoot(filePath) ?? path.dirname(filePath);
+    schedule({
+      id: filePath,
+      filePath,
+      pkg: readPkgSafe(pkgRoot),
+    });
   }
 
   while (inFlight.size > 0) {
@@ -443,152 +587,169 @@ async function collectTransformedModules(
   }
 
   return {
-    headers: Array.from(headers.values()),
-    dynamicEntries: Array.from(dynamicEntryEnvs.entries()).map(([entryPath, envSet]) => ({
-      id: entryPath,
-      path: entryPath,
-      envs: Array.from(envSet),
-    })),
+    headersByEnv,
+    dynamicEntries: Array.from(dynamicEntries.values()),
     resolvedMap,
   };
 }
 
 async function transformModule(
-  modulePath: string,
+  module: ScheduledModule,
   envs: string[],
   cacheDir: string,
-  plugins: BundlerPlugin[],
+  plugins: NormalizedPlugin[],
+  workerProfile: WorkerTransformProfile,
+  config: BundlerConfig,
   pool: WorkerPool,
   resolver: Resolver,
-  headers: Map<string, FileRecord>,
-  resolvedMap: Map<string, string>,
-  dynamicEntryEnvs: Map<string, Set<string>>,
-  schedule: (modulePath: string) => void,
+  headersByEnv: Map<string, Map<string, FileRecord>>,
+  resolvedMap: Map<string, ModuleResolution>,
+  dynamicEntries: Map<string, EntrySpec>,
+  schedule: (module: ScheduledModule) => void,
 ): Promise<void> {
-  const code = await fs.readFile(modulePath, "utf8");
-  const pkgRoot = findPkgRoot(modulePath) ?? path.dirname(modulePath);
-  const pkg = readPkgSafe(pkgRoot);
-  const syntax = {
-    jsx: modulePath.endsWith(".jsx") || modulePath.endsWith(".tsx"),
-    ts: modulePath.endsWith(".ts") || modulePath.endsWith(".tsx"),
-  };
-  const pluginResult = await runTransformModule(plugins, {
-    code,
-    realPath: modulePath,
-    pkg,
-    syntax,
-    envs,
-  });
-  if (pluginResult && (pluginResult as { skipCore?: boolean }).skipCore) {
-    throw new Error("Custom transform cannot skip core analysis in v1.");
-  }
-
-  const multiEnvCode =
-    pluginResult && "codeByEnv" in pluginResult
-      ? pluginResult.codeByEnv
-      : undefined;
-  const fallbackCode =
-    pluginResult && "code" in pluginResult ? pluginResult.code : code;
-  const response = (await pool.run({
-    realPath: modulePath,
-    code: fallbackCode,
-    pkg,
-    envs,
-    cacheDir,
-    syntax,
-    codeByEnv: multiEnvCode,
-  })) as WorkerTransformResponse;
-  const fileRecord = response.fileRecord;
-  headers.set(fileRecord.id, fileRecord);
-
-  if (fileRecord.flags.hasTopLevelAwait) {
-    throw new Error(
-      `E_TLA: Top-level 'await' is not supported (v1). at ${modulePath}`,
-    );
-  }
-
-  const { dependencies, dynamicEntries } = await discoverModulesFromHeader(
-    fileRecord,
+  const loadedModule = await loadModuleRecord(module, envs, plugins, config);
+  const resolvedImportsByEnv = await resolveImportsForEnvs(
+    loadedModule,
     envs,
     resolver,
   );
+  const syntax = {
+    jsx: module.filePath.endsWith(".jsx") || module.filePath.endsWith(".tsx"),
+    ts: module.filePath.endsWith(".ts") || module.filePath.endsWith(".tsx"),
+  };
+  const response = (await pool.run({
+    id: module.id,
+    realPath: module.filePath,
+    code: loadedModule.code,
+    pkg: module.pkg,
+    envs,
+    cacheDir,
+    syntax,
+    codeByEnv: loadedModule.codeByEnv,
+    mapByEnv: loadedModule.mapByEnv,
+    workerProfile,
+    resolvedImportsByEnv,
+  })) as WorkerTransformResponse;
+  for (const [envId, fileRecord] of Object.entries(response.fileRecordsByEnv)) {
+    headersByEnv.get(envId)?.set(fileRecord.id, fileRecord);
 
-  for (const resolved of dependencies) {
-    resolvedMap.set(resolved.id, resolved.resolvedPath);
-    schedule(resolved.resolvedPath);
-  }
+    if (fileRecord.flags.hasTopLevelAwait) {
+      throw new Error(
+        `E_TLA: Top-level 'await' is not supported (v1). at ${module.filePath}`,
+      );
+    }
 
-  for (const dynamicEntry of dynamicEntries) {
-    resolvedMap.set(dynamicEntry.id, dynamicEntry.resolvedPath);
-    const envSet = dynamicEntryEnvs.get(dynamicEntry.resolvedPath) ?? new Set<string>();
-    envSet.add(dynamicEntry.envId);
-    dynamicEntryEnvs.set(dynamicEntry.resolvedPath, envSet);
-    schedule(dynamicEntry.resolvedPath);
+    const { dependencies, dynamicEntries: discoveredDynamics } =
+      await discoverModulesFromHeader(fileRecord, envId, resolver);
+
+    for (const resolved of dependencies) {
+      resolvedMap.set(resolved.id, resolved);
+      schedule({
+        id: resolved.id,
+        filePath: resolved.filePath,
+        pkg: resolved.pkg,
+        virtual: resolved.virtual,
+      });
+    }
+
+    for (const dynamicEntry of discoveredDynamics) {
+      resolvedMap.set(dynamicEntry.id, dynamicEntry);
+      const existing = dynamicEntries.get(dynamicEntry.id);
+      if (existing) {
+        existing.envs = Array.from(new Set([...(existing.envs ?? []), envId]));
+      } else {
+        dynamicEntries.set(dynamicEntry.id, {
+          id: dynamicEntry.id,
+          path: dynamicEntry.filePath,
+          envs: [envId],
+        });
+      }
+      schedule({
+        id: dynamicEntry.id,
+        filePath: dynamicEntry.filePath,
+        pkg: dynamicEntry.pkg,
+        virtual: dynamicEntry.virtual,
+      });
+    }
   }
 }
 
 async function discoverModulesFromHeader(
   irHeader: FileRecord,
-  envs: string[],
+  envId: string,
   resolver: Resolver,
 ): Promise<{
-  dependencies: ResolveResult[];
+  dependencies: ModuleResolution[];
   dynamicEntries: DynamicEntryDiscovery[];
 }> {
-  const dependencyPromises: Array<Promise<ResolveResult>> = [];
+  const dependencyPromises: Array<Promise<ModuleResolution>> = [];
   const dynamicPromises: Array<Promise<DynamicEntryDiscovery>> = [];
 
   for (const importEntry of irHeader.imports) {
-    if (importEntry.kind === "type") {
+    if (importEntry.kind === "type" || importEntry.external) {
       continue;
     }
-    for (const envId of envs) {
-      dependencyPromises.push(
-        resolver(
-          irHeader.id,
-          importEntry.request ?? importEntry.source,
-          envId,
-        ),
-      );
-    }
+    dependencyPromises.push(
+      resolver(
+        irHeader.id,
+        irHeader.filePath,
+        importEntry.request ?? importEntry.source,
+        envId,
+        importEntry.condition ? "conditional-import" : "import",
+        importEntry.attributes ?? undefined,
+      ),
+    );
   }
 
   for (const conditionalImport of irHeader.conditionalImports) {
-    if (!conditionalImport.elseSource) {
+    if (!conditionalImport.elseSource || conditionalImport.elseExternal) {
       continue;
     }
-    for (const envId of envs) {
-      dependencyPromises.push(
-        resolver(
-          irHeader.id,
-          conditionalImport.elseRequest ?? conditionalImport.elseSource,
-          envId,
-        ),
-      );
-    }
+    dependencyPromises.push(
+      resolver(
+        irHeader.id,
+        irHeader.filePath,
+        conditionalImport.elseRequest ?? conditionalImport.elseSource,
+        envId,
+        "conditional-else",
+      ),
+    );
   }
 
-  for (const reexport of [...irHeader.exportStars, ...irHeader.reexportsNamed]) {
-    for (const envId of envs) {
-      dependencyPromises.push(
-        resolver(irHeader.id, reexport.request ?? reexport.source, envId),
-      );
+  for (const reexport of [
+    ...irHeader.exportStars,
+    ...irHeader.reexportsNamed,
+  ]) {
+    if (reexport.external) {
+      continue;
     }
+    dependencyPromises.push(
+      resolver(
+        irHeader.id,
+        irHeader.filePath,
+        reexport.request ?? reexport.source,
+        envId,
+        "reexport",
+      ),
+    );
   }
 
   for (const dynamicImport of irHeader.dynamicImports) {
-    for (const envId of envs) {
-      dynamicPromises.push(
-        resolver(
-          irHeader.id,
-          dynamicImport.request ?? dynamicImport.source,
-          envId,
-        ).then((resolved) => ({
-          ...resolved,
-          envId,
-        })),
-      );
+    if (dynamicImport.external) {
+      continue;
     }
+    dynamicPromises.push(
+      resolver(
+        irHeader.id,
+        irHeader.filePath,
+        dynamicImport.request ?? dynamicImport.source,
+        envId,
+        "dynamic-import",
+      ).then((resolved) => ({
+        ...resolved,
+        envId,
+      })),
+    );
   }
 
   const [dependencies, dynamicEntries] = await Promise.all([
@@ -600,6 +761,143 @@ async function discoverModulesFromHeader(
     dependencies: dedupeResolved(dependencies),
     dynamicEntries: dedupeDynamicEntries(dynamicEntries),
   };
+}
+
+async function loadModuleRecord(
+  module: ScheduledModule,
+  envs: string[],
+  plugins: NormalizedPlugin[],
+  config: BundlerConfig,
+): Promise<LoadedModuleRecord> {
+  const syntax = {
+    jsx: module.filePath.endsWith(".jsx") || module.filePath.endsWith(".tsx"),
+    ts: module.filePath.endsWith(".ts") || module.filePath.endsWith(".tsx"),
+  };
+  let code: string | undefined;
+  const codeByEnv: Record<string, string> = {};
+  const mapByEnv: Record<string, string> = {};
+
+  for (const envId of envs) {
+    const envConfig = config.envs[envId];
+    const loaded = await runLoad(plugins, envId, {
+      id: module.id,
+      filePath: module.filePath,
+      envId,
+      target: envConfig.target,
+      syntax,
+    });
+    if (!loaded) {
+      continue;
+    }
+    if (loaded.codeByEnv) {
+      Object.assign(codeByEnv, loaded.codeByEnv);
+    }
+    if (loaded.mapByEnv) {
+      Object.assign(mapByEnv, loaded.mapByEnv);
+    }
+    if (loaded.code) {
+      codeByEnv[envId] = loaded.code;
+      if (!code) {
+        code = loaded.code;
+      }
+    }
+    if (loaded.map) {
+      mapByEnv[envId] = loaded.map;
+    }
+  }
+
+  if (!code) {
+    if (module.virtual) {
+      throw new Error(
+        `Virtual module '${module.id}' at '${module.filePath}' was not provided by any load hook.`,
+      );
+    }
+    code = await fs.readFile(module.filePath, "utf8");
+  }
+
+  return {
+    id: module.id,
+    filePath: module.filePath,
+    virtual: module.virtual,
+    pkg: module.pkg,
+    syntax,
+    code,
+    codeByEnv: Object.keys(codeByEnv).length > 0 ? codeByEnv : undefined,
+    mapByEnv: Object.keys(mapByEnv).length > 0 ? mapByEnv : undefined,
+  };
+}
+
+async function resolveImportsForEnvs(
+  module: LoadedModuleRecord,
+  envs: string[],
+  resolver: Resolver,
+): Promise<
+  Record<
+    string,
+    Record<
+      string,
+      {
+        id: string | null;
+        filePath: string | null;
+        external: boolean;
+        virtual?: boolean;
+        meta?: Record<string, unknown>;
+      }
+    >
+  >
+> {
+  const resolvedByEnv: Record<
+    string,
+    Record<
+      string,
+      {
+        id: string | null;
+        filePath: string | null;
+        external: boolean;
+        virtual?: boolean;
+        meta?: Record<string, unknown>;
+      }
+    >
+  > = {};
+
+  for (const envId of envs) {
+    const code = module.codeByEnv?.[envId] ?? module.code;
+    const requests = scanModuleRequests({
+      code,
+      filePath: module.filePath,
+      syntax: module.syntax,
+    });
+    const envResolutions: Record<
+      string,
+      {
+        id: string | null;
+        filePath: string | null;
+        external: boolean;
+        virtual?: boolean;
+        meta?: Record<string, unknown>;
+      }
+    > = {};
+    for (const request of requests) {
+      const resolved = await resolver(
+        module.id,
+        module.filePath,
+        request.request,
+        envId,
+        request.kind,
+        request.importAttributes,
+      );
+      envResolutions[request.key] = {
+        id: resolved.external ? null : resolved.id,
+        filePath: resolved.external ? null : resolved.filePath,
+        external: resolved.external,
+        virtual: resolved.virtual,
+        meta: resolved.meta,
+      };
+    }
+    resolvedByEnv[envId] = envResolutions;
+  }
+
+  return resolvedByEnv;
 }
 
 function collectBundleSelection(
@@ -962,10 +1260,52 @@ function emitDynamicBundleExports(
   return `export { ${Array.from(exportedSymbols).join(", ")} };`;
 }
 
-function dedupeResolved(results: ResolveResult[]): ResolveResult[] {
-  const deduped = new Map<string, ResolveResult>();
+function fromBundleDraft(draft: BundlePlanDraft): BundlePlan {
+  return {
+    envId: draft.envId,
+    entryId: draft.entryId,
+    exportMode: draft.exportMode,
+    parts: draft.orderedParts,
+    dynamicImports: draft.dynamicImports.map((dynamicImport) => ({
+      hashKey: dynamicImport.hashKey,
+      resolvedId: dynamicImport.resolvedId,
+      externalRequest: dynamicImport.externalRequest,
+      exports: dynamicImport.exports ?? [],
+    })),
+    diagnostics: draft.diagnostics,
+    modules: draft.modules,
+  };
+}
+
+async function flushPendingFiles(
+  outDir: string,
+  files: PendingEmitFile[],
+  manifest: BundleManifest,
+): Promise<void> {
+  for (const file of files) {
+    const finalName = file.hash
+      ? applyHashToFileName(file.fileName, file.contents)
+      : file.fileName;
+    await fs.writeFile(path.join(outDir, finalName), file.contents, "utf8");
+    manifest.emittedFiles.push({
+      fileName: finalName,
+      originalFileName: file.fileName,
+      type: file.type ?? "asset",
+      envId: file.envId,
+    });
+  }
+}
+
+function applyHashToFileName(fileName: string, contents: string): string {
+  const ext = path.extname(fileName);
+  const base = ext ? fileName.slice(0, -ext.length) : fileName;
+  return `${base}.${contentHashShort(contents)}${ext}`;
+}
+
+function dedupeResolved(results: ModuleResolution[]): ModuleResolution[] {
+  const deduped = new Map<string, ModuleResolution>();
   for (const result of results) {
-    deduped.set(result.resolvedPath, result);
+    deduped.set(result.id, result);
   }
   return Array.from(deduped.values());
 }
@@ -975,7 +1315,7 @@ function dedupeDynamicEntries(
 ): DynamicEntryDiscovery[] {
   const deduped = new Map<string, DynamicEntryDiscovery>();
   for (const result of results) {
-    deduped.set(`${result.envId}:${result.resolvedPath}`, result);
+    deduped.set(`${result.envId}:${result.id}`, result);
   }
   return Array.from(deduped.values());
 }

@@ -5,7 +5,8 @@ export type BundleTarget = {
 
 export type DynamicImportRuntime = {
   hashKey: string;
-  resolvedId: string;
+  resolvedId: string | null;
+  externalRequest?: string;
   exports: Array<{ exported: string; symbol: string }>;
 };
 
@@ -21,6 +22,16 @@ export function emitDynamicImportConstants(
       continue;
     }
     emitted.add(dynamicImport.hashKey);
+
+    if (dynamicImport.resolvedId == null) {
+      if (!dynamicImport.externalRequest) {
+        continue;
+      }
+      lines.push(
+        `const ${dynamicImport.hashKey} = () => import(${JSON.stringify(dynamicImport.externalRequest)});`,
+      );
+      continue;
+    }
 
     const target = bundleMap.get(dynamicImport.resolvedId);
     if (!target) {

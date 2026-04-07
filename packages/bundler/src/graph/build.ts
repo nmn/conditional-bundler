@@ -19,6 +19,8 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
   for (const header of input.headers) {
     nodes.set(header.id, {
       id: header.id,
+      filePath: header.filePath,
+      virtual: header.virtual,
       prefix: header.prefix,
       deps: [],
       unconditionalDeps: new Set<string>(),
@@ -30,13 +32,16 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
 
   for (const node of nodes.values()) {
     for (const importEntry of node.irHeader.imports) {
-      if (importEntry.kind === "type") {
+      if (importEntry.kind === "type" || importEntry.external) {
         continue;
       }
       const resolved = await input.resolver(
         node.irHeader.id,
+        node.irHeader.filePath,
         importEntry.request ?? importEntry.source,
         input.envId,
+        importEntry.condition ? "conditional-import" : "import",
+        importEntry.attributes ?? undefined,
       );
       node.deps.push(resolved.id);
       node.resolvedSources.set(importEntry.source, resolved.id);
@@ -52,11 +57,13 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
           (item) => item.source === importEntry.source,
         );
         const elseSource = conditionalImport?.elseSource;
-        if (elseSource) {
+        if (elseSource && !conditionalImport?.elseExternal) {
           const elseResolved = await input.resolver(
             node.irHeader.id,
+            node.irHeader.filePath,
             conditionalImport?.elseRequest ?? elseSource,
             input.envId,
+            "conditional-else",
           );
           node.deps.push(elseResolved.id);
           node.resolvedSources.set(elseSource, elseResolved.id);
@@ -74,20 +81,30 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
       }
     }
     for (const star of node.irHeader.exportStars) {
+      if (star.external) {
+        continue;
+      }
       const resolved = await input.resolver(
         node.irHeader.id,
+        node.irHeader.filePath,
         star.request ?? star.source,
         input.envId,
+        "reexport",
       );
       node.deps.push(resolved.id);
       node.unconditionalDeps.add(resolved.id);
       node.resolvedSources.set(star.source, resolved.id);
     }
     for (const reexport of node.irHeader.reexportsNamed) {
+      if (reexport.external) {
+        continue;
+      }
       const resolved = await input.resolver(
         node.irHeader.id,
+        node.irHeader.filePath,
         reexport.request ?? reexport.source,
         input.envId,
+        "reexport",
       );
       node.deps.push(resolved.id);
       node.unconditionalDeps.add(resolved.id);

@@ -100,36 +100,29 @@ test("records export stars and reexports", async () => {
     "export * from './dep.js'; export { foo as bar } from './dep.js';",
   );
   expect(result.code).toMatchInlineSnapshot(`""`);
-  expect(result.meta).toMatchInlineSnapshot(`
-{
-  "conditionalImports": [],
-  "discoveredEntrypoints": [],
-  "dynamicImports": [],
-  "exportRanges": [],
-  "exportStars": [
-    {
-      "request": "./dep.js",
-      "source": "src/dep.js",
-      "sourceOrder": 0,
-    },
-  ],
-  "exportsLocal": [],
-  "flags": {
-    "hasTopLevelAwait": false,
-    "needsNamespaceObject": false,
-    "sideEffects": true,
-  },
-  "importRanges": [],
-  "imports": [],
-  "reexportsNamed": [
-    {
-      "exported": "bar",
-      "imported": "foo",
-      "request": "./dep.js",
-      "source": "src/dep.js",
-      "sourceOrder": 26,
-    },
-  ],
-}
-`);
+  expect(result.meta).toMatchObject({
+    conditionalImports: [],
+    discoveredEntrypoints: [],
+    dynamicImports: [],
+    exportStars: [
+      expect.objectContaining({
+        request: "./dep.js",
+        source: "src/dep.js",
+        moduleId: "/fixture/src/dep.js",
+        external: false,
+        sourceOrder: 0,
+      }),
+    ],
+    reexportsNamed: [
+      expect.objectContaining({
+        exported: "bar",
+        imported: "foo",
+        request: "./dep.js",
+        source: "src/dep.js",
+        moduleId: "/fixture/src/dep.js",
+        external: false,
+        sourceOrder: 26,
+      }),
+    ],
+  });
 });

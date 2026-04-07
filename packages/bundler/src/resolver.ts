@@ -1,41 +1,111 @@
 import path from "node:path";
 import fs from "node:fs";
-import { findPkgRoot, readPkg } from "@bundler/shared";
-
-export type ResolveResult = {
-  id: string;
-  resolvedPath: string;
-  pkg: { name: string; version: string; root: string };
-};
+import { createHash } from "node:crypto";
+import { findPkgRoot, readPkg, readPkgSafe } from "@bundler/shared";
+import { runResolveImport } from "./plugins/run.js";
+import type { BundlerConfig } from "./config.js";
+import type {
+  ModuleResolution,
+  NormalizedPlugin,
+  ResolveImportContext,
+  ResolveImportKind,
+  ResolveImportResult,
+} from "./plugins/types.js";
 
 export type Resolver = (
-  from: string,
+  fromId: string,
+  fromFilePath: string,
   source: string,
   envId: string,
-) => Promise<ResolveResult>;
+  kind?: ResolveImportKind,
+  importAttributes?: Record<string, string>,
+) => Promise<ModuleResolution>;
 
-export function createResolver(): Resolver {
-  return async (from: string, source: string) => {
-    const resolvedPath = resolvePath(from, source);
-    const pkgRoot = findPkgRoot(resolvedPath) ?? path.dirname(resolvedPath);
+type ResolverOptions = {
+  config: BundlerConfig;
+  plugins: NormalizedPlugin[];
+  cacheDir: string;
+};
+
+export function createResolver(options: ResolverOptions): Resolver {
+  return async (
+    fromId: string,
+    fromFilePath: string,
+    source: string,
+    envId: string,
+    kind: ResolveImportKind = "import",
+    importAttributes,
+  ) => {
+    const envConfig = options.config.envs[envId];
+    if (!envConfig) {
+      throw new Error(`Unknown environment '${envId}'.`);
+    }
+
+    const context: ResolveImportContext = {
+      fromId,
+      fromFilePath,
+      request: source,
+      envId,
+      conditions: envConfig.conditions,
+      target: envConfig.target,
+      kind,
+      importAttributes,
+      resolveDefault: async () => resolveDefault(fromFilePath, source),
+    };
+    const pluginResult = await runResolveImport(
+      options.plugins,
+      envId,
+      context,
+    );
+    const resolved =
+      pluginResult === undefined
+        ? await context.resolveDefault()
+        : pluginResult;
+
+    if (resolved === null) {
+      const pkgRoot = findPkgRoot(fromFilePath) ?? path.dirname(fromFilePath);
+      return {
+        id: source,
+        filePath: source,
+        pkg: readPkgSafe(pkgRoot),
+        external: true,
+      };
+    }
+
+    const filePath = resolved.virtual
+      ? createVirtualFilePath(options.cacheDir, resolved.id)
+      : path.resolve(resolved.filePath);
+    const pkgRoot = findPkgRoot(filePath) ?? path.dirname(filePath);
     const pkg = readPkg(pkgRoot);
-    const id = resolvedPath;
     return {
-      id,
-      resolvedPath,
+      id: resolved.id,
+      filePath,
       pkg,
+      external: false,
+      virtual: resolved.virtual,
+      meta: resolved.meta,
     };
   };
+}
+
+export function resolveDefault(
+  fromFilePath: string,
+  source: string,
+): Promise<ResolveImportResult> {
+  const resolvedPath = resolvePath(fromFilePath, source);
+  return Promise.resolve({
+    id: resolvedPath,
+    filePath: resolvedPath,
+  });
 }
 
 function resolvePath(from: string, source: string): string {
   if (source.startsWith(".")) {
     const base = path.dirname(from);
     const candidate = path.resolve(base, source);
-    const withExt = resolveWithExtensions(candidate);
-    return withExt;
+    return resolveWithExtensions(candidate);
   }
-  return requireResolve(source, path.dirname(from));
+  return require.resolve(source, { paths: [path.dirname(from)] });
 }
 
 function resolveWithExtensions(filePath: string): string {
@@ -55,6 +125,7 @@ function resolveWithExtensions(filePath: string): string {
   throw new Error(`Cannot resolve '${filePath}'`);
 }
 
-function requireResolve(source: string, fromDir: string): string {
-  return require.resolve(source, { paths: [fromDir] });
+function createVirtualFilePath(cacheDir: string, id: string): string {
+  const hash = createHash("sha1").update(id).digest("hex").slice(0, 12);
+  return path.join(cacheDir, "virtual", `${hash}.js`);
 }

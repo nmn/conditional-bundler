@@ -9,6 +9,8 @@ export type ImportSpecifier = {
 export type ImportEntry = {
   source: string;
   request?: string;
+  moduleId?: string | null;
+  external?: boolean;
   kind: "value" | "type" | "side-effect";
   isNamespace: boolean;
   isDefault: boolean;
@@ -27,6 +29,8 @@ export type ExportLocal = {
 export type ReexportNamed = {
   source: string;
   request?: string;
+  moduleId?: string | null;
+  external?: boolean;
   imported: string;
   exported: string;
   isNamespace?: boolean;
@@ -36,14 +40,17 @@ export type ReexportNamed = {
 export type ExportStar = {
   source: string;
   request?: string;
+  moduleId?: string | null;
+  external?: boolean;
   sourceOrder?: number;
 };
 
 export type DynamicImport = {
   source: string;
   request?: string;
+  moduleId?: string | null;
+  external?: boolean;
   hashKey: string;
-  moduleId?: string;
 };
 
 export type CellExternalDep =
@@ -76,9 +83,13 @@ export type CellRecord = {
 export type ConditionalImport = {
   source: string;
   request?: string;
+  moduleId?: string | null;
+  external?: boolean;
   condition: ConditionExpr;
   elseSource?: string;
   elseRequest?: string;
+  elseModuleId?: string | null;
+  elseExternal?: boolean;
 };
 
 export type FileFlags = {
@@ -90,6 +101,8 @@ export type FileFlags = {
 export type FileIR = {
   id: string;
   realPath: string;
+  filePath: string;
+  virtual?: boolean;
   pkg: { name: string; version: string; root: string };
   prefix: string;
   contentHash: string;
@@ -113,6 +126,8 @@ export type FileIR = {
 export type FileRecord = Pick<
   FileIR,
   | "id"
+  | "filePath"
+  | "virtual"
   | "prefix"
   | "contentHash"
   | "imports"
@@ -143,6 +158,8 @@ export type Provider = {
 
 export type ModuleNode = {
   id: string;
+  filePath: string;
+  virtual?: boolean;
   prefix: string;
   deps: string[];
   unconditionalDeps: Set<string>;

@@ -20,14 +20,20 @@ async function buildFixture(name, options = {}) {
   const { buildProject } = await import("../dist/builder.js");
   return buildProject(
     {
-      envs: { browser: { conditions: ["default"], target: "browser" } },
-      entries: [{ id: name, path: entry }],
-      outputs: { outDir, fileName: `${name}.[env].[hash].js` },
+      envs: options.envs ?? {
+        browser: { conditions: ["default"], target: "browser" },
+      },
+      entries: options.entries ?? [{ id: name, path: entry }],
+      outputs: options.outputs ?? {
+        outDir,
+        fileName: `${name}.[env].[hash].js`,
+      },
       cacheDir,
       maxWorkers: 2,
       diagnostics: "human",
+      plugins: options.configPlugins ?? [],
     },
-    [],
+    options.plugins ?? [],
   );
 }
 
@@ -247,7 +253,11 @@ test("reuses cached worker artifacts for unchanged modules", async () => {
     "module.json",
   );
   const moduleJson = JSON.parse(await fs.readFile(entryModulePath, "utf8"));
-  const artifactPaths = moduleJson.fileRecord.cells
+  const fileRecord =
+    moduleJson.fileRecordsByEnv?.browser ??
+    moduleJson.fileRecordsByEnv?.default ??
+    moduleJson.fileRecord;
+  const artifactPaths = fileRecord.cells
     .map((cell) => cell.artifactPath)
     .filter(Boolean);
   expect(artifactPaths.length).toBeGreaterThan(0);
@@ -296,11 +306,194 @@ test("uses different config roots when the bundler config changes", async () => 
   expect(configRoots).toHaveLength(2);
 });
 
+test("supports env-specific externalized imports via resolveImport", async () => {
+  const result = await buildFixture("simple", {
+    envs: {
+      client: { conditions: ["default"], target: "browser" },
+      ssr: { conditions: ["node"], target: "node" },
+    },
+    outputs: {
+      outDir: path.join(outRoot, "simple-external"),
+      fileName: "simple-external.[env].[hash].js",
+    },
+    configPlugins: [
+      {
+        name: "externalize-foo-in-ssr",
+        resolveImport: {
+          ssr: async ({ request }) =>
+            request === "./foo.js" ? null : undefined,
+        },
+      },
+    ],
+  });
+
+  const outDir = path.join(outRoot, "simple-external");
+  const clientBundle = result.bundles.find(
+    (bundle) => bundle.envId === "client",
+  );
+  const ssrBundle = result.bundles.find((bundle) => bundle.envId === "ssr");
+  const clientCode = await fs.readFile(
+    path.join(outDir, clientBundle.fileName),
+    "utf8",
+  );
+  const ssrCode = await fs.readFile(
+    path.join(outDir, ssrBundle.fileName),
+    "utf8",
+  );
+
+  expect(clientCode).not.toContain('import { foo } from "./foo.js";');
+  expect(ssrCode).toContain('import { foo } from "./foo.js";');
+  expect(ssrCode).toContain("globalThis.__SIDE_EFFECT__ = true;");
+});
+
+test("supports virtual modules through resolveImport and load", async () => {
+  const fixtureName = "plugin-virtual";
+  const virtualPath = path.join(outRoot, ".virtual", "virtual-msg.js");
+  const result = await buildFixture(fixtureName, {
+    configPlugins: [
+      {
+        name: "virtual-msg",
+        resolveImport: async ({ request }) =>
+          request === "virtual:msg"
+            ? { id: "virtual:msg", filePath: virtualPath, virtual: true }
+            : undefined,
+        load: async ({ id }) =>
+          id === "virtual:msg"
+            ? { code: 'export const msg = "hello from virtual";' }
+            : undefined,
+      },
+    ],
+  });
+
+  const output = await readBundle(result, fixtureName);
+  expect(output).toContain('"hello from virtual"');
+  expect(output).toContain("export {");
+});
+
+test("runs module-backed worker transforms per environment", async () => {
+  const pluginModule = path.join(
+    rootDir,
+    "packages/bundler/test/plugins/env-transform-plugin.mjs",
+  );
+  const result = await buildFixture("plugin-transform", {
+    envs: {
+      client: { conditions: ["default"], target: "browser" },
+      ssr: { conditions: ["node"], target: "node" },
+    },
+    outputs: {
+      outDir: path.join(outRoot, "plugin-transform"),
+      fileName: "plugin-transform.[env].[hash].js",
+    },
+    configPlugins: [
+      {
+        __bundlerPluginRef: true,
+        module: pluginModule,
+        options: { defaultValue: "server", clientValue: "client" },
+      },
+    ],
+  });
+
+  const outDir = path.join(outRoot, "plugin-transform");
+  const clientBundle = result.bundles.find(
+    (bundle) => bundle.envId === "client",
+  );
+  const ssrBundle = result.bundles.find((bundle) => bundle.envId === "ssr");
+  const clientCode = await fs.readFile(
+    path.join(outDir, clientBundle.fileName),
+    "utf8",
+  );
+  const ssrCode = await fs.readFile(
+    path.join(outDir, ssrBundle.fileName),
+    "utf8",
+  );
+
+  expect(clientCode).toContain('"client"');
+  expect(ssrCode).toContain('"server"');
+});
+
+test("runs build lifecycle hooks and emits sidecar files", async () => {
+  const extraEntry = path.join(fixturesDir, "simple", "src/foo.js");
+  const outDir = path.join(outRoot, "plugin-lifecycle");
+  const result = await buildFixture("simple", {
+    envs: {
+      client: { conditions: ["default"], target: "browser" },
+      ssr: { conditions: ["node"], target: "node" },
+    },
+    outputs: { outDir, fileName: "plugin-lifecycle.[env].[hash].js" },
+    configPlugins: [
+      {
+        name: "lifecycle",
+        buildStart({ addEntry, emitFile }) {
+          addEntry({ id: "extra", path: extraEntry, envs: ["client"] });
+          emitFile({
+            fileName: "build-start.txt",
+            contents: "started",
+            type: "manifest",
+          });
+        },
+        beforeCombine: [
+          ({ plans }) =>
+            plans.map((plan) => ({
+              ...plan,
+              orderedParts: [
+                `const __BEFORE_COMBINE__ = true;`,
+                ...plan.orderedParts,
+              ],
+            })),
+        ],
+        afterCombine: [({ code }) => `/* after combine */\n${code}`],
+        buildEnd({ bundles, emitFile }) {
+          emitFile({
+            fileName: "summary.json",
+            contents: JSON.stringify({ bundles: bundles.length }),
+            type: "manifest",
+          });
+        },
+      },
+    ],
+  });
+
+  const buildStartFile = await fs.readFile(
+    path.join(outDir, "build-start.txt"),
+    "utf8",
+  );
+  const summaryFile = await fs.readFile(
+    path.join(outDir, "summary.json"),
+    "utf8",
+  );
+  const clientBundles = result.bundles.filter(
+    (bundle) => bundle.envId === "client",
+  );
+  const extraBundle = clientBundles.find(
+    (bundle) => bundle.entryId === extraEntry,
+  );
+  const firstBundleCode = await fs.readFile(
+    path.join(outDir, result.bundles[0].fileName),
+    "utf8",
+  );
+
+  expect(buildStartFile).toBe("started");
+  expect(JSON.parse(summaryFile)).toEqual({ bundles: result.bundles.length });
+  expect(extraBundle).toBeDefined();
+  expect(
+    result.bundles.some(
+      (bundle) => bundle.envId === "ssr" && bundle.entryId === extraEntry,
+    ),
+  ).toBe(false);
+  expect(firstBundleCode).toContain("/* after combine */");
+  expect(firstBundleCode).toContain("const __BEFORE_COMBINE__ = true;");
+  expect(result.manifest.emittedFiles.map((file) => file.fileName)).toEqual(
+    expect.arrayContaining(["build-start.txt", "summary.json"]),
+  );
+});
+
 test("executes dynamically imported bundles with the expected exports", async () => {
   const entryPath = path.join(fixturesDir, "dynamic-import", "src/index.js");
   const result = await buildFixture("dynamic-import");
   const bundleDir = path.join(outRoot, "dynamic-import");
-  const entryBundle = result.bundles.find((bundle) => bundle.entryId === entryPath);
+  const entryBundle = result.bundles.find(
+    (bundle) => bundle.entryId === entryPath,
+  );
 
   expect(entryBundle).toBeDefined();
 

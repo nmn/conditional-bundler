@@ -9,6 +9,7 @@ export * from "./graph/partition.js";
 export * from "./graph/scc.js";
 export * from "./graph/conditions.js";
 export * from "./plugins/types.js";
+export * from "./plugins/normalize.js";
 export * from "./plugins/run.js";
 export * from "./exports/resolve.js";
 export * from "./linker/rewriter.js";
