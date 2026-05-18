@@ -1,10 +1,15 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { defaultConfig } from "./config.js";
 import { buildProject } from "./builder.js";
+import type { BundlerConfig } from "./config.js";
 
 export async function runCli(argv: string[]): Promise<void> {
   const command = argv[2] ?? "build";
   if (command === "build") {
-    await buildProject(defaultConfig, []);
+    const config = await loadConfig(argv);
+    await buildProject(config, []);
     return;
   }
   if (command === "clean-cache") {
@@ -12,4 +17,52 @@ export async function runCli(argv: string[]): Promise<void> {
     return;
   }
   throw new Error(`Unknown command: ${command}`);
+}
+
+async function loadConfig(argv: string[]): Promise<BundlerConfig> {
+  const explicitConfig = readFlag(argv, "--config");
+  const configPath = explicitConfig
+    ? path.resolve(explicitConfig)
+    : await findDefaultConfig();
+  if (!configPath) {
+    return defaultConfig;
+  }
+
+  const imported = await import(pathToFileURL(configPath).href);
+  const exported = imported.default ?? imported.config ?? imported;
+  const loaded =
+    typeof exported === "function" ? await exported() : await exported;
+  return {
+    ...defaultConfig,
+    ...loaded,
+    configIdentity: await fs.readFile(configPath, "utf8"),
+    envs: loaded.envs ?? defaultConfig.envs,
+    entries: loaded.entries ?? defaultConfig.entries,
+    outputs: {
+      ...defaultConfig.outputs,
+      ...(loaded.outputs ?? {}),
+    },
+    plugins: loaded.plugins ?? defaultConfig.plugins,
+  };
+}
+
+function readFlag(argv: string[], name: string): string | null {
+  const index = argv.indexOf(name);
+  if (index < 0) {
+    return null;
+  }
+  return argv[index + 1] ?? null;
+}
+
+async function findDefaultConfig(): Promise<string | null> {
+  for (const fileName of ["bundler.config.mjs", "bundler.config.js"]) {
+    const candidate = path.resolve(fileName);
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      // Try the next default config name.
+    }
+  }
+  return null;
 }

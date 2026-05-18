@@ -53,6 +53,20 @@ export type DynamicImport = {
   hashKey: string;
 };
 
+export type DiscoveredEntrypoint =
+  | string
+  | {
+      id?: string;
+      request: string;
+      envs?: string[];
+    };
+
+export type ExtraTransformOutput = {
+  contents: string;
+  map?: string;
+  metadata?: unknown;
+};
+
 export type CellExternalDep =
   | {
       kind: "import";
@@ -114,7 +128,8 @@ export type FileIR = {
   exportsLocal: ExportLocal[];
   dynamicImports: DynamicImport[];
   conditionalImports: ConditionalImport[];
-  discoveredEntrypoints: string[];
+  discoveredEntrypoints: DiscoveredEntrypoint[];
+  extraOutputs?: Record<string, ExtraTransformOutput>;
   cells: CellRecord[];
   importRanges: Array<[number, number]>;
   exportRanges: Array<[number, number]>;
@@ -138,6 +153,7 @@ export type FileRecord = Pick<
   | "dynamicImports"
   | "conditionalImports"
   | "discoveredEntrypoints"
+  | "extraOutputs"
   | "cells"
   | "importRanges"
   | "exportRanges"

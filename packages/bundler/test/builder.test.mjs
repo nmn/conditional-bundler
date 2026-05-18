@@ -306,6 +306,99 @@ test("uses different config roots when the bundler config changes", async () => 
   expect(configRoots).toHaveLength(2);
 });
 
+test("writes bundle manifest and supports entry output placeholder", async () => {
+  const outDir = path.join(outRoot, "entry-placeholder");
+  const result = await buildFixture("simple", {
+    outputs: {
+      outDir,
+      fileName: "[entry].[env].[hash].js",
+      manifestFile: "manifest.json",
+    },
+  });
+
+  expect(result.bundles[0].fileName).toMatch(/^index\.browser\.[a-z0-9]+\.js$/);
+  const manifest = JSON.parse(
+    await fs.readFile(path.join(outDir, "manifest.json"), "utf8"),
+  );
+  expect(manifest.bundles[0].fileName).toBe(result.bundles[0].fileName);
+});
+
+test("cli loads async config files", async () => {
+  const projectDir = path.join(outRoot, "cli-config");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(projectDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "bundler.config.mjs"),
+    `export default async function config() {
+      return {
+        envs: { browser: { conditions: ["default"], target: "browser" } },
+        entries: [{ id: "cli", path: ${JSON.stringify(path.join(fixturesDir, "simple", "src/index.js"))} }],
+        outputs: { outDir: ${JSON.stringify(outDir)}, fileName: "cli.[env].[hash].js", manifestFile: "manifest.json" },
+        cacheDir: ${JSON.stringify(path.join(projectDir, ".cache"))},
+        maxWorkers: 1,
+        diagnostics: "human"
+      };
+    }`,
+  );
+
+  const previousCwd = process.cwd();
+  const { runCli } = await import("../dist/cli.js");
+  try {
+    process.chdir(projectDir);
+    await runCli(["node", "bundler", "build"]);
+  } finally {
+    process.chdir(previousCwd);
+  }
+
+  const manifest = JSON.parse(
+    await fs.readFile(path.join(outDir, "manifest.json"), "utf8"),
+  );
+  expect(manifest.bundles[0].fileName).toMatch(/^cli\.browser\.[a-z0-9]+\.js$/);
+});
+
+test("cli honors explicit config path", async () => {
+  const projectDir = path.join(outRoot, "cli-explicit-config");
+  const outDir = path.join(projectDir, "dist");
+  const configPath = path.join(projectDir, "custom.config.mjs");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(projectDir, { recursive: true });
+  await fs.writeFile(
+    configPath,
+    `export default {
+      envs: { browser: { conditions: ["default"], target: "browser" } },
+      entries: [{ id: "cli-explicit", path: ${JSON.stringify(path.join(fixturesDir, "simple", "src/index.js"))} }],
+      outputs: { outDir: ${JSON.stringify(outDir)}, fileName: "explicit.[env].[hash].js", manifestFile: "manifest.json" },
+      cacheDir: ${JSON.stringify(path.join(projectDir, ".cache"))},
+      maxWorkers: 1,
+      diagnostics: "human"
+    };`,
+  );
+
+  const { runCli } = await import("../dist/cli.js");
+  await runCli(["node", "bundler", "build", "--config", configPath]);
+
+  const manifest = JSON.parse(
+    await fs.readFile(path.join(outDir, "manifest.json"), "utf8"),
+  );
+  expect(manifest.bundles[0].fileName).toMatch(
+    /^explicit\.browser\.[a-z0-9]+\.js$/,
+  );
+});
+
+test("requires cache directives for inline config functions", async () => {
+  await expect(
+    buildFixture("simple", {
+      configPlugins: [
+        {
+          name: "missing-cache-directive",
+          buildStart() {},
+        },
+      ],
+    }),
+  ).rejects.toThrow("Inline config/plugin functions must start");
+});
+
 test("supports env-specific externalized imports via resolveImport", async () => {
   const result = await buildFixture("simple", {
     envs: {
@@ -320,8 +413,10 @@ test("supports env-specific externalized imports via resolveImport", async () =>
       {
         name: "externalize-foo-in-ssr",
         resolveImport: {
-          ssr: async ({ request }) =>
-            request === "./foo.js" ? null : undefined,
+          ssr: async ({ request }) => {
+            "externalize-foo-v1";
+            return request === "./foo.js" ? null : undefined;
+          },
         },
       },
     ],
@@ -353,14 +448,18 @@ test("supports virtual modules through resolveImport and load", async () => {
     configPlugins: [
       {
         name: "virtual-msg",
-        resolveImport: async ({ request }) =>
-          request === "virtual:msg"
+        resolveImport: async ({ request }) => {
+          "virtual-resolve-v1";
+          return request === "virtual:msg"
             ? { id: "virtual:msg", filePath: virtualPath, virtual: true }
-            : undefined,
-        load: async ({ id }) =>
-          id === "virtual:msg"
+            : undefined;
+        },
+        load: async ({ id }) => {
+          "virtual-load-v1";
+          return id === "virtual:msg"
             ? { code: 'export const msg = "hello from virtual";' }
-            : undefined,
+            : undefined;
+        },
       },
     ],
   });
@@ -411,6 +510,33 @@ test("runs module-backed worker transforms per environment", async () => {
   expect(ssrCode).toContain('"server"');
 });
 
+test("caches extra transform outputs and exposes them to build plugins", async () => {
+  const pluginModule = path.join(
+    rootDir,
+    "packages/bundler/test/plugins/metadata-output-plugin.mjs",
+  );
+  const outDir = path.join(outRoot, "extra-output-plugin");
+  await buildFixture("simple", {
+    outputs: {
+      outDir,
+      fileName: "extra-output.[env].[hash].js",
+    },
+    configPlugins: [{ __bundlerPluginRef: true, module: pluginModule }],
+  });
+
+  const emitted = JSON.parse(
+    await fs.readFile(path.join(outDir, "extra-outputs.json"), "utf8"),
+  );
+  expect(emitted).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        name: "test-metadata",
+        file: path.join(fixturesDir, "simple", "src/index.js"),
+      }),
+    ]),
+  );
+});
+
 test("runs build lifecycle hooks and emits sidecar files", async () => {
   const extraEntry = path.join(fixturesDir, "simple", "src/foo.js");
   const outDir = path.join(outRoot, "plugin-lifecycle");
@@ -424,6 +550,7 @@ test("runs build lifecycle hooks and emits sidecar files", async () => {
       {
         name: "lifecycle",
         buildStart({ addEntry, emitFile }) {
+          "lifecycle-build-start-v1";
           addEntry({ id: "extra", path: extraEntry, envs: ["client"] });
           emitFile({
             fileName: "build-start.txt",
@@ -432,17 +559,25 @@ test("runs build lifecycle hooks and emits sidecar files", async () => {
           });
         },
         beforeCombine: [
-          ({ plans }) =>
-            plans.map((plan) => ({
+          ({ plans }) => {
+            "lifecycle-before-combine-v1";
+            return plans.map((plan) => ({
               ...plan,
               orderedParts: [
                 `const __BEFORE_COMBINE__ = true;`,
                 ...plan.orderedParts,
               ],
-            })),
+            }));
+          },
         ],
-        afterCombine: [({ code }) => `/* after combine */\n${code}`],
+        afterCombine: [
+          ({ code }) => {
+            "lifecycle-after-combine-v1";
+            return `/* after combine */\n${code}`;
+          },
+        ],
         buildEnd({ bundles, emitFile }) {
+          "lifecycle-build-end-v1";
           emitFile({
             fileName: "summary.json",
             contents: JSON.stringify({ bundles: bundles.length }),

@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { findPkgRoot, readPkg, readPkgSafe } from "@bundler/shared";
 import { runResolveImport } from "./plugins/run.js";
@@ -11,6 +12,8 @@ import type {
   ResolveImportKind,
   ResolveImportResult,
 } from "./plugins/types.js";
+
+const requireFromHere = createRequire(import.meta.url);
 
 export type Resolver = (
   fromId: string,
@@ -105,7 +108,7 @@ function resolvePath(from: string, source: string): string {
     const candidate = path.resolve(base, source);
     return resolveWithExtensions(candidate);
   }
-  return require.resolve(source, { paths: [path.dirname(from)] });
+  return requireFromHere.resolve(source, { paths: [path.dirname(from)] });
 }
 
 function resolveWithExtensions(filePath: string): string {

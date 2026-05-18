@@ -1,7 +1,7 @@
 export default function envTransformPlugin(options = {}) {
   return {
     name: "env-transform-plugin",
-    transformPre: {
+    transform: {
       default: [
         [
           "./string-replace-babel-plugin.mjs",

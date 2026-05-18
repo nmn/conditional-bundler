@@ -5,6 +5,9 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "bundler": "bin/bundler.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rimraf dist"
@@ -12,6 +15,7 @@
   "dependencies": {
     "@babel/parser": "^7.24.0",
     "@babel/traverse": "^7.24.0",
+    "@babel/types": "^7.24.0",
     "@bundler/shared": "workspace:*",
     "@bundler/worker": "workspace:*"
   }

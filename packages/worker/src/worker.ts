@@ -4,7 +4,13 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { transformAsync } from "@babel/core";
 import { filePrefix, contentHash, normalizePosixPath } from "@bundler/shared";
-import type { CellRecord, FileRecord, TransformResult } from "@bundler/shared";
+import type {
+  CellRecord,
+  DiscoveredEntrypoint,
+  ExtraTransformOutput,
+  FileRecord,
+  TransformResult,
+} from "@bundler/shared";
 import {
   writeFileAtomic,
   writeJsonAtomic,
@@ -24,6 +30,7 @@ type WorkerBabelPluginSpec = {
 
 type WorkerTransformProfile = {
   fingerprint: string;
+  transform: Record<string, WorkerBabelPluginSpec[]>;
   transformPre: Record<string, WorkerBabelPluginSpec[]>;
   transformPost: Record<string, WorkerBabelPluginSpec[]>;
 };
@@ -38,6 +45,8 @@ type WorkerRequest = {
   syntax: { jsx: boolean; ts: boolean };
   codeByEnv?: Record<string, string>;
   mapByEnv?: Record<string, string>;
+  discoveredEntrypointsByEnv?: Record<string, DiscoveredEntrypoint[]>;
+  extraOutputsByEnv?: Record<string, Record<string, ExtraTransformOutput>>;
   workerProfile: WorkerTransformProfile;
   resolvedImportsByEnv?: Record<
     string,
@@ -153,14 +162,20 @@ async function transformFile(
   for (const envId of request.envs) {
     const initialCode = request.codeByEnv?.[envId] ?? request.code;
     const initialMap = request.mapByEnv?.[envId];
+    const transformSpecs = [
+      ...(request.workerProfile.transformPre[envId] ??
+        request.workerProfile.transformPre.default ??
+        []),
+      ...(request.workerProfile.transform[envId] ??
+        request.workerProfile.transform.default ??
+        []),
+    ];
     const preResult = await applyBabelStage(
       initialCode,
       initialMap,
       request,
       envId,
-      request.workerProfile.transformPre[envId] ??
-        request.workerProfile.transformPre.default ??
-        [],
+      transformSpecs,
     );
     const coreResult = transformWithCore(
       {
@@ -196,6 +211,22 @@ async function transformFile(
             [],
         )
       : [];
+    const metadata = preResult.metadata as
+      | {
+          conditionalBundlerExtraOutputs?: Record<string, ExtraTransformOutput>;
+          conditionalBundlerDiscoveredEntrypoints?: DiscoveredEntrypoint[];
+        }
+      | undefined;
+    const extraOutputs = {
+      ...(request.extraOutputsByEnv?.[envId] ?? {}),
+      ...(coreResult.extraOutputs ?? {}),
+      ...(metadata?.conditionalBundlerExtraOutputs ?? {}),
+    };
+    const discoveredEntrypoints = [
+      ...(coreResult.fileRecord?.discoveredEntrypoints ?? []),
+      ...(request.discoveredEntrypointsByEnv?.[envId] ?? []),
+      ...(metadata?.conditionalBundlerDiscoveredEntrypoints ?? []),
+    ];
     results[envId] = {
       ...coreResult,
       code: postResult.code,
@@ -203,6 +234,9 @@ async function transformFile(
       fileRecord: coreResult.fileRecord
         ? {
             ...coreResult.fileRecord,
+            discoveredEntrypoints,
+            extraOutputs:
+              Object.keys(extraOutputs).length > 0 ? extraOutputs : undefined,
             cells: postCells,
           }
         : undefined,
@@ -218,7 +252,7 @@ async function applyBabelStage(
   request: WorkerRequest,
   envId: string,
   specs: WorkerBabelPluginSpec[],
-): Promise<{ code: string; map?: string }> {
+): Promise<{ code: string; map?: string; metadata?: Record<string, unknown> }> {
   if (specs.length === 0) {
     return { code, map };
   }
@@ -227,7 +261,13 @@ async function applyBabelStage(
       const loaded = await loadBabelPlugin(spec.modulePath);
       return [
         loaded,
-        spec.options ?? {},
+        {
+          ...(spec.options ?? {}),
+          envId,
+          filePath: request.realPath,
+          id: request.id,
+          pkg: request.pkg,
+        },
         `${envId}:${index}:${spec.modulePath}`,
       ] as const;
     }),
@@ -241,6 +281,7 @@ async function applyBabelStage(
   return {
     code: result?.code ?? code,
     map: result?.map ? JSON.stringify(result.map) : map,
+    metadata: result?.metadata,
   };
 }
 
@@ -297,6 +338,23 @@ function buildModuleKey(request: WorkerRequest): string {
       contentHash(map),
     ]),
   );
+  const extraOutputHashes = Object.fromEntries(
+    Object.entries(request.extraOutputsByEnv ?? {}).map(([envId, outputs]) => [
+      envId,
+      Object.fromEntries(
+        Object.entries(outputs).map(([name, output]) => [
+          name,
+          contentHash(
+            JSON.stringify({
+              contents: output.contents,
+              map: output.map,
+              metadata: output.metadata,
+            }),
+          ),
+        ]),
+      ),
+    ]),
+  );
 
   return JSON.stringify({
     id: request.id,
@@ -307,6 +365,7 @@ function buildModuleKey(request: WorkerRequest): string {
     codeHash: contentHash(request.code),
     envHashes,
     mapHashes,
+    extraOutputHashes,
     workerProfile: request.workerProfile.fingerprint,
     resolvedImportsByEnv: request.resolvedImportsByEnv,
   });

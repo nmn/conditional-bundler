@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
 import { parse, type ParserPlugin } from "@babel/parser";
 import traverseModule, { type NodePath } from "@babel/traverse";

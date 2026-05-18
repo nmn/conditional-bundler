@@ -54,6 +54,7 @@ import type {
 import type { ModuleGraph } from "./graph/build.js";
 import type {
   CellRecord,
+  DiscoveredEntrypoint,
   ModuleNode,
   Provider,
   FileRecord,
@@ -89,12 +90,15 @@ type WorkerTransformResponse = {
 
 type DynamicEntryDiscovery = ModuleResolution & {
   envId: string;
+  entryId?: string;
+  entryEnvs?: string[];
 };
 
 type ModuleCollection = {
   headersByEnv: Map<string, Map<string, FileRecord>>;
   dynamicEntries: EntrySpec[];
   resolvedMap: Map<string, ModuleResolution>;
+  fileRecords: FileRecord[];
 };
 
 type ScheduledModule = {
@@ -158,13 +162,14 @@ export async function buildProject(
       config,
       explicitEntries,
       workerProfile,
+      allPlugins,
     );
     const resolver = createResolver({
       config,
       plugins: normalizedPlugins,
       cacheDir: cacheRoot.activeRoot,
     });
-    const { headersByEnv, dynamicEntries, resolvedMap } =
+    const { headersByEnv, dynamicEntries, resolvedMap, fileRecords } =
       await collectTransformedModules(
         explicitEntries,
         envs,
@@ -255,6 +260,7 @@ export async function buildProject(
       const hash = contentHashShort(finalBundle.code);
       const fileName = config.outputs.fileName
         ? config.outputs.fileName
+            .replace("[entry]", sanitizeOutputName(plan.entryId))
             .replace("[env]", plan.envId)
             .replace("[hash]", hash)
         : `bundle.${plan.envId}.${hash}.js`;
@@ -318,11 +324,19 @@ export async function buildProject(
       bundles,
       manifest,
       diagnostics,
+      modules: fileRecords,
       emitFile(file) {
         pendingFiles.push(file);
       },
     });
     await flushPendingFiles(config.outputs.outDir, pendingFiles, manifest);
+    if (config.outputs.manifestFile) {
+      await fs.writeFile(
+        path.join(config.outputs.outDir, config.outputs.manifestFile),
+        JSON.stringify(manifest, null, 2),
+        "utf8",
+      );
+    }
 
     return {
       bundles,
@@ -339,6 +353,7 @@ async function prepareCacheRoot(
   config: BundlerConfig,
   entries: EntrySpec[],
   workerProfile: WorkerTransformProfile,
+  plugins: BundlerPlugin[],
 ): Promise<CacheRootInfo> {
   const v2Dir = path.join(cacheBaseDir, "v2");
   await ensureDir(v2Dir);
@@ -348,6 +363,7 @@ async function prepareCacheRoot(
     entries,
     cacheBaseDir,
     workerProfile,
+    plugins,
   );
   const configHash = contentHash(JSON.stringify(normalizedConfig));
   const activeRoot = path.join(v2Dir, configHash);
@@ -373,6 +389,7 @@ function normalizeConfigForCache(
   entries: EntrySpec[],
   cacheBaseDir: string,
   workerProfile: WorkerTransformProfile,
+  plugins: BundlerPlugin[],
 ): unknown {
   return {
     envs: Object.fromEntries(
@@ -394,12 +411,52 @@ function normalizeConfigForCache(
     outputs: {
       outDir: path.resolve(config.outputs.outDir),
       fileName: config.outputs.fileName,
+      manifestFile: config.outputs.manifestFile,
     },
     workerProfile,
+    plugins: serializeConfigValue(plugins),
+    configIdentity: serializeConfigValue(config.configIdentity),
     cacheDir: cacheBaseDir,
     maxWorkers: config.maxWorkers,
     diagnostics: config.diagnostics,
   };
+}
+
+function serializeConfigValue(value: unknown): unknown {
+  if (typeof value === "function") {
+    const source = value.toString();
+    const directive = readFunctionCacheDirective(source);
+    if (!directive) {
+      throw new Error(
+        'Inline config/plugin functions must start with a string-literal cache directive, for example "cache-v1";.',
+      );
+    }
+    return {
+      __type: "function",
+      directive,
+      source,
+    };
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => serializeConfigValue(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, serializeConfigValue(item)]),
+    );
+  }
+  return value;
+}
+
+function readFunctionCacheDirective(source: string): string | null {
+  const bodyMatch = source.match(/\{\s*(["'])(.*?)\1\s*;?/s);
+  if (bodyMatch) {
+    return bodyMatch[2] ?? null;
+  }
+  const arrowMatch = source.match(/=>\s*(["'])(.*?)\1\s*;?\s*$/s);
+  return arrowMatch?.[2] ?? null;
 }
 
 async function cleanupObsoleteCacheRoots(
@@ -539,6 +596,7 @@ async function collectTransformedModules(
   const resolvedMap = new Map<string, ModuleResolution>();
   const scheduled = new Set<string>();
   const dynamicEntries = new Map<string, EntrySpec>();
+  const fileRecords: FileRecord[] = [];
   const inFlight = new Set<Promise<void>>();
 
   const schedule = (module: ScheduledModule) => {
@@ -565,6 +623,7 @@ async function collectTransformedModules(
       headersByEnv,
       resolvedMap,
       dynamicEntries,
+      fileRecords,
       schedule,
     ).finally(() => {
       inFlight.delete(task);
@@ -590,6 +649,7 @@ async function collectTransformedModules(
     headersByEnv,
     dynamicEntries: Array.from(dynamicEntries.values()),
     resolvedMap,
+    fileRecords,
   };
 }
 
@@ -605,6 +665,7 @@ async function transformModule(
   headersByEnv: Map<string, Map<string, FileRecord>>,
   resolvedMap: Map<string, ModuleResolution>,
   dynamicEntries: Map<string, EntrySpec>,
+  fileRecords: FileRecord[],
   schedule: (module: ScheduledModule) => void,
 ): Promise<void> {
   const loadedModule = await loadModuleRecord(module, envs, plugins, config);
@@ -627,11 +688,14 @@ async function transformModule(
     syntax,
     codeByEnv: loadedModule.codeByEnv,
     mapByEnv: loadedModule.mapByEnv,
+    discoveredEntrypointsByEnv: loadedModule.discoveredEntrypointsByEnv,
+    extraOutputsByEnv: loadedModule.extraOutputsByEnv,
     workerProfile,
     resolvedImportsByEnv,
   })) as WorkerTransformResponse;
   for (const [envId, fileRecord] of Object.entries(response.fileRecordsByEnv)) {
     headersByEnv.get(envId)?.set(fileRecord.id, fileRecord);
+    fileRecords.push(fileRecord);
 
     if (fileRecord.flags.hasTopLevelAwait) {
       throw new Error(
@@ -643,6 +707,9 @@ async function transformModule(
       await discoverModulesFromHeader(fileRecord, envId, resolver);
 
     for (const resolved of dependencies) {
+      if (resolved.external) {
+        continue;
+      }
       resolvedMap.set(resolved.id, resolved);
       schedule({
         id: resolved.id,
@@ -656,12 +723,17 @@ async function transformModule(
       resolvedMap.set(dynamicEntry.id, dynamicEntry);
       const existing = dynamicEntries.get(dynamicEntry.id);
       if (existing) {
-        existing.envs = Array.from(new Set([...(existing.envs ?? []), envId]));
+        existing.envs = Array.from(
+          new Set([
+            ...(existing.envs ?? []),
+            ...(dynamicEntry.entryEnvs ?? [envId]),
+          ]),
+        );
       } else {
         dynamicEntries.set(dynamicEntry.id, {
-          id: dynamicEntry.id,
+          id: dynamicEntry.entryId ?? dynamicEntry.id,
           path: dynamicEntry.filePath,
-          envs: [envId],
+          envs: dynamicEntry.entryEnvs ?? [envId],
         });
       }
       schedule({
@@ -752,6 +824,27 @@ async function discoverModulesFromHeader(
     );
   }
 
+  for (const entrypoint of irHeader.discoveredEntrypoints) {
+    if (typeof entrypoint === "string") {
+      continue;
+    }
+    const normalized = normalizeDiscoveredEntrypoint(entrypoint);
+    dynamicPromises.push(
+      resolver(
+        irHeader.id,
+        irHeader.filePath,
+        normalized.request,
+        envId,
+        "dynamic-import",
+      ).then((resolved) => ({
+        ...resolved,
+        envId,
+        entryId: normalized.id,
+        entryEnvs: normalized.envs,
+      })),
+    );
+  }
+
   const [dependencies, dynamicEntries] = await Promise.all([
     Promise.all(dependencyPromises),
     Promise.all(dynamicPromises),
@@ -761,6 +854,14 @@ async function discoverModulesFromHeader(
     dependencies: dedupeResolved(dependencies),
     dynamicEntries: dedupeDynamicEntries(dynamicEntries),
   };
+}
+
+function normalizeDiscoveredEntrypoint(entry: DiscoveredEntrypoint): {
+  id?: string;
+  request: string;
+  envs?: string[];
+} {
+  return typeof entry === "string" ? { request: entry } : entry;
 }
 
 async function loadModuleRecord(
@@ -776,6 +877,10 @@ async function loadModuleRecord(
   let code: string | undefined;
   const codeByEnv: Record<string, string> = {};
   const mapByEnv: Record<string, string> = {};
+  const discoveredEntrypointsByEnv: Record<string, DiscoveredEntrypoint[]> = {};
+  const extraOutputsByEnv: NonNullable<
+    LoadedModuleRecord["extraOutputsByEnv"]
+  > = {};
 
   for (const envId of envs) {
     const envConfig = config.envs[envId];
@@ -794,6 +899,12 @@ async function loadModuleRecord(
     }
     if (loaded.mapByEnv) {
       Object.assign(mapByEnv, loaded.mapByEnv);
+    }
+    if (loaded.discoveredEntrypoints) {
+      discoveredEntrypointsByEnv[envId] = loaded.discoveredEntrypoints;
+    }
+    if (loaded.extraOutputs) {
+      extraOutputsByEnv[envId] = loaded.extraOutputs;
     }
     if (loaded.code) {
       codeByEnv[envId] = loaded.code;
@@ -824,6 +935,12 @@ async function loadModuleRecord(
     code,
     codeByEnv: Object.keys(codeByEnv).length > 0 ? codeByEnv : undefined,
     mapByEnv: Object.keys(mapByEnv).length > 0 ? mapByEnv : undefined,
+    discoveredEntrypointsByEnv:
+      Object.keys(discoveredEntrypointsByEnv).length > 0
+        ? discoveredEntrypointsByEnv
+        : undefined,
+    extraOutputsByEnv:
+      Object.keys(extraOutputsByEnv).length > 0 ? extraOutputsByEnv : undefined,
   };
 }
 
@@ -1341,4 +1458,11 @@ function dedupeDiagnostics(diagnostics: Diagnostic[]): Diagnostic[] {
 function resolveWorkerCount(configured: number): number {
   const cpuCount = Math.max(1, availableParallelism());
   return Math.max(1, Math.min(configured, cpuCount));
+}
+
+function sanitizeOutputName(value: string): string {
+  return path
+    .basename(value)
+    .replace(/\.[cm]?[jt]sx?$/i, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-");
 }

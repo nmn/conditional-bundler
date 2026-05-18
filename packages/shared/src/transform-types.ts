@@ -6,6 +6,8 @@ import type {
   ReexportNamed,
   DynamicImport,
   ConditionalImport,
+  DiscoveredEntrypoint,
+  ExtraTransformOutput,
   FileRecord,
 } from "./ir.js";
 
@@ -35,7 +37,8 @@ export type TransformMeta = {
   reexportsNamed: ReexportNamed[];
   dynamicImports: DynamicImport[];
   conditionalImports: ConditionalImport[];
-  discoveredEntrypoints: string[];
+  discoveredEntrypoints: DiscoveredEntrypoint[];
+  extraOutputs?: Record<string, ExtraTransformOutput>;
   importRanges: Array<[number, number]>;
   exportRanges: Array<[number, number]>;
   flags: {
@@ -58,6 +61,7 @@ export type TransformResult = {
   meta?: TransformMeta;
   fileRecord?: FileRecord;
   codeByEnv?: Record<string, string>;
+  extraOutputs?: Record<string, ExtraTransformOutput>;
   diagnostics?: Diagnostic[];
   skipCore?: boolean;
 };

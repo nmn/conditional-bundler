@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { contentHash, findPkgRoot, readPkgSafe } from "@bundler/shared";
@@ -95,7 +96,7 @@ function isModulePlugin(plugin: BundlerPlugin): plugin is ModuleBundlerPlugin {
 }
 
 function validateInlinePlugin(plugin: InlineBundlerPlugin): void {
-  if (plugin.transformPre || plugin.transformPost) {
+  if (plugin.transform || plugin.transformPre || plugin.transformPost) {
     throw new Error(
       `Inline plugin '${plugin.name}' cannot declare worker-phase hooks. Use plugin(moduleSpecifier, options) instead.`,
     );
@@ -135,6 +136,9 @@ async function loadModulePlugin(
       modulePath,
     );
   }
+  if (plugin.transform) {
+    resolved.transform = resolveEnvBabelSpecs(plugin.transform, modulePath);
+  }
   if (plugin.transformPost) {
     resolved.transformPost = resolveEnvBabelSpecs(
       plugin.transformPost,
@@ -148,13 +152,47 @@ async function loadModulePlugin(
     JSON.stringify({
       name: plugin.name,
       modulePath,
+      moduleHash: hashFileIfExists(modulePath),
       version: pkg.version,
       options: pluginRef.options ?? null,
+      transform: serializeEnvSpecs(resolved.transform),
       transformPre: serializeEnvSpecs(resolved.transformPre),
       transformPost: serializeEnvSpecs(resolved.transformPost),
+      transformFiles: hashTransformFiles([
+        resolved.transform,
+        resolved.transformPre,
+        resolved.transformPost,
+      ]),
     }),
   );
   return resolved;
+}
+
+function hashTransformFiles(
+  values: Array<EnvValue<NormalizedBabelPluginSpec[]> | undefined>,
+): Record<string, string | null> {
+  const modulePaths = new Set<string>();
+  for (const value of values) {
+    const specs = serializeEnvSpecs(value);
+    for (const entries of Object.values(specs ?? {})) {
+      for (const entry of entries) {
+        modulePaths.add(entry.modulePath);
+      }
+    }
+  }
+  return Object.fromEntries(
+    Array.from(modulePaths)
+      .sort()
+      .map((modulePath) => [modulePath, hashFileIfExists(modulePath)]),
+  );
+}
+
+function hashFileIfExists(filePath: string): string | null {
+  try {
+    return contentHash(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 function resolveEnvBabelSpecs(
@@ -214,9 +252,15 @@ function buildWorkerTransformProfile(
   plugins: NormalizedPlugin[],
 ): WorkerTransformProfile {
   const transformPre = new Map<string, NormalizedBabelPluginSpec[]>();
+  const transform = new Map<string, NormalizedBabelPluginSpec[]>();
   const transformPost = new Map<string, NormalizedBabelPluginSpec[]>();
 
   for (const plugin of plugins) {
+    for (const envId of envKeys(plugin.transform)) {
+      const current = transform.get(envId) ?? [];
+      current.push(...getEnvListValue(plugin.transform, envId));
+      transform.set(envId, current);
+    }
     for (const envId of envKeys(plugin.transformPre)) {
       const current = transformPre.get(envId) ?? [];
       current.push(...getEnvListValue(plugin.transformPre, envId));
@@ -232,6 +276,7 @@ function buildWorkerTransformProfile(
   const profile = {
     fingerprint: contentHash(
       JSON.stringify({
+        transform: Object.fromEntries(transform.entries()),
         transformPre: Object.fromEntries(transformPre.entries()),
         transformPost: Object.fromEntries(transformPost.entries()),
         plugins: plugins
@@ -239,6 +284,7 @@ function buildWorkerTransformProfile(
           .filter((value): value is string => Boolean(value)),
       }),
     ),
+    transform: Object.fromEntries(transform.entries()),
     transformPre: Object.fromEntries(transformPre.entries()),
     transformPost: Object.fromEntries(transformPost.entries()),
   };

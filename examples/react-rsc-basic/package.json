@@ -1,0 +1,17 @@
+{
+  "name": "react-rsc-basic",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bundler build --config bundler.config.mjs",
+    "start": "node --conditions react-server scripts/start.mjs"
+  },
+  "dependencies": {
+    "@babel/plugin-transform-react-jsx": "7.27.1",
+    "@bundler/bundler": "workspace:*",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "react-server-dom-webpack": "19.2.5"
+  }
+}

@@ -14,6 +14,7 @@ export type EntrySpec = {
 export type OutputSpec = {
   outDir: string;
   fileName?: string;
+  manifestFile?: string;
 };
 
 export type BundlerConfig = {
@@ -22,6 +23,7 @@ export type BundlerConfig = {
   outputs: OutputSpec;
   plugins?: BundlerPlugin[];
   cacheDir?: string;
+  configIdentity?: unknown;
   maxWorkers: number;
   diagnostics: "human" | "json";
 };

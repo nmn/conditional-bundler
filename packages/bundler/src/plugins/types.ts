@@ -1,4 +1,9 @@
-import type { Diagnostic, FileRecord } from "@bundler/shared";
+import type {
+  Diagnostic,
+  DiscoveredEntrypoint,
+  ExtraTransformOutput,
+  FileRecord,
+} from "@bundler/shared";
 import type { BundleManifest } from "../manifest.js";
 
 export type EnvValue<T> = T | ({ default?: T } & Record<string, T | undefined>);
@@ -42,6 +47,8 @@ export type LoadResult = {
   map?: string;
   codeByEnv?: Record<string, string>;
   mapByEnv?: Record<string, string>;
+  discoveredEntrypoints?: DiscoveredEntrypoint[];
+  extraOutputs?: Record<string, ExtraTransformOutput>;
 };
 
 export type BabelPluginSpec = string | [string, Record<string, unknown>];
@@ -105,6 +112,7 @@ export type BuildEndContext = {
   bundles: Array<{ envId: string; entryId: string; fileName: string }>;
   manifest: BundleManifest;
   diagnostics: Diagnostic[];
+  modules: FileRecord[];
   emitFile: EmitFile;
 };
 
@@ -145,6 +153,7 @@ export type InlineBundlerPlugin = {
   beforeCombine?: EnvValue<BeforeCombineHook[]>;
   afterCombine?: EnvValue<AfterCombineHook[]>;
   buildEnd?: BuildEndHook;
+  transform?: EnvValue<BabelPluginSpec[]>;
   transformPre?: EnvValue<BabelPluginSpec[]>;
   transformPost?: EnvValue<BabelPluginSpec[]>;
 };
@@ -172,12 +181,14 @@ export type NormalizedPlugin = {
   beforeCombine?: InlineBundlerPlugin["beforeCombine"];
   afterCombine?: InlineBundlerPlugin["afterCombine"];
   buildEnd?: BuildEndHook;
+  transform?: EnvValue<NormalizedBabelPluginSpec[]>;
   transformPre?: EnvValue<NormalizedBabelPluginSpec[]>;
   transformPost?: EnvValue<NormalizedBabelPluginSpec[]>;
 };
 
 export type WorkerTransformProfile = {
   fingerprint: string;
+  transform: Record<string, NormalizedBabelPluginSpec[]>;
   transformPre: Record<string, NormalizedBabelPluginSpec[]>;
   transformPost: Record<string, NormalizedBabelPluginSpec[]>;
 };
@@ -195,6 +206,8 @@ export type LoadModuleResult = {
   code: string;
   codeByEnv?: Record<string, string>;
   mapByEnv?: Record<string, string>;
+  discoveredEntrypointsByEnv?: Record<string, DiscoveredEntrypoint[]>;
+  extraOutputsByEnv?: Record<string, Record<string, ExtraTransformOutput>>;
 };
 
 export type LoadedModuleRecord = {
@@ -206,6 +219,8 @@ export type LoadedModuleRecord = {
   code: string;
   codeByEnv?: Record<string, string>;
   mapByEnv?: Record<string, string>;
+  discoveredEntrypointsByEnv?: Record<string, DiscoveredEntrypoint[]>;
+  extraOutputsByEnv?: Record<string, Record<string, ExtraTransformOutput>>;
 };
 
 export type WorkerTransformResult = {
