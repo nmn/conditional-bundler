@@ -20,6 +20,17 @@ import {
   emitDynamicImportConstants,
   type BundleTarget,
 } from "./linker/dynamic-import-constants.js";
+import {
+  emitHmrBundleMetadata,
+  emitHmrCell,
+  emitHmrExportFooter,
+  emitHmrPrelude,
+  emitHmrSymbolDeclarations,
+  emitReactRefreshRegistrations,
+  type HmrBundleRecord,
+  type HmrCellRecord,
+} from "./dev/hmr-linker.js";
+import { resolveDevOptions, type ResolvedDevOptions } from "./dev/options.js";
 import { concatParts } from "./concat.js";
 import type { BundleManifest } from "./manifest.js";
 import { normalizePlugins } from "./plugins/normalize.js";
@@ -82,6 +93,11 @@ type BundlePlan = {
   diagnostics: Diagnostic[];
   modules: string[];
   map?: string;
+  hmr?: HmrBundleRecord;
+};
+
+type BundlePlanDraftWithHmr = BundlePlanDraft & {
+  hmr?: HmrBundleRecord;
 };
 
 type WorkerTransformResponse = {
@@ -105,6 +121,7 @@ type ScheduledModule = {
   id: string;
   filePath: string;
   pkg: { name: string; version: string; root: string };
+  envId: string;
   virtual?: boolean;
 };
 
@@ -157,6 +174,7 @@ export async function buildProject(
         pendingFiles.push(file);
       },
     });
+    const devOptions = await resolveDevOptions(config, explicitEntries);
     const cacheRoot = await prepareCacheRoot(
       cacheBaseDir,
       config,
@@ -205,10 +223,17 @@ export async function buildProject(
     const bundlePlans: BundlePlan[] = [];
     for (const graph of graphs) {
       const entries = pickEntriesForEnv(explicitEntries, graph.envId);
-      let drafts: BundlePlanDraft[] = [];
+      let drafts: BundlePlanDraftWithHmr[] = [];
       for (const entry of entries) {
         drafts.push(
-          await createBundlePlan(graph, entry.path, config, resolver, "entry"),
+          await createBundlePlan(
+            graph,
+            entry.path,
+            config,
+            resolver,
+            "entry",
+            devOptions,
+          ),
         );
       }
 
@@ -226,16 +251,17 @@ export async function buildProject(
             config,
             resolver,
             "dynamic",
+            devOptions,
           ),
         );
       }
-      drafts = await runBeforeCombine(normalizedPlugins, {
+      drafts = (await runBeforeCombine(normalizedPlugins, {
         envId: graph.envId,
         plans: drafts,
         emitFile(file) {
           pendingFiles.push(file);
         },
-      });
+      })) as BundlePlanDraftWithHmr[];
       bundlePlans.push(...drafts.map((draft) => fromBundleDraft(draft)));
     }
 
@@ -264,10 +290,14 @@ export async function buildProject(
             .replace("[env]", plan.envId)
             .replace("[hash]", hash)
         : `bundle.${plan.envId}.${hash}.js`;
-      bundleMap.set(plan.entryId, {
+      const target = {
         fileName,
         exportMode: plan.exportMode,
-      });
+      };
+      bundleMap.set(`${plan.envId}:${plan.entryId}`, target);
+      if (!bundleMap.has(plan.entryId)) {
+        bundleMap.set(plan.entryId, target);
+      }
       bundleOutputs.set(`${plan.envId}:${plan.entryId}`, {
         envId: plan.envId,
         entryId: plan.entryId,
@@ -286,7 +316,11 @@ export async function buildProject(
           `Missing finalized bundle output for '${plan.entryId}' in '${plan.envId}'.`,
         );
       }
-      const header = emitDynamicImportConstants(plan.dynamicImports, bundleMap);
+      const header = emitDynamicImportConstants(
+        plan.dynamicImports,
+        bundleMap,
+        plan.envId,
+      );
       const patchedBundle = concatParts([header, ...plan.parts]);
 
       const outputPath = path.join(
@@ -317,7 +351,20 @@ export async function buildProject(
         ]),
       ),
       emittedFiles: [],
-      metadata: {},
+      metadata: {
+        hmr: devOptions.hmr
+          ? {
+              bundles: Object.fromEntries(
+                bundlePlans
+                  .filter((plan) => plan.hmr)
+                  .map((plan) => [
+                    `${plan.envId}:${plan.entryId}`,
+                    emitHmrBundleMetadata(plan.hmr as HmrBundleRecord),
+                  ]),
+              ),
+            }
+          : undefined,
+      },
     };
 
     await runBuildEnd(normalizedPlugins, {
@@ -419,6 +466,7 @@ function normalizeConfigForCache(
     cacheDir: cacheBaseDir,
     maxWorkers: config.maxWorkers,
     diagnostics: config.diagnostics,
+    dev: config.dev,
   };
 }
 
@@ -509,10 +557,11 @@ function pickEntriesForEnv(entries: EntrySpec[], envId: string): EntrySpec[] {
 async function createBundlePlan(
   graph: ModuleGraph,
   entryId: string,
-  _config: BundlerConfig,
+  config: BundlerConfig,
   _resolver: Resolver,
   exportMode: "entry" | "dynamic",
-): Promise<BundlePlanDraft> {
+  devOptions: ResolvedDevOptions,
+): Promise<BundlePlanDraftWithHmr> {
   const entryNode = graph.nodes.get(entryId);
   if (!entryNode) {
     throw new Error(`Entry not found in graph: ${entryId}`);
@@ -524,6 +573,38 @@ async function createBundlePlan(
   const parts: string[] = [];
   const dynamicImports: DynamicImportRef[] = [];
   const namespaceDemanded = collectNamespaceDemands(selection, graph);
+  const hmrCells: HmrCellRecord[] = [];
+  const hmrSymbols = new Set<string>();
+  const useHmr = devOptions.hmr;
+  const useReactRefresh = devOptions.reactRefreshEnvs.has(graph.envId);
+
+  for (const node of orderedFiles) {
+    const selectedCells = selection.get(node.id);
+    if (!selectedCells || selectedCells.size === 0) {
+      continue;
+    }
+    for (const cell of collectOrderedCells(node, selectedCells)) {
+      for (const symbol of cell.provides) {
+        hmrSymbols.add(symbol);
+      }
+    }
+  }
+
+  if (useHmr) {
+    parts.push(
+      emitHmrPrelude({
+        connect:
+          exportMode === "entry" &&
+          config.envs[graph.envId]?.target === "browser",
+        reactRefresh:
+          useReactRefresh && config.envs[graph.envId]?.target === "browser",
+      }),
+    );
+    const declarations = emitHmrSymbolDeclarations(hmrSymbols);
+    if (declarations) {
+      parts.push(declarations);
+    }
+  }
 
   for (const node of orderedFiles) {
     const selectedCells = selection.get(node.id);
@@ -535,13 +616,31 @@ async function createBundlePlan(
       parts.push(emitConditionalStart(condition));
     }
 
-    const cellParts = await Promise.all(
-      collectOrderedCells(node, selectedCells).map(readCellSource),
-    );
+    const orderedCells = useHmr
+      ? collectDependencyOrderedCells(node, selectedCells)
+      : collectOrderedCells(node, selectedCells);
+    const cellParts = useHmr
+      ? await Promise.all(
+          orderedCells.map(async (cell) => {
+            const hmrCell = await emitHmrCell(
+              cell,
+              collectExternalIdentifierDeps(graph, node, cell),
+            );
+            hmrCells.push(hmrCell);
+            return hmrCell.code;
+          }),
+        )
+      : await Promise.all(orderedCells.map(readCellSource));
     parts.push(...cellParts.filter((part): part is string => part.length > 0));
 
     if (namespaceDemanded.has(node.id) && node.exportTable) {
       parts.push(emitNamespaceObject(node));
+    }
+    if (useHmr && useReactRefresh) {
+      const registrations = emitReactRefreshRegistrations(node, selectedCells);
+      if (registrations) {
+        parts.push(registrations);
+      }
     }
 
     if (condition) {
@@ -560,8 +659,9 @@ async function createBundlePlan(
       });
     }
   }
-  const exportFooter =
-    exportMode === "entry"
+  const exportFooter = useHmr
+    ? emitHmrExportFooter(graph.nodes.get(entryId))
+    : exportMode === "entry"
       ? emitEntryExports(graph.nodes.get(entryId))
       : emitDynamicBundleExports(orderedFiles, selection);
   if (exportFooter) {
@@ -576,6 +676,15 @@ async function createBundlePlan(
     orderedParts: parts,
     dynamicImports,
     diagnostics,
+    hmr: useHmr
+      ? {
+          envId: graph.envId,
+          entryId,
+          reactRefresh: useReactRefresh,
+          symbols: Array.from(hmrSymbols).sort(),
+          cells: hmrCells,
+        }
+      : undefined,
   };
 }
 
@@ -600,10 +709,11 @@ async function collectTransformedModules(
   const inFlight = new Set<Promise<void>>();
 
   const schedule = (module: ScheduledModule) => {
-    if (scheduled.has(module.id)) {
+    const key = `${module.envId}:${module.id}`;
+    if (scheduled.has(key)) {
       return;
     }
-    scheduled.add(module.id);
+    scheduled.add(key);
     resolvedMap.set(module.id, {
       id: module.id,
       filePath: module.filePath,
@@ -613,6 +723,7 @@ async function collectTransformedModules(
     });
     const task = transformModule(
       module,
+      [module.envId],
       envs,
       cacheDir,
       plugins,
@@ -634,11 +745,14 @@ async function collectTransformedModules(
   for (const entry of entries) {
     const filePath = path.resolve(entry.path);
     const pkgRoot = findPkgRoot(filePath) ?? path.dirname(filePath);
-    schedule({
-      id: filePath,
-      filePath,
-      pkg: readPkgSafe(pkgRoot),
-    });
+    for (const envId of entry.envs ?? envs) {
+      schedule({
+        id: filePath,
+        filePath,
+        envId,
+        pkg: readPkgSafe(pkgRoot),
+      });
+    }
   }
 
   while (inFlight.size > 0) {
@@ -656,6 +770,7 @@ async function collectTransformedModules(
 async function transformModule(
   module: ScheduledModule,
   envs: string[],
+  allEnvIds: string[],
   cacheDir: string,
   plugins: NormalizedPlugin[],
   workerProfile: WorkerTransformProfile,
@@ -692,6 +807,9 @@ async function transformModule(
     extraOutputsByEnv: loadedModule.extraOutputsByEnv,
     workerProfile,
     resolvedImportsByEnv,
+    dev: {
+      hmr: config.dev?.hmr === true,
+    },
   })) as WorkerTransformResponse;
   for (const [envId, fileRecord] of Object.entries(response.fileRecordsByEnv)) {
     headersByEnv.get(envId)?.set(fileRecord.id, fileRecord);
@@ -705,7 +823,6 @@ async function transformModule(
 
     const { dependencies, dynamicEntries: discoveredDynamics } =
       await discoverModulesFromHeader(fileRecord, envId, resolver);
-
     for (const resolved of dependencies) {
       if (resolved.external) {
         continue;
@@ -714,6 +831,7 @@ async function transformModule(
       schedule({
         id: resolved.id,
         filePath: resolved.filePath,
+        envId,
         pkg: resolved.pkg,
         virtual: resolved.virtual,
       });
@@ -736,12 +854,18 @@ async function transformModule(
           envs: dynamicEntry.entryEnvs ?? [envId],
         });
       }
-      schedule({
-        id: dynamicEntry.id,
-        filePath: dynamicEntry.filePath,
-        pkg: dynamicEntry.pkg,
-        virtual: dynamicEntry.virtual,
-      });
+      for (const targetEnv of dynamicEntry.entryEnvs ?? [envId]) {
+        if (!allEnvIds.includes(targetEnv)) {
+          continue;
+        }
+        schedule({
+          id: dynamicEntry.id,
+          filePath: dynamicEntry.filePath,
+          envId: targetEnv,
+          pkg: dynamicEntry.pkg,
+          virtual: dynamicEntry.virtual,
+        });
+      }
     }
   }
 }
@@ -829,20 +953,22 @@ async function discoverModulesFromHeader(
       continue;
     }
     const normalized = normalizeDiscoveredEntrypoint(entrypoint);
-    dynamicPromises.push(
-      resolver(
-        irHeader.id,
-        irHeader.filePath,
-        normalized.request,
-        envId,
-        "dynamic-import",
-      ).then((resolved) => ({
-        ...resolved,
-        envId,
-        entryId: normalized.id,
-        entryEnvs: normalized.envs,
-      })),
-    );
+    for (const targetEnv of normalized.envs ?? [envId]) {
+      dynamicPromises.push(
+        resolver(
+          irHeader.id,
+          irHeader.filePath,
+          normalized.request,
+          targetEnv,
+          "dynamic-import",
+        ).then((resolved) => ({
+          ...resolved,
+          envId: targetEnv,
+          entryId: normalized.id,
+          entryEnvs: [targetEnv],
+        })),
+      );
+    }
   }
 
   const [dependencies, dynamicEntries] = await Promise.all([
@@ -1285,6 +1411,38 @@ function collectNamespaceDemands(
   return demanded;
 }
 
+function collectExternalIdentifierDeps(
+  graph: ModuleGraph,
+  node: ModuleNode,
+  cell: CellRecord,
+): string[] {
+  const deps = new Set<string>();
+  for (const dependency of cell.externalDeps) {
+    if (dependency.kind !== "import") {
+      continue;
+    }
+    const sourceId = node.resolvedSources.get(dependency.source);
+    if (!sourceId) {
+      continue;
+    }
+    const sourceNode = graph.nodes.get(sourceId);
+    if (!sourceNode?.exportTable) {
+      continue;
+    }
+    if (dependency.imported === "*") {
+      for (const provider of sourceNode.exportTable.values()) {
+        deps.add(provider.symbol);
+      }
+      continue;
+    }
+    const provider = sourceNode.exportTable.get(dependency.imported);
+    if (provider) {
+      deps.add(provider.symbol);
+    }
+  }
+  return Array.from(deps);
+}
+
 function collectOrderedCells(
   node: ModuleNode,
   selectedCells: Set<string>,
@@ -1292,6 +1450,53 @@ function collectOrderedCells(
   return getAllCells(node)
     .filter((cell) => selectedCells.has(cell.id))
     .sort((left, right) => left.sourceOrder - right.sourceOrder);
+}
+
+function collectDependencyOrderedCells(
+  node: ModuleNode,
+  selectedCells: Set<string>,
+): CellRecord[] {
+  const cells = collectOrderedCells(node, selectedCells);
+  const selectedById = new Map(cells.map((cell) => [cell.id, cell]));
+  const providerBySymbol = new Map<string, CellRecord>();
+  for (const cell of cells) {
+    for (const symbol of cell.provides) {
+      providerBySymbol.set(symbol, cell);
+    }
+  }
+
+  const output: CellRecord[] = [];
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+
+  const visit = (cell: CellRecord) => {
+    if (visited.has(cell.id)) {
+      return;
+    }
+    if (visiting.has(cell.id)) {
+      output.push(cell);
+      visited.add(cell.id);
+      return;
+    }
+    visiting.add(cell.id);
+    for (const symbol of cell.internalDeps) {
+      const dependency = providerBySymbol.get(symbol);
+      if (dependency && selectedById.has(dependency.id)) {
+        visit(dependency);
+      }
+    }
+    visiting.delete(cell.id);
+    if (!visited.has(cell.id)) {
+      visited.add(cell.id);
+      output.push(cell);
+    }
+  };
+
+  for (const cell of cells) {
+    visit(cell);
+  }
+
+  return output;
 }
 
 function getAllCells(node: ModuleNode): CellRecord[] {
@@ -1377,7 +1582,7 @@ function emitDynamicBundleExports(
   return `export { ${Array.from(exportedSymbols).join(", ")} };`;
 }
 
-function fromBundleDraft(draft: BundlePlanDraft): BundlePlan {
+function fromBundleDraft(draft: BundlePlanDraftWithHmr): BundlePlan {
   return {
     envId: draft.envId,
     entryId: draft.entryId,
@@ -1391,6 +1596,7 @@ function fromBundleDraft(draft: BundlePlanDraft): BundlePlan {
     })),
     diagnostics: draft.diagnostics,
     modules: draft.modules,
+    hmr: draft.hmr,
   };
 }
 

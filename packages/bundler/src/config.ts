@@ -17,6 +17,14 @@ export type OutputSpec = {
   manifestFile?: string;
 };
 
+export type DevSpec = {
+  hmr?: boolean;
+  reactRefresh?: boolean | { envs?: string[] };
+  fullReloadOnFailure?: boolean;
+  port?: number;
+  host?: string;
+};
+
 export type BundlerConfig = {
   envs: Record<string, EnvConfig>;
   entries: EntrySpec[];
@@ -26,6 +34,7 @@ export type BundlerConfig = {
   configIdentity?: unknown;
   maxWorkers: number;
   diagnostics: "human" | "json";
+  dev?: DevSpec;
 };
 
 export const defaultConfig: BundlerConfig = {

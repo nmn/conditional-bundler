@@ -17,6 +17,7 @@
     "@babel/traverse": "^7.24.0",
     "@babel/types": "^7.24.0",
     "@bundler/shared": "workspace:*",
-    "@bundler/worker": "workspace:*"
+    "@bundler/worker": "workspace:*",
+    "react-refresh": "0.14.2"
   }
 }

@@ -20,3 +20,7 @@ export * from "./linker/strip-imports.js";
 export * from "./concat.js";
 export * from "./sourcemap/compose.js";
 export * from "./manifest.js";
+export * from "./dev/options.js";
+export * from "./dev/hmr-linker.js";
+export * from "./dev/server.js";
+export * from "./dev/rsc-server.js";

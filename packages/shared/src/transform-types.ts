@@ -28,6 +28,9 @@ export type TransformInput = {
   envs: string[];
   envId?: string;
   resolvedImports?: Record<string, TransformResolvedImport>;
+  dev?: {
+    hmr?: boolean;
+  };
 };
 
 export type TransformMeta = {

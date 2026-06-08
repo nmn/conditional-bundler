@@ -67,11 +67,12 @@ test("captures conditional import attributes", async () => {
     "import { foo } from './dep.js' with { condition: 'COND_A' }; export const value = foo;",
   );
   expect(result.code).toMatchInlineSnapshot(`
-"/////##CONDITION_START##"COND_A"
-const ji19ybwd_foo = a4tfu7r6i_foo;
+"let ji19ybwd_foo;
+/////##CONDITION_START##"COND_A"
+ji19ybwd_foo = a4tfu7r6i_foo;
 /////##CONDITION_END##
 /////##CONDITION_START##{"NOT":"COND_A"}
-const ji19ybwd_foo = undefined;
+ji19ybwd_foo = undefined;
 /////##CONDITION_END##
 const ji19ybwd_value = ji19ybwd_foo;"
 `);
@@ -103,11 +104,12 @@ test("handles conditional else attributes", async () => {
     "import { foo } from './dep.js' with { condition: 'COND_A', else: './alt.js' }; export const value = foo;",
   );
   expect(result.code).toMatchInlineSnapshot(`
-"/////##CONDITION_START##"COND_A"
-const ji19ybwd_foo = a4tfu7r6i_foo;
+"let ji19ybwd_foo;
+/////##CONDITION_START##"COND_A"
+ji19ybwd_foo = a4tfu7r6i_foo;
 /////##CONDITION_END##
 /////##CONDITION_START##{"NOT":"COND_A"}
-const ji19ybwd_foo = a594tohci_foo;
+ji19ybwd_foo = a594tohci_foo;
 /////##CONDITION_END##
 const ji19ybwd_value = ji19ybwd_foo;"
 `);

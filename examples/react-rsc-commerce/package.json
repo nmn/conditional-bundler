@@ -1,0 +1,20 @@
+{
+  "name": "react-rsc-commerce",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build": "node scripts/clean.mjs && BUNDLER_MODE=production bundler build --config bundler.config.mjs",
+    "start": "node --conditions react-server scripts/start.mjs",
+    "prod": "node scripts/clean.mjs && BUNDLER_MODE=production bundler build --config bundler.config.mjs && node --conditions react-server scripts/start.mjs",
+    "dev": "BUNDLER_MODE=development node --conditions react-server scripts/dev.mjs"
+  },
+  "dependencies": {
+    "@babel/plugin-transform-react-jsx": "7.27.1",
+    "@bundler/bundler": "workspace:*",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "react-server-dom-webpack": "19.2.5"
+  }
+}

@@ -61,6 +61,9 @@ type WorkerRequest = {
       }
     >
   >;
+  dev?: {
+    hmr?: boolean;
+  };
 };
 
 type WorkerResponse = {
@@ -91,7 +94,11 @@ async function handleTransform(
 ): Promise<WorkerResponse> {
   const moduleKey = buildModuleKey(request);
   const fileHash = contentHash(request.code);
-  const cachePaths = buildFileCachePaths(request.cacheDir, request.realPath);
+  const cachePaths = buildFileCachePaths(
+    request.cacheDir,
+    request.realPath,
+    request.envs,
+  );
   const cached = await readModuleCache(cachePaths.modulePath);
   if (
     cached &&
@@ -187,6 +194,7 @@ async function transformFile(
         envs: request.envs,
         envId,
         resolvedImports: request.resolvedImportsByEnv?.[envId],
+        dev: request.dev,
       },
       {
         importAttrAllow: ["json"],
@@ -374,9 +382,11 @@ function buildModuleKey(request: WorkerRequest): string {
 function buildFileCachePaths(
   cacheRoot: string,
   realPath: string,
+  envs: string[],
 ): FileCachePaths {
   const fileHash = contentHash(normalizePosixPath(realPath));
-  const fileDir = path.join(cacheRoot, "files", fileHash);
+  const envHash = contentHash(JSON.stringify([...envs].sort())).slice(0, 12);
+  const fileDir = path.join(cacheRoot, "files", fileHash, envHash);
   return {
     fileHash,
     fileDir,

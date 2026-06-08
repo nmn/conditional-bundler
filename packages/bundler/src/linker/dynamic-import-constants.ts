@@ -13,6 +13,7 @@ export type DynamicImportRuntime = {
 export function emitDynamicImportConstants(
   imports: DynamicImportRuntime[],
   bundleMap: Map<string, BundleTarget>,
+  envId?: string,
 ): string {
   const lines: string[] = [];
   const emitted = new Set<string>();
@@ -33,7 +34,9 @@ export function emitDynamicImportConstants(
       continue;
     }
 
-    const target = bundleMap.get(dynamicImport.resolvedId);
+    const target =
+      (envId ? bundleMap.get(`${envId}:${dynamicImport.resolvedId}`) : null) ??
+      bundleMap.get(dynamicImport.resolvedId);
     if (!target) {
       continue;
     }

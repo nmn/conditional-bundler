@@ -3,6 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { defaultConfig } from "./config.js";
 import { buildProject } from "./builder.js";
+import { startDevServer } from "./dev/server.js";
 import type { BundlerConfig } from "./config.js";
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -12,6 +13,25 @@ export async function runCli(argv: string[]): Promise<void> {
     await buildProject(config, []);
     return;
   }
+  if (command === "dev") {
+    const config = await loadConfig(argv);
+    const port = readFlag(argv, "--port");
+    const host = readFlag(argv, "--host");
+    const server = await startDevServer({
+      ...config,
+      dev: {
+        ...(config.dev ?? {}),
+        hmr: true,
+        reactRefresh: config.dev?.reactRefresh ?? true,
+        fullReloadOnFailure: config.dev?.fullReloadOnFailure ?? true,
+        port: port ? Number(port) : config.dev?.port,
+        host: host ?? config.dev?.host,
+      },
+    });
+    console.log(`conditional-bundler dev server running at ${server.url}`);
+    await new Promise(() => {});
+    return;
+  }
   if (command === "clean-cache") {
     console.log("Clean cache (stub).");
     return;
@@ -19,7 +39,7 @@ export async function runCli(argv: string[]): Promise<void> {
   throw new Error(`Unknown command: ${command}`);
 }
 
-async function loadConfig(argv: string[]): Promise<BundlerConfig> {
+export async function loadConfig(argv: string[]): Promise<BundlerConfig> {
   const explicitConfig = readFlag(argv, "--config");
   const configPath = explicitConfig
     ? path.resolve(explicitConfig)
@@ -43,6 +63,7 @@ async function loadConfig(argv: string[]): Promise<BundlerConfig> {
       ...(loaded.outputs ?? {}),
     },
     plugins: loaded.plugins ?? defaultConfig.plugins,
+    dev: loaded.dev ?? defaultConfig.dev,
   };
 }
 

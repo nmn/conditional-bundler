@@ -160,6 +160,15 @@ export function transformWithCore(
   const exportStars: ExportStar[] = [];
   const reexportsNamed: ReexportNamed[] = [];
   const exportsLocal: ExportLocal[] = [];
+  const externalImportLocals = new Set<string>();
+  for (const entry of importMeta.imports) {
+    if (!entry.external || entry.kind !== "value") {
+      continue;
+    }
+    for (const spec of entry.specifiers) {
+      externalImportLocals.add(spec.local);
+    }
+  }
   const renameMap = new Map<string, string>();
   const renameReverse = new Map<string, string>();
   const handledDefaultExports = new WeakSet<t.ExportDefaultDeclaration>();
@@ -175,7 +184,11 @@ export function transformWithCore(
           binding.path.isImportSpecifier() ||
           binding.path.isImportDefaultSpecifier() ||
           binding.path.isImportNamespaceSpecifier();
-        if (binding.kind === "module" && isImportBinding) {
+        if (
+          binding.kind === "module" &&
+          isImportBinding &&
+          !externalImportLocals.has(name)
+        ) {
           continue;
         }
         const nextName = `${prefix}_${name}`;
@@ -247,6 +260,20 @@ export function transformWithCore(
           t.stringLiteral(prefix),
           t.stringLiteral(first.value),
         ]),
+      );
+    },
+    MemberExpression(path: NodePath<t.MemberExpression>) {
+      if (!input.dev?.hmr || !isImportMetaHot(path.node)) {
+        return;
+      }
+      path.replaceWith(
+        t.callExpression(
+          t.memberExpression(
+            t.identifier("__BUNDLER_HMR__"),
+            t.identifier("hot"),
+          ),
+          [t.stringLiteral(input.id ?? input.realPath)],
+        ),
       );
     },
     ExportNamedDeclaration(path: NodePath<t.ExportNamedDeclaration>) {
@@ -750,8 +777,9 @@ function buildConditionalBindingCells(
       }
       const localName = `${prefix}_${namespaceLocal}`;
       const lines = [
+        `let ${localName};`,
         emitConditionalStart(entry.condition),
-        `const ${localName} = __NS__${depPrefix};`,
+        `${localName} = __NS__${depPrefix};`,
         emitConditionalEnd(),
       ];
 
@@ -785,7 +813,7 @@ function buildConditionalBindingCells(
       }
       lines.push(
         emitConditionalStart({ NOT: entry.condition }),
-        `const ${localName} = ${fallback};`,
+        `${localName} = ${fallback};`,
         emitConditionalEnd(),
       );
       cells.push({
@@ -806,8 +834,9 @@ function buildConditionalBindingCells(
     for (const spec of entry.specifiers) {
       const localName = `${prefix}_${spec.local}`;
       const lines = [
+        `let ${localName};`,
         emitConditionalStart(entry.condition),
-        `const ${localName} = ${conditionalImportTarget(entry, spec, depPrefix)};`,
+        `${localName} = ${conditionalImportTarget(entry, spec, depPrefix)};`,
         emitConditionalEnd(),
       ];
 
@@ -841,7 +870,7 @@ function buildConditionalBindingCells(
       }
       lines.push(
         emitConditionalStart({ NOT: entry.condition }),
-        `const ${localName} = ${fallback};`,
+        `${localName} = ${fallback};`,
         emitConditionalEnd(),
       );
       cells.push({
@@ -1474,6 +1503,15 @@ function isImportMetaUrl(node: t.MemberExpression): boolean {
     node.object.meta.name === "import" &&
     node.object.property.name === "meta" &&
     t.isIdentifier(node.property, { name: "url" })
+  );
+}
+
+function isImportMetaHot(node: t.MemberExpression): boolean {
+  return (
+    t.isMetaProperty(node.object) &&
+    node.object.meta.name === "import" &&
+    node.object.property.name === "meta" &&
+    t.isIdentifier(node.property, { name: "hot" })
   );
 }
 

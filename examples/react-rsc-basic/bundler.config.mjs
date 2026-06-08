@@ -22,12 +22,9 @@ export default {
     manifestFile: "manifest.json",
   },
   plugins: [
-    plugin("./plugins/rsc-example-plugin.mjs", {
+    plugin("../shared/rsc-plugin/rsc-example-plugin.mjs", {
       root,
-      clientEnv: "client",
-      rscEnv: "rsc",
-      clientEntry: path.join(root, "src/client.jsx"),
-      clientManifestFile: "rsc-client-manifest.json",
+      name: "react-rsc-basic",
     }),
   ],
   cacheDir: path.join(root, ".cache/conditional-bundler"),

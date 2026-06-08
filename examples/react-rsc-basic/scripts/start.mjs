@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+process.env.NODE_ENV ??= "production";
+
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const manifest = JSON.parse(
   fs.readFileSync(path.join(root, "dist/manifest.json"), "utf8"),

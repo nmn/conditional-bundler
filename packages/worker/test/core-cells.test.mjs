@@ -238,7 +238,7 @@ test("creates conditional binding cells that feed later worker cells", async () 
         },
       ],
       eager: false,
-      code: `/////##CONDITION_START##"FLAG" const ${prefix}_feature = ${prefixForSource("./dep.js")}_feature; /////##CONDITION_END## /////##CONDITION_START##{"NOT":"FLAG"} const ${prefix}_feature = ${prefixForSource("./fallback.js")}_feature; /////##CONDITION_END##`,
+      code: `let ${prefix}_feature; /////##CONDITION_START##"FLAG" ${prefix}_feature = ${prefixForSource("./dep.js")}_feature; /////##CONDITION_END## /////##CONDITION_START##{"NOT":"FLAG"} ${prefix}_feature = ${prefixForSource("./fallback.js")}_feature; /////##CONDITION_END##`,
     },
     {
       kind: "worker",

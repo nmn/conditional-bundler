@@ -35,11 +35,12 @@ test("handles a mixed module with reexports, conditional imports, namespace acce
     code: result.code,
     meta: result.meta,
   }).toMatchObject({
-    code: `/////##CONDITION_START##"COND_A"
-const ji19ybwd_pick = rzh0ycy4_pick;
+    code: `let ji19ybwd_pick;
+/////##CONDITION_START##"COND_A"
+ji19ybwd_pick = rzh0ycy4_pick;
 /////##CONDITION_END##
 /////##CONDITION_START##{"NOT":"COND_A"}
-const ji19ybwd_pick = gb2g3nny_pick;
+ji19ybwd_pick = gb2g3nny_pick;
 /////##CONDITION_END##
 const ji19ybwd_default = async function ji19ybwd_run(key) {
   const mod = await __IMPORT_a38syydlx();

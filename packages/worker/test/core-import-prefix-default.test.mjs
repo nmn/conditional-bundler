@@ -22,11 +22,12 @@ test("defines conditional imports as local prefixed bindings wrapped in markers"
   );
 
   expect(trimCode(result)).toBe(
-    `/////##CONDITION_START##"COND_A"
-const ${prefixFor(defaultFilePath)}_foo = ${prefixForSource("./dep.js")}_foo;
+    `let ${prefixFor(defaultFilePath)}_foo;
+/////##CONDITION_START##"COND_A"
+${prefixFor(defaultFilePath)}_foo = ${prefixForSource("./dep.js")}_foo;
 /////##CONDITION_END##
 /////##CONDITION_START##{"NOT":"COND_A"}
-const ${prefixFor(defaultFilePath)}_foo = undefined;
+${prefixFor(defaultFilePath)}_foo = undefined;
 /////##CONDITION_END##
 const ${prefixFor(defaultFilePath)}_value = ${prefixFor(defaultFilePath)}_foo;`,
   );

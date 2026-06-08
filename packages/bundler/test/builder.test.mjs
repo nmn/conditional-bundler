@@ -32,6 +32,7 @@ async function buildFixture(name, options = {}) {
       maxWorkers: 2,
       diagnostics: "human",
       plugins: options.configPlugins ?? [],
+      dev: options.dev,
     },
     options.plugins ?? [],
   );
@@ -73,11 +74,12 @@ test("adds conditional markers", async () => {
 /////##CONDITION_START##"EXPERIMENT_A"
 const ka1gyw5b_feature = "enabled";
 /////##CONDITION_END##
+let kftqz1jg_feature;
 /////##CONDITION_START##"EXPERIMENT_A"
-const kftqz1jg_feature = ka1gyw5b_feature;
+kftqz1jg_feature = ka1gyw5b_feature;
 /////##CONDITION_END##
 /////##CONDITION_START##{"NOT":"EXPERIMENT_A"}
-const kftqz1jg_feature = undefined;
+kftqz1jg_feature = undefined;
 /////##CONDITION_END##
 const kftqz1jg_value = kftqz1jg_feature;
 export { kftqz1jg_value as value };",
@@ -97,11 +99,12 @@ const a57bqmm6a_feature = "yes";
 /////##CONDITION_START##{"NOT":"EXPERIMENT_B"}
 const qb58dser_feature = "no";
 /////##CONDITION_END##
+let pvain3vm_feature;
 /////##CONDITION_START##"EXPERIMENT_B"
-const pvain3vm_feature = a57bqmm6a_feature;
+pvain3vm_feature = a57bqmm6a_feature;
 /////##CONDITION_END##
 /////##CONDITION_START##{"NOT":"EXPERIMENT_B"}
-const pvain3vm_feature = qb58dser_feature;
+pvain3vm_feature = qb58dser_feature;
 /////##CONDITION_END##
 const pvain3vm_value = pvain3vm_feature;
 export { pvain3vm_value as value };",
@@ -122,19 +125,21 @@ const rw4545i1_helper = "helper";
 const pm2t2idw_helper = "fallback";
 /////##CONDITION_END##
 /////##CONDITION_START##"COND_A"
+let sa8r0y59_helper;
 /////##CONDITION_START##"COND_B"
-const sa8r0y59_helper = rw4545i1_helper;
+sa8r0y59_helper = rw4545i1_helper;
 /////##CONDITION_END##
 /////##CONDITION_START##{"NOT":"COND_B"}
-const sa8r0y59_helper = pm2t2idw_helper;
+sa8r0y59_helper = pm2t2idw_helper;
 /////##CONDITION_END##
 const sa8r0y59_feature = sa8r0y59_helper;
 /////##CONDITION_END##
+let a2u80kk0g_feature;
 /////##CONDITION_START##"COND_A"
-const a2u80kk0g_feature = sa8r0y59_feature;
+a2u80kk0g_feature = sa8r0y59_feature;
 /////##CONDITION_END##
 /////##CONDITION_START##{"NOT":"COND_A"}
-const a2u80kk0g_feature = undefined;
+a2u80kk0g_feature = undefined;
 /////##CONDITION_END##
 function a2u80kk0g_run() {
   return a2u80kk0g_feature;
@@ -250,7 +255,7 @@ test("reuses cached worker artifacts for unchanged modules", async () => {
     activeRoot,
     "files",
     entryFileHash,
-    "module.json",
+    await findModuleCacheSuffix(path.join(activeRoot, "files", entryFileHash)),
   );
   const moduleJson = JSON.parse(await fs.readFile(entryModulePath, "utf8"));
   const fileRecord =
@@ -274,6 +279,21 @@ test("reuses cached worker artifacts for unchanged modules", async () => {
   expect(secondModuleStat.mtimeMs).toBe(firstModuleStat.mtimeMs);
   expect(secondArtifactStat.mtimeMs).toBe(firstArtifactStat.mtimeMs);
 });
+
+async function findModuleCacheSuffix(moduleRoot) {
+  const direct = path.join(moduleRoot, "module.json");
+  try {
+    await fs.stat(direct);
+    return "module.json";
+  } catch {
+    const entries = await fs.readdir(moduleRoot, { withFileTypes: true });
+    const envDir = entries.find((entry) => entry.isDirectory());
+    if (!envDir) {
+      throw new Error(`Missing module cache under ${moduleRoot}`);
+    }
+    return path.join(envDir.name, "module.json");
+  }
+}
 
 test("uses different config roots when the bundler config changes", async () => {
   const cacheDir = path.join(cacheRoot, "config-roots");
@@ -321,6 +341,165 @@ test("writes bundle manifest and supports entry output placeholder", async () =>
     await fs.readFile(path.join(outDir, "manifest.json"), "utf8"),
   );
   expect(manifest.bundles[0].fileName).toBe(result.bundles[0].fileName);
+});
+
+test("dev hmr emits mutable cell installers keyed by identifiers", async () => {
+  const result = await buildFixture("simple", {
+    outputs: {
+      outDir: path.join(outRoot, "simple-hmr"),
+      fileName: "simple-hmr.[env].[hash].js",
+    },
+    dev: { hmr: true, reactRefresh: false },
+  });
+  const bundlePath = path.join(
+    outRoot,
+    "simple-hmr",
+    result.bundles[0].fileName,
+  );
+  const output = await fs.readFile(bundlePath, "utf8");
+  const hmrBundle =
+    result.manifest.metadata.hmr.bundles[
+      `${result.bundles[0].envId}:${result.bundles[0].entryId}`
+    ];
+  const symbolCell = hmrBundle.cells.find((cell) => cell.symbols.length > 0);
+
+  expect(output).toContain("const __BUNDLER_HMR__");
+  expect(output).toContain("__BUNDLER_HMR__.register");
+  expect(output).toContain("let a33jpi1jb_value");
+  expect(output).toContain("a33jpi1jb_value = k7isotkd_foo + 1;");
+  expect(hmrBundle.reactRefresh).toBe(false);
+  expect(symbolCell.symbols.length).toBeGreaterThan(0);
+  expect(Object.prototype.hasOwnProperty.call(symbolCell, "moduleId")).toBe(
+    false,
+  );
+  expect(Object.prototype.hasOwnProperty.call(symbolCell, "cellId")).toBe(
+    false,
+  );
+});
+
+test("dev hmr enables react refresh only when react is declared", async () => {
+  const projectDir = path.join(outRoot, "react-detect");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({ dependencies: { react: "19.0.0" } }),
+  );
+  await fs.writeFile(
+    path.join(srcDir, "index.jsx"),
+    `export function App() { return <div />; }`,
+  );
+
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: { browser: { conditions: ["default"], target: "browser" } },
+      entries: [{ id: "react-entry", path: path.join(srcDir, "index.jsx") }],
+      outputs: { outDir, fileName: "react-entry.[env].[hash].js" },
+      cacheDir: path.join(projectDir, ".cache"),
+      maxWorkers: 1,
+      diagnostics: "human",
+      dev: { hmr: true, reactRefresh: true },
+    },
+    [],
+  );
+
+  expect(
+    result.manifest.metadata.hmr.bundles[
+      `${result.bundles[0].envId}:${result.bundles[0].entryId}`
+    ].reactRefresh,
+  ).toBe(true);
+});
+
+test("dev hmr emits dependency cells before dependent cells", async () => {
+  const projectDir = path.join(outRoot, "hmr-cell-order");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(
+    path.join(srcDir, "index.js"),
+    `export const value = helper();
+function helper() {
+  return 1;
+}`,
+  );
+
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: { browser: { conditions: ["default"], target: "browser" } },
+      entries: [{ id: "hmr-cell-order", path: path.join(srcDir, "index.js") }],
+      outputs: { outDir, fileName: "hmr-cell-order.[env].[hash].js" },
+      cacheDir: path.join(projectDir, ".cache"),
+      maxWorkers: 1,
+      diagnostics: "human",
+      dev: { hmr: true, reactRefresh: false },
+    },
+    [],
+  );
+  const output = await fs.readFile(
+    path.join(outDir, result.bundles[0].fileName),
+    "utf8",
+  );
+  const helperIndex = output.indexOf('_helper"');
+  const valueIndex = output.indexOf('_value"');
+
+  expect(helperIndex).toBeGreaterThan(-1);
+  expect(valueIndex).toBeGreaterThan(-1);
+  expect(helperIndex).toBeLessThan(valueIndex);
+});
+
+test("dev react refresh only registers selected component exports", async () => {
+  const projectDir = path.join(outRoot, "react-refresh-selected");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({ dependencies: { react: "19.0.0" } }),
+  );
+  await fs.writeFile(
+    path.join(srcDir, "index.js"),
+    `import { Used } from "./components.js";
+export const value = Used;`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "components.js"),
+    `export function Used() {
+  return null;
+}
+export function Unused() {
+  return null;
+}`,
+  );
+
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: { browser: { conditions: ["default"], target: "browser" } },
+      entries: [
+        { id: "react-refresh-selected", path: path.join(srcDir, "index.js") },
+      ],
+      outputs: { outDir, fileName: "react-refresh-selected.[env].[hash].js" },
+      cacheDir: path.join(projectDir, ".cache"),
+      maxWorkers: 1,
+      diagnostics: "human",
+      dev: { hmr: true, reactRefresh: true },
+    },
+    [],
+  );
+  const output = await fs.readFile(
+    path.join(outDir, result.bundles[0].fileName),
+    "utf8",
+  );
+
+  expect(output).toContain("_Used");
+  expect(output).toContain("reactRefreshRegister");
+  expect(output).not.toContain("_Unused");
 });
 
 test("cli loads async config files", async () => {
@@ -437,8 +616,133 @@ test("supports env-specific externalized imports via resolveImport", async () =>
   );
 
   expect(clientCode).not.toContain('import { foo } from "./foo.js";');
-  expect(ssrCode).toContain('import { foo } from "./foo.js";');
+  expect(ssrCode).toContain('import { foo as a33jpi1jb_foo } from "./foo.js";');
   expect(ssrCode).toContain("globalThis.__SIDE_EFFECT__ = true;");
+});
+
+test("renames external import locals across concatenated and dynamic modules", async () => {
+  const projectDir = path.join(outRoot, "external-local-collisions");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(path.join(projectDir, "node_modules/react"), {
+    recursive: true,
+  });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "node_modules/react/package.json"),
+    JSON.stringify({ type: "module", exports: "./index.js" }),
+  );
+  await fs.writeFile(
+    path.join(projectDir, "node_modules/react/index.js"),
+    `export default { Fragment: "fragment", createElement() {} };
+export const Fragment = "fragment";
+export function useMemo(callback) { return callback(); }`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "index.js"),
+    `import { a } from "./a.js";
+import { b } from "./b.js";
+import { c } from "./c.js";
+import { d } from "./d.js";
+export const summary = [a, b, c, d].join("|");
+export async function loadDyn() {
+  return import("./dyn.js");
+}`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "a.js"),
+    `import React from "react";
+export const a = React.Fragment ? "a" : "missing";`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "b.js"),
+    `import React from "react";
+export const b = React.Fragment ? "b" : "missing";`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "c.js"),
+    `import fs, { existsSync } from "node:fs";
+export const c = typeof fs.readFileSync + ":" + typeof existsSync;`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "d.js"),
+    `import { existsSync } from "node:fs";
+export const d = typeof existsSync;`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "dyn.js"),
+    `import React from "react";
+import fs, { existsSync } from "node:fs";
+export const dyn = React.Fragment && typeof fs.readFileSync === "function" && existsSync ? "dyn" : "missing";`,
+  );
+
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: { node: { conditions: ["node"], target: "node" } },
+      entries: [
+        { id: "external-collisions", path: path.join(srcDir, "index.js") },
+      ],
+      outputs: {
+        outDir,
+        fileName: "[entry].[env].[hash].js",
+      },
+      cacheDir: path.join(projectDir, ".cache"),
+      maxWorkers: 2,
+      diagnostics: "human",
+      plugins: [
+        {
+          name: "externalize-test-imports",
+          resolveImport: async ({ request }) => {
+            "externalize-test-imports-v1";
+            return request === "react" || request === "node:fs"
+              ? null
+              : undefined;
+          },
+        },
+      ],
+    },
+    [],
+  );
+  const entryBundle = result.bundles.find((bundle) =>
+    bundle.entryId.endsWith("index.js"),
+  );
+  const dynamicBundle = result.bundles.find((bundle) =>
+    bundle.entryId.endsWith("dyn.js"),
+  );
+  const entryCode = await fs.readFile(
+    path.join(outDir, entryBundle.fileName),
+    "utf8",
+  );
+  const dynamicCode = await fs.readFile(
+    path.join(outDir, dynamicBundle.fileName),
+    "utf8",
+  );
+
+  expect(entryCode.match(/import [a-z0-9]+_React from "react";/g)).toHaveLength(
+    2,
+  );
+  expect(entryCode).toMatch(
+    /import [a-z0-9]+_fs, \{ existsSync as [a-z0-9]+_existsSync \} from "node:fs";/,
+  );
+  expect(entryCode).toMatch(
+    /import \{ existsSync as [a-z0-9]+_existsSync \} from "node:fs";/,
+  );
+  expect(dynamicCode).toMatch(/import [a-z0-9]+_React from "react";/);
+  expect(dynamicCode).toMatch(
+    /import [a-z0-9]+_fs, \{ existsSync as [a-z0-9]+_existsSync \} from "node:fs";/,
+  );
+
+  const imported = await import(
+    pathToFileURL(path.join(outDir, entryBundle.fileName))
+  );
+  expect(imported.summary).toBe("a|b|function:function|function");
+  await expect(imported.loadDyn()).resolves.toMatchObject({ dyn: "dyn" });
 });
 
 test("supports virtual modules through resolveImport and load", async () => {

@@ -88,11 +88,12 @@ const mag3x3is_shared = "shared";
 /////##CONDITION_START##{"NOT":"COND_A"}
 const m1lyft9j_pick = value => \`alt:\${value}\`;
 /////##CONDITION_END##
+let a1wam17ob_pick;
 /////##CONDITION_START##"COND_A"
-const a1wam17ob_pick = a7fe542m3_pick;
+a1wam17ob_pick = a7fe542m3_pick;
 /////##CONDITION_END##
 /////##CONDITION_START##{"NOT":"COND_A"}
-const a1wam17ob_pick = m1lyft9j_pick;
+a1wam17ob_pick = m1lyft9j_pick;
 /////##CONDITION_END##
 function a1wam17ob_run() {
   return a1wam17ob_pick(mag3x3is_shared);
@@ -171,26 +172,6 @@ test("bundles a hybrid graph with conditionals, barrels, and dynamic namespace u
 {
   "name": "hybrid",
   "outputs": {
-    "hybrid.browser.gfdy0l3l.js": "const __IMPORT_kh774klk = () => import("./hybrid.browser.n3gd2izo.js").then((mod) => Object.freeze({ "default": mod["kh774klk_default"] }));
-const kbgjp98n_label = "base";
-const a7c4iu3zz_label = kbgjp98n_label;
-/////##CONDITION_START##"FLAG_A"
-const e68ec7o1_feature = "alpha";
-/////##CONDITION_END##
-/////##CONDITION_START##{"NOT":"FLAG_A"}
-const dvxo7bsl_feature = "beta";
-/////##CONDITION_END##
-/////##CONDITION_START##"FLAG_A"
-const a54u0cy4f_feature = e68ec7o1_feature;
-/////##CONDITION_END##
-/////##CONDITION_START##{"NOT":"FLAG_A"}
-const a54u0cy4f_feature = dvxo7bsl_feature;
-/////##CONDITION_END##
-async function a54u0cy4f_run(key) {
-  const mod = await __IMPORT_kh774klk();
-  return mod.default(\`\${a7c4iu3zz_label}:\${a54u0cy4f_feature}:\${key}\`);
-}
-export { a54u0cy4f_run as run };",
     "hybrid.browser.n3gd2izo.js": "
 const o5ufutef_suffix = "tail";
 const __NS__o5ufutef = Object.create(null);
@@ -201,6 +182,27 @@ const kh774klk_default = function kh774klk_finish(input) {
   return \`\${input}:\${__NS__o5ufutef.suffix}:\${__NS__o5ufutef["suffix"]}\`;
 };
 export { o5ufutef_suffix, kh774klk_default };",
+    "hybrid.browser.o84oz7v7.js": "const __IMPORT_kh774klk = () => import("./hybrid.browser.n3gd2izo.js").then((mod) => Object.freeze({ "default": mod["kh774klk_default"] }));
+const kbgjp98n_label = "base";
+const a7c4iu3zz_label = kbgjp98n_label;
+/////##CONDITION_START##"FLAG_A"
+const e68ec7o1_feature = "alpha";
+/////##CONDITION_END##
+/////##CONDITION_START##{"NOT":"FLAG_A"}
+const dvxo7bsl_feature = "beta";
+/////##CONDITION_END##
+let a54u0cy4f_feature;
+/////##CONDITION_START##"FLAG_A"
+a54u0cy4f_feature = e68ec7o1_feature;
+/////##CONDITION_END##
+/////##CONDITION_START##{"NOT":"FLAG_A"}
+a54u0cy4f_feature = dvxo7bsl_feature;
+/////##CONDITION_END##
+async function a54u0cy4f_run(key) {
+  const mod = await __IMPORT_kh774klk();
+  return mod.default(\`\${a7c4iu3zz_label}:\${a54u0cy4f_feature}:\${key}\`);
+}
+export { a54u0cy4f_run as run };",
   },
 }
 `);
@@ -212,11 +214,7 @@ test("reports when a conditional module also becomes unconditional", async () =>
     {
       code: "W_CONDITIONAL_ESCAPED",
       envId: "browser",
-      file: path.join(
-        fixturesDir,
-        "conditional-warning",
-        "src/helper.js",
-      ),
+      file: path.join(fixturesDir, "conditional-warning", "src/helper.js"),
       message:
         "Module is reachable both conditionally and unconditionally; emitting it unconditionally.",
       severity: "warning",
