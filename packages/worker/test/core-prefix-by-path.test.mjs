@@ -22,7 +22,9 @@ test("changes the prefix when the module path changes", async () => {
     filePath: otherFilePath,
   });
 
-  expect(trimCode(first)).toBe(`const ${prefixFor(defaultFilePath)}_value = 1;`);
+  expect(trimCode(first)).toBe(
+    `const ${prefixFor(defaultFilePath)}_value = 1;`,
+  );
   expect(trimCode(second)).toBe(`const ${prefixFor(otherFilePath)}_value = 1;`);
   expect(trimCode(first)).not.toBe(trimCode(second));
 });

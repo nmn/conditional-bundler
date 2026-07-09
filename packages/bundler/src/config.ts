@@ -1,4 +1,5 @@
 import type { BundlerPlugin } from "./plugins/types.js";
+import type { CacheConfig } from "@bundler/shared";
 
 export type EnvConfig = {
   conditions: string[];
@@ -31,6 +32,9 @@ export type BundlerConfig = {
   outputs: OutputSpec;
   plugins?: BundlerPlugin[];
   cacheDir?: string;
+  cache?: CacheConfig;
+  css?: boolean;
+  configFile?: string;
   configIdentity?: unknown;
   maxWorkers: number;
   diagnostics: "human" | "json";
@@ -51,6 +55,8 @@ export const defaultConfig: BundlerConfig = {
   },
   plugins: [],
   cacheDir: "tmp/.bundler-cache",
+  cache: undefined,
+  css: true,
   maxWorkers: 4,
   diagnostics: "human",
 };

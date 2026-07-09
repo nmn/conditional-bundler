@@ -7,7 +7,9 @@ import {
 
 test("creates a prefixed alias for renamed local re-exports", async () => {
   const prefix = prefixFor(defaultFilePath);
-  const result = await transform("const local = 1; export { local as renamed };");
+  const result = await transform(
+    "const local = 1; export { local as renamed };",
+  );
 
   expect(trimCode(result)).toBe(
     `const ${prefix}_local = 1;

@@ -1,10 +1,16 @@
 import fs from "node:fs/promises";
 import { availableParallelism } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { WorkerPool } from "./worker-pool.js";
 import { resolveWorkerPath } from "./worker-path.js";
-import { createResolver, type Resolver } from "./resolver.js";
+import {
+  collectResolverAliasCacheIdentity,
+  createResolver,
+  type Resolver,
+} from "./resolver.js";
 import { buildGraph } from "./graph/build.js";
+import { sourceLookupKey } from "./graph/source-key.js";
 import { resolveExportTables } from "./exports/resolve.js";
 import { findCycles } from "./graph/scc.js";
 import {
@@ -34,6 +40,7 @@ import { resolveDevOptions, type ResolvedDevOptions } from "./dev/options.js";
 import { concatParts } from "./concat.js";
 import type { BundleManifest } from "./manifest.js";
 import { normalizePlugins } from "./plugins/normalize.js";
+import { createCssPlugin } from "./plugins/css.js";
 import { scanModuleRequests } from "./plugins/scan.js";
 import {
   runAfterCombine,
@@ -48,10 +55,13 @@ import {
   findPkgRoot,
   contentHash,
   contentHashShort,
+  extractConditionNames,
   readJsonIfExists,
   writeJsonAtomic,
   ensureDir,
   type Diagnostic,
+  type ConditionExpr,
+  type RemoteCacheConfig,
 } from "@bundler/shared";
 import type {
   BundlerPlugin,
@@ -92,6 +102,8 @@ type BundlePlan = {
   dynamicImports: DynamicImportRef[];
   diagnostics: Diagnostic[];
   modules: string[];
+  conditions: Array<{ moduleId: string; condition: ConditionExpr }>;
+  conditionNames: string[];
   map?: string;
   hmr?: HmrBundleRecord;
 };
@@ -101,6 +113,8 @@ type BundlePlanDraftWithHmr = BundlePlanDraft & {
 };
 
 type WorkerTransformResponse = {
+  cacheHit?: boolean;
+  needsResolution?: boolean;
   fileRecordsByEnv: Record<string, FileRecord>;
 };
 
@@ -132,6 +146,7 @@ type PendingEmitFile = EmitFileInput & {
 type CacheRootInfo = {
   activeRoot: string;
   configHash: string;
+  remote?: RemoteCacheConfig;
 };
 
 type CacheRootMetadata = {
@@ -146,12 +161,15 @@ export async function buildProject(
   plugins: BundlerPlugin[],
 ): Promise<BuildResult> {
   const explicitEntries = collectEntries(config.entries);
-  const allPlugins = [...(config.plugins ?? []), ...plugins];
+  const userPlugins = [...(config.plugins ?? []), ...plugins];
+  const allPlugins = [...createBuiltinPlugins(config), ...userPlugins];
   const pendingFiles: PendingEmitFile[] = [];
   const { plugins: normalizedPlugins, workerProfile } =
     await normalizePlugins(allPlugins);
   const cacheBaseDir = path.resolve(
-    config.cacheDir ?? path.join("tmp", ".bundler-cache"),
+    config.cache?.local?.dir ??
+      config.cacheDir ??
+      path.join("tmp", ".bundler-cache"),
   );
   const envs = Object.keys(config.envs);
   const pool = new WorkerPool({
@@ -180,7 +198,7 @@ export async function buildProject(
       config,
       explicitEntries,
       workerProfile,
-      allPlugins,
+      userPlugins,
     );
     const resolver = createResolver({
       config,
@@ -192,6 +210,8 @@ export async function buildProject(
         explicitEntries,
         envs,
         cacheRoot.activeRoot,
+        cacheRoot.configHash,
+        cacheRoot.remote,
         normalizedPlugins,
         workerProfile,
         config,
@@ -341,8 +361,15 @@ export async function buildProject(
     const manifest: BundleManifest = {
       bundles: bundles.map((bundle) => ({
         ...bundle,
+        type: "script",
+        contentType: "text/javascript; charset=utf-8",
         modules:
           bundleOutputs.get(`${bundle.envId}:${bundle.entryId}`)?.modules ?? [],
+        conditionNames:
+          bundlePlans.find(
+            (plan) =>
+              plan.envId === bundle.envId && plan.entryId === bundle.entryId,
+          )?.conditionNames ?? [],
       })),
       dynamicImports: Object.fromEntries(
         bundles.map((bundle) => [
@@ -351,7 +378,37 @@ export async function buildProject(
         ]),
       ),
       emittedFiles: [],
+      assets: bundles.map((bundle) => {
+        const plan = bundlePlans.find(
+          (candidate) =>
+            candidate.envId === bundle.envId &&
+            candidate.entryId === bundle.entryId,
+        );
+        return {
+          fileName: bundle.fileName,
+          type: "script",
+          contentType: "text/javascript; charset=utf-8",
+          envId: bundle.envId,
+          entryId: bundle.entryId,
+          bundleKey: `${bundle.envId}:${bundle.entryId}`,
+          modules:
+            bundleOutputs.get(`${bundle.envId}:${bundle.entryId}`)?.modules ??
+            [],
+          conditionNames: plan?.conditionNames ?? [],
+        };
+      }),
       metadata: {
+        conditions: {
+          byBundle: Object.fromEntries(
+            bundlePlans.map((plan) => [
+              `${plan.envId}:${plan.entryId}`,
+              {
+                conditionNames: plan.conditionNames,
+                modules: plan.conditions,
+              },
+            ]),
+          ),
+        },
         hmr: devOptions.hmr
           ? {
               bundles: Object.fromEntries(
@@ -426,9 +483,18 @@ async function prepareCacheRoot(
     lastUsedAt: now,
   });
 
-  void cleanupObsoleteCacheRoots(v2Dir, activeRoot, now);
+  void cleanupObsoleteCacheRoots(
+    v2Dir,
+    activeRoot,
+    now,
+    config.cache?.local?.retentionDays ?? 7,
+  );
 
-  return { activeRoot, configHash };
+  return {
+    activeRoot,
+    configHash,
+    remote: config.cache?.remote || undefined,
+  };
 }
 
 function normalizeConfigForCache(
@@ -463,7 +529,12 @@ function normalizeConfigForCache(
     workerProfile,
     plugins: serializeConfigValue(plugins),
     configIdentity: serializeConfigValue(config.configIdentity),
+    configFile: config.configFile ? path.resolve(config.configFile) : undefined,
+    resolverAliases: collectResolverAliasCacheIdentity(config, entries),
     cacheDir: cacheBaseDir,
+    mode: process.env.BUNDLER_MODE ?? process.env.NODE_ENV ?? "development",
+    cache: serializeConfigValue(config.cache),
+    css: config.css,
     maxWorkers: config.maxWorkers,
     diagnostics: config.diagnostics,
     dev: config.dev,
@@ -511,10 +582,13 @@ async function cleanupObsoleteCacheRoots(
   v2Dir: string,
   activeRoot: string,
   nowIso: string,
+  retentionDays: number,
 ): Promise<void> {
   try {
     const entries = await fs.readdir(v2Dir, { withFileTypes: true });
-    const cutoff = new Date(nowIso).getTime() - 7 * 24 * 60 * 60 * 1000;
+    const cutoff =
+      new Date(nowIso).getTime() -
+      Math.max(0, retentionDays) * 24 * 60 * 60 * 1000;
 
     await Promise.all(
       entries.map(async (entry) => {
@@ -554,6 +628,43 @@ function pickEntriesForEnv(entries: EntrySpec[], envId: string): EntrySpec[] {
   return entries.filter((entry) => !entry.envs || entry.envs.includes(envId));
 }
 
+function createBuiltinPlugins(config: BundlerConfig): BundlerPlugin[] {
+  const plugins: BundlerPlugin[] = [];
+  if (config.css !== false) {
+    plugins.push(createCssPlugin());
+  }
+
+  const refreshEnvs = resolveReactRefreshTransformEnvs(config);
+  if (refreshEnvs.length > 0) {
+    plugins.push({
+      __bundlerPluginRef: true,
+      module: fileURLToPath(
+        new URL("./plugins/react-refresh.js", import.meta.url),
+      ),
+      options: { envs: refreshEnvs },
+    });
+  }
+  return plugins;
+}
+
+function resolveReactRefreshTransformEnvs(config: BundlerConfig): string[] {
+  if (config.dev?.hmr !== true || config.dev.reactRefresh === false) {
+    return [];
+  }
+  const explicit =
+    typeof config.dev.reactRefresh === "object"
+      ? new Set(config.dev.reactRefresh.envs)
+      : null;
+  return Object.entries(config.envs)
+    .filter(([envId, envConfig]) => {
+      if (envConfig.target !== "browser") {
+        return false;
+      }
+      return explicit ? explicit.has(envId) : true;
+    })
+    .map(([envId]) => envId);
+}
+
 async function createBundlePlan(
   graph: ModuleGraph,
   entryId: string,
@@ -568,8 +679,22 @@ async function createBundlePlan(
   }
 
   const { conditions, diagnostics } = resolveEntryConditions(graph, entryId);
+  const conditionRecordsForGraph = Array.from(conditions.entries())
+    .filter((entry): entry is [string, ConditionExpr] => entry[1] !== undefined)
+    .map(([moduleId, condition]) => ({ moduleId, condition }));
   const selection = collectBundleSelection(graph, entryId);
   const orderedFiles = orderSelectedFiles(graph, selection);
+  const orderedFileIds = new Set(orderedFiles.map((node) => node.id));
+  const conditionRecords = conditionRecordsForGraph.filter((record) =>
+    orderedFileIds.has(record.moduleId),
+  );
+  const conditionNames = Array.from(
+    new Set(
+      conditionRecords.flatMap((record) =>
+        extractConditionNames(record.condition),
+      ),
+    ),
+  ).sort();
   const parts: string[] = [];
   const dynamicImports: DynamicImportRef[] = [];
   const namespaceDemanded = collectNamespaceDemands(selection, graph);
@@ -673,6 +798,8 @@ async function createBundlePlan(
     entryId,
     exportMode,
     modules: orderedFiles.map((node) => node.id),
+    conditions: conditionRecords,
+    conditionNames,
     orderedParts: parts,
     dynamicImports,
     diagnostics,
@@ -692,6 +819,8 @@ async function collectTransformedModules(
   entries: EntrySpec[],
   envs: string[],
   cacheDir: string,
+  cacheNamespace: string,
+  remoteCache: RemoteCacheConfig | undefined,
   plugins: NormalizedPlugin[],
   workerProfile: WorkerTransformProfile,
   config: BundlerConfig,
@@ -726,6 +855,8 @@ async function collectTransformedModules(
       [module.envId],
       envs,
       cacheDir,
+      cacheNamespace,
+      remoteCache,
       plugins,
       workerProfile,
       config,
@@ -772,6 +903,8 @@ async function transformModule(
   envs: string[],
   allEnvIds: string[],
   cacheDir: string,
+  cacheNamespace: string,
+  remoteCache: RemoteCacheConfig | undefined,
   plugins: NormalizedPlugin[],
   workerProfile: WorkerTransformProfile,
   config: BundlerConfig,
@@ -784,33 +917,44 @@ async function transformModule(
   schedule: (module: ScheduledModule) => void,
 ): Promise<void> {
   const loadedModule = await loadModuleRecord(module, envs, plugins, config);
-  const resolvedImportsByEnv = await resolveImportsForEnvs(
-    loadedModule,
-    envs,
-    resolver,
-  );
   const syntax = {
     jsx: module.filePath.endsWith(".jsx") || module.filePath.endsWith(".tsx"),
     ts: module.filePath.endsWith(".ts") || module.filePath.endsWith(".tsx"),
   };
-  const response = (await pool.run({
+  const requestBase = {
     id: module.id,
     realPath: module.filePath,
     code: loadedModule.code,
     pkg: module.pkg,
     envs,
     cacheDir,
+    cacheNamespace,
+    remoteCache,
     syntax,
     codeByEnv: loadedModule.codeByEnv,
     mapByEnv: loadedModule.mapByEnv,
     discoveredEntrypointsByEnv: loadedModule.discoveredEntrypointsByEnv,
     extraOutputsByEnv: loadedModule.extraOutputsByEnv,
     workerProfile,
-    resolvedImportsByEnv,
     dev: {
       hmr: config.dev?.hmr === true,
     },
+  };
+  let response = (await pool.run({
+    ...requestBase,
+    cacheOnly: true,
   })) as WorkerTransformResponse;
+  if (response.needsResolution) {
+    const resolvedImportsByEnv = await resolveImportsForEnvs(
+      loadedModule,
+      envs,
+      resolver,
+    );
+    response = (await pool.run({
+      ...requestBase,
+      resolvedImportsByEnv,
+    })) as WorkerTransformResponse;
+  }
   for (const [envId, fileRecord] of Object.entries(response.fileRecordsByEnv)) {
     headersByEnv.get(envId)?.set(fileRecord.id, fileRecord);
     fileRecords.push(fileRecord);
@@ -1199,7 +1343,7 @@ function collectBundleSelection(
       if (importEntry.kind === "type") {
         continue;
       }
-      const sourceId = node.resolvedSources.get(importEntry.source);
+      const sourceId = node.resolvedSources.get(sourceLookupKey(importEntry));
       if (!sourceId) {
         continue;
       }
@@ -1213,7 +1357,9 @@ function collectBundleSelection(
       if (!conditionalImport.elseSource) {
         continue;
       }
-      const elseId = node.resolvedSources.get(conditionalImport.elseSource);
+      const elseId = node.resolvedSources.get(
+        conditionalImport.elseRequest ?? conditionalImport.elseSource,
+      );
       if (!elseId) {
         continue;
       }
@@ -1255,7 +1401,7 @@ function collectBundleSelection(
     }
 
     for (const dependency of cell.externalDeps) {
-      const sourceId = node.resolvedSources.get(dependency.source);
+      const sourceId = node.resolvedSources.get(sourceLookupKey(dependency));
       if (!sourceId) {
         continue;
       }
@@ -1335,7 +1481,7 @@ function collectSelectedFileDeps(
     if (importEntry.kind === "type") {
       continue;
     }
-    const sourceId = node.resolvedSources.get(importEntry.source);
+    const sourceId = node.resolvedSources.get(sourceLookupKey(importEntry));
     if (sourceId && selection.has(sourceId)) {
       deps.add(sourceId);
     }
@@ -1345,7 +1491,9 @@ function collectSelectedFileDeps(
     if (!conditionalImport.elseSource) {
       continue;
     }
-    const elseId = node.resolvedSources.get(conditionalImport.elseSource);
+    const elseId = node.resolvedSources.get(
+      conditionalImport.elseRequest ?? conditionalImport.elseSource,
+    );
     if (elseId && selection.has(elseId)) {
       deps.add(elseId);
     }
@@ -1369,7 +1517,7 @@ function collectSelectedFileDeps(
     }
 
     for (const dependency of cell.externalDeps) {
-      const sourceId = node.resolvedSources.get(dependency.source);
+      const sourceId = node.resolvedSources.get(sourceLookupKey(dependency));
       if (sourceId && selection.has(sourceId)) {
         deps.add(sourceId);
       }
@@ -1400,7 +1548,7 @@ function collectNamespaceDemands(
         if (dependency.kind !== "import" || dependency.imported !== "*") {
           continue;
         }
-        const sourceId = node.resolvedSources.get(dependency.source);
+        const sourceId = node.resolvedSources.get(sourceLookupKey(dependency));
         if (sourceId) {
           demanded.add(sourceId);
         }
@@ -1421,7 +1569,7 @@ function collectExternalIdentifierDeps(
     if (dependency.kind !== "import") {
       continue;
     }
-    const sourceId = node.resolvedSources.get(dependency.source);
+    const sourceId = node.resolvedSources.get(sourceLookupKey(dependency));
     if (!sourceId) {
       continue;
     }
@@ -1596,6 +1744,8 @@ function fromBundleDraft(draft: BundlePlanDraftWithHmr): BundlePlan {
     })),
     diagnostics: draft.diagnostics,
     modules: draft.modules,
+    conditions: draft.conditions,
+    conditionNames: draft.conditionNames,
     hmr: draft.hmr,
   };
 }
@@ -1615,6 +1765,20 @@ async function flushPendingFiles(
       originalFileName: file.fileName,
       type: file.type ?? "asset",
       envId: file.envId,
+      contentType: file.contentType,
+      bundleKey: file.bundleKey,
+    });
+    manifest.assets?.push({
+      fileName: finalName,
+      type:
+        file.type === "manifest"
+          ? "manifest"
+          : file.type === "style"
+            ? "style"
+            : "asset",
+      contentType: file.contentType ?? guessContentType(finalName),
+      envId: file.envId,
+      bundleKey: file.bundleKey,
     });
   }
 }
@@ -1623,6 +1787,30 @@ function applyHashToFileName(fileName: string, contents: string): string {
   const ext = path.extname(fileName);
   const base = ext ? fileName.slice(0, -ext.length) : fileName;
   return `${base}.${contentHashShort(contents)}${ext}`;
+}
+
+function guessContentType(fileName: string): string {
+  const ext = path.extname(fileName);
+  switch (ext) {
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".js":
+    case ".mjs":
+      return "text/javascript; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".webp":
+      return "image/webp";
+    default:
+      return "application/octet-stream";
+  }
 }
 
 function dedupeResolved(results: ModuleResolution[]): ModuleResolution[] {

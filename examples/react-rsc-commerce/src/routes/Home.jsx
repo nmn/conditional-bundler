@@ -1,6 +1,7 @@
 import React from "react";
+import { ProductActionBoundary } from "../components/ProductActionBoundary.jsx";
+import { HomeCounter } from "../client/HomeCounter.jsx";
 import { featuredProducts } from "../data/catalog.js";
-import { ProductActions } from "../client/ProductActions.jsx";
 import { formatCurrency } from "../lib/pricing.js";
 
 export default function Home() {
@@ -15,6 +16,7 @@ export default function Home() {
         <aside>
           <strong>48h</strong>
           <span>average fulfillment for stocked goods</span>
+          <HomeCounter />
         </aside>
       </section>
       <section className="product-grid featured-grid">
@@ -31,7 +33,7 @@ export default function Home() {
               </h2>
               <strong>{formatCurrency(product.price)}</strong>
             </div>
-            <ProductActions product={product} />
+            <ProductActionBoundary product={product} />
           </article>
         ))}
       </section>

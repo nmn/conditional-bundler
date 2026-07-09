@@ -1,6 +1,6 @@
 import React from "react";
+import { ProductActionBoundary } from "../components/ProductActionBoundary.jsx";
 import { findProduct, products } from "../data/catalog.js";
-import { ProductActions } from "../client/ProductActions.jsx";
 import { formatCurrency, shippingWindow } from "../lib/pricing.js";
 import { merchandisingNote } from "../lib/merchandising.dev.js" with {
   condition: "__DEV__",
@@ -30,7 +30,7 @@ export default function Product({ path }) {
           <span>{product.rating} rating</span>
           <span>{shippingWindow(product)}</span>
         </div>
-        <ProductActions product={product} />
+        <ProductActionBoundary product={product} />
         <p className="merch-note">{merchandisingNote(product)}</p>
       </div>
       <aside className="related-panel">

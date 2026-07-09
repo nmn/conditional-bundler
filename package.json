@@ -7,13 +7,13 @@
     "examples/*"
   ],
   "scripts": {
-    "build": "pnpm -r build",
-    "clean": "pnpm -r clean",
+    "build": "corepack pnpm -r build",
+    "clean": "corepack pnpm -r clean",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "pnpm -r build && NODE_OPTIONS=--experimental-vm-modules pnpm exec jest --runInBand"
+    "test": "corepack pnpm -r build && NODE_OPTIONS=--experimental-vm-modules corepack pnpm exec jest --runInBand"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,6 +1,8 @@
 node_modules/
+**/.cache/
 node_modules/.bundler-cache/
 dist/
 packages/*/dist/
 *.tsbuildinfo
 tmp/
+test/.out/

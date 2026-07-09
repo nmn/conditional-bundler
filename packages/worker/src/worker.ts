@@ -9,6 +9,7 @@ import type {
   DiscoveredEntrypoint,
   ExtraTransformOutput,
   FileRecord,
+  RemoteCacheConfig,
   TransformResult,
 } from "@bundler/shared";
 import {
@@ -42,12 +43,15 @@ type WorkerRequest = {
   pkg: { name: string; version: string; root: string };
   envs: string[];
   cacheDir: string;
+  cacheNamespace?: string;
+  remoteCache?: RemoteCacheConfig;
   syntax: { jsx: boolean; ts: boolean };
   codeByEnv?: Record<string, string>;
   mapByEnv?: Record<string, string>;
   discoveredEntrypointsByEnv?: Record<string, DiscoveredEntrypoint[]>;
   extraOutputsByEnv?: Record<string, Record<string, ExtraTransformOutput>>;
   workerProfile: WorkerTransformProfile;
+  cacheOnly?: boolean;
   resolvedImportsByEnv?: Record<
     string,
     Record<
@@ -69,6 +73,7 @@ type WorkerRequest = {
 type WorkerResponse = {
   ok: boolean;
   cacheHit?: boolean;
+  needsResolution?: boolean;
   contentHash: string;
   prefix: string;
   fileRecordsByEnv: Record<string, FileRecord>;
@@ -85,6 +90,12 @@ type FileCachePaths = {
   fileHash: string;
   fileDir: string;
   modulePath: string;
+  remoteBaseKey: string;
+};
+
+type RemoteCacheAdapter = {
+  get: (key: string) => Promise<string | null>;
+  set: (key: string, value: string) => Promise<void>;
 };
 
 const babelModuleCache = new Map<string, unknown>();
@@ -99,6 +110,10 @@ async function handleTransform(
     request.realPath,
     request.envs,
   );
+  const remote = createRemoteCacheAdapter(
+    request.remoteCache,
+    request.cacheNamespace,
+  );
   const cached = await readModuleCache(cachePaths.modulePath);
   if (
     cached &&
@@ -112,6 +127,30 @@ async function handleTransform(
       contentHash: first.contentHash,
       prefix: first.prefix,
       fileRecordsByEnv: cached.fileRecordsByEnv,
+    };
+  }
+  const remoteCached = remote
+    ? await readRemoteModuleCache(remote, cachePaths, moduleKey)
+    : null;
+  if (remoteCached) {
+    const first = Object.values(remoteCached.fileRecordsByEnv)[0];
+    return {
+      ok: true,
+      cacheHit: true,
+      contentHash: first.contentHash,
+      prefix: first.prefix,
+      fileRecordsByEnv: remoteCached.fileRecordsByEnv,
+    };
+  }
+
+  if (request.cacheOnly) {
+    return {
+      ok: true,
+      cacheHit: false,
+      needsResolution: true,
+      contentHash: fileHash,
+      prefix: "",
+      fileRecordsByEnv: {},
     };
   }
 
@@ -150,6 +189,9 @@ async function handleTransform(
   ) as Record<string, FileRecord>;
 
   await writeFileCache(cachePaths, resultsByEnv, fileRecordsByEnv, moduleKey);
+  if (remote) {
+    await writeRemoteFileCache(remote, cachePaths, fileRecordsByEnv, moduleKey);
+  }
 
   return {
     ok: true,
@@ -284,6 +326,12 @@ async function applyBabelStage(
     filename: request.realPath,
     sourceMaps: true,
     inputSourceMap: map ? JSON.parse(map) : undefined,
+    parserOpts: {
+      plugins: [
+        ...(request.syntax.jsx ? ["jsx"] : []),
+        ...(request.syntax.ts ? ["typescript"] : []),
+      ],
+    },
     plugins,
   });
   return {
@@ -375,7 +423,6 @@ function buildModuleKey(request: WorkerRequest): string {
     mapHashes,
     extraOutputHashes,
     workerProfile: request.workerProfile.fingerprint,
-    resolvedImportsByEnv: request.resolvedImportsByEnv,
   });
 }
 
@@ -391,6 +438,7 @@ function buildFileCachePaths(
     fileHash,
     fileDir,
     modulePath: path.join(fileDir, "module.json"),
+    remoteBaseKey: joinRemoteKey("files", fileHash, envHash),
   };
 }
 
@@ -486,6 +534,222 @@ async function readModuleCache(
     createdAt: parsed.createdAt ?? new Date(0).toISOString(),
     updatedAt: parsed.updatedAt ?? new Date(0).toISOString(),
   };
+}
+
+async function readRemoteModuleCache(
+  remote: RemoteCacheAdapter,
+  cachePaths: FileCachePaths,
+  moduleKey: string,
+): Promise<ModuleCacheRecord | null> {
+  const raw = await remote.get(
+    joinRemoteKey(cachePaths.remoteBaseKey, "module.json"),
+  );
+  if (!raw) {
+    return null;
+  }
+
+  let parsed: ModuleCacheRecord | null = null;
+  try {
+    parsed = JSON.parse(raw) as ModuleCacheRecord;
+  } catch {
+    return null;
+  }
+  if (!parsed || parsed.moduleKey !== moduleKey || !parsed.fileRecordsByEnv) {
+    return null;
+  }
+
+  const hydrated: ModuleCacheRecord = {
+    ...parsed,
+    fileRecordsByEnv: hydrateRemoteFileRecords(
+      parsed.fileRecordsByEnv,
+      cachePaths.fileDir,
+    ),
+  };
+
+  await fs.rm(cachePaths.fileDir, { recursive: true, force: true });
+  await ensureDir(cachePaths.fileDir);
+
+  for (const fileRecord of Object.values(hydrated.fileRecordsByEnv)) {
+    for (const cell of fileRecord.cells) {
+      if (cell.kind === "generated" || !cell.artifactPath) {
+        continue;
+      }
+      const relativeArtifactPath = normalizePosixPath(
+        path.relative(cachePaths.fileDir, cell.artifactPath),
+      );
+      const artifact = await remote.get(
+        joinRemoteKey(cachePaths.remoteBaseKey, relativeArtifactPath),
+      );
+      if (artifact == null) {
+        return null;
+      }
+      await writeFileAtomic(cell.artifactPath, artifact);
+    }
+  }
+
+  await writeJsonAtomic(cachePaths.modulePath, hydrated);
+  if (!(await hasCachedArtifacts(hydrated.fileRecordsByEnv))) {
+    return null;
+  }
+  return hydrated;
+}
+
+async function writeRemoteFileCache(
+  remote: RemoteCacheAdapter,
+  cachePaths: FileCachePaths,
+  fileRecordsByEnv: Record<string, FileRecord>,
+  moduleKey: string,
+): Promise<void> {
+  const local = await readModuleCache(cachePaths.modulePath);
+  const now = new Date().toISOString();
+  const remoteRecord: ModuleCacheRecord = {
+    moduleKey,
+    fileRecordsByEnv: toRemoteFileRecords(fileRecordsByEnv, cachePaths.fileDir),
+    createdAt: local?.createdAt ?? now,
+    updatedAt: now,
+  };
+
+  for (const fileRecord of Object.values(fileRecordsByEnv)) {
+    for (const cell of fileRecord.cells) {
+      if (cell.kind === "generated" || !cell.artifactPath) {
+        continue;
+      }
+      const relativeArtifactPath = normalizePosixPath(
+        path.relative(cachePaths.fileDir, cell.artifactPath),
+      );
+      const artifact = await fs.readFile(cell.artifactPath, "utf8");
+      await remote.set(
+        joinRemoteKey(cachePaths.remoteBaseKey, relativeArtifactPath),
+        artifact,
+      );
+    }
+  }
+
+  await remote.set(
+    joinRemoteKey(cachePaths.remoteBaseKey, "module.json"),
+    JSON.stringify(remoteRecord),
+  );
+}
+
+function hydrateRemoteFileRecords(
+  records: Record<string, FileRecord>,
+  fileDir: string,
+): Record<string, FileRecord> {
+  return Object.fromEntries(
+    Object.entries(records).map(([envId, record]) => [
+      envId,
+      {
+        ...record,
+        cells: record.cells.map((cell) =>
+          cell.artifactPath && !path.isAbsolute(cell.artifactPath)
+            ? { ...cell, artifactPath: path.join(fileDir, cell.artifactPath) }
+            : cell,
+        ),
+      },
+    ]),
+  );
+}
+
+function toRemoteFileRecords(
+  records: Record<string, FileRecord>,
+  fileDir: string,
+): Record<string, FileRecord> {
+  return Object.fromEntries(
+    Object.entries(records).map(([envId, record]) => [
+      envId,
+      {
+        ...record,
+        cells: record.cells.map((cell) =>
+          cell.artifactPath
+            ? {
+                ...cell,
+                artifactPath: normalizePosixPath(
+                  path.relative(fileDir, cell.artifactPath),
+                ),
+              }
+            : cell,
+        ),
+      },
+    ]),
+  );
+}
+
+function createRemoteCacheAdapter(
+  config: RemoteCacheConfig | undefined,
+  namespace = "default",
+): RemoteCacheAdapter | null {
+  if (!config) {
+    return null;
+  }
+  const prefix = joinRemoteKey(config.prefix, namespace);
+  if (config.kind === "file") {
+    return {
+      async get(key) {
+        try {
+          return await fs.readFile(path.join(config.dir, prefix, key), "utf8");
+        } catch {
+          return null;
+        }
+      },
+      async set(key, value) {
+        await writeFileAtomic(path.join(config.dir, prefix, key), value);
+      },
+    };
+  }
+  if (config.kind === "cloudflare-kv") {
+    const token = process.env[config.apiTokenEnv];
+    if (!token) {
+      throw new Error(
+        `Cloudflare KV cache token env '${config.apiTokenEnv}' is not set.`,
+      );
+    }
+    const baseUrl = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
+      config.accountId,
+    )}/storage/kv/namespaces/${encodeURIComponent(config.namespaceId)}/values`;
+    return {
+      async get(key) {
+        const response = await fetch(
+          `${baseUrl}/${encodeURIComponent(joinRemoteKey(prefix, key))}`,
+          {
+            headers: { authorization: `Bearer ${token}` },
+          },
+        );
+        if (response.status === 404) {
+          return null;
+        }
+        if (!response.ok) {
+          throw new Error(
+            `Cloudflare KV cache read failed (${response.status}).`,
+          );
+        }
+        return response.text();
+      },
+      async set(key, value) {
+        const response = await fetch(
+          `${baseUrl}/${encodeURIComponent(joinRemoteKey(prefix, key))}`,
+          {
+            method: "PUT",
+            headers: { authorization: `Bearer ${token}` },
+            body: value,
+          },
+        );
+        if (!response.ok) {
+          throw new Error(
+            `Cloudflare KV cache write failed (${response.status}).`,
+          );
+        }
+      },
+    };
+  }
+  return null;
+}
+
+function joinRemoteKey(...parts: Array<string | undefined>): string {
+  return parts
+    .filter((part): part is string => Boolean(part))
+    .flatMap((part) => part.split("/"))
+    .filter(Boolean)
+    .join("/");
 }
 
 async function hasCachedArtifacts(

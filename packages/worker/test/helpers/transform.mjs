@@ -41,7 +41,10 @@ export function prefixForSource(
   if (!source.startsWith(".")) {
     return filePrefix(pkgName, pkgVersion, source);
   }
-  const resolvedPath = path.posix.resolve(path.posix.dirname(fromFilePath), source);
+  const resolvedPath = path.posix.resolve(
+    path.posix.dirname(fromFilePath),
+    source,
+  );
   return prefixFor(resolvedPath, root);
 }
 

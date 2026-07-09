@@ -55,6 +55,7 @@ export async function loadConfig(argv: string[]): Promise<BundlerConfig> {
   return {
     ...defaultConfig,
     ...loaded,
+    configFile: configPath,
     configIdentity: await fs.readFile(configPath, "utf8"),
     envs: loaded.envs ?? defaultConfig.envs,
     entries: loaded.entries ?? defaultConfig.entries,

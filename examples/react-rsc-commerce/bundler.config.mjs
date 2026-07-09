@@ -33,6 +33,8 @@ export default {
       root,
       name: "react-rsc-commerce",
       jsx: "classic",
+      clientEntry: false,
+      runtimeEntry: true,
     }),
   ],
   cacheDir: path.join(root, ".cache/conditional-bundler"),

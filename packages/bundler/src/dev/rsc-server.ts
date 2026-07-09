@@ -69,6 +69,7 @@ export async function startRscDevServer(
   const devOptions = await resolveDevOptions(devConfig, devConfig.entries);
   let current = await buildProject(devConfig, []);
   let serverImportVersion = Date.now();
+  let clientPatchVersion = 0;
   let loadedServerModule: LoadedServerModule | undefined;
   let pendingServerModule:
     | { version: number; promise: Promise<Record<string, unknown>> }
@@ -130,9 +131,17 @@ export async function startRscDevServer(
       }
       current = next;
       if (action.type === "patch") {
-        broadcast(clients, action.patch);
+        broadcast(
+          clients,
+          addClientPatchImports(
+            action.patch,
+            next,
+            options.clientEntryId,
+            ++clientPatchVersion,
+          ),
+        );
       } else if (action.type === "reload") {
-        broadcast(clients, { type: "reload" });
+        broadcast(clients, { type: "rsc-refresh" });
       }
     } catch (error) {
       console.error("[bundler] RSC dev rebuild failed", error);
@@ -210,7 +219,6 @@ export function classifyRscDevChange({
   next,
   patch,
   clientEntryId,
-  serverEntryId,
 }: {
   previous: BuildResult;
   next: BuildResult;
@@ -228,38 +236,84 @@ export function classifyRscDevChange({
   const clientEnv = clientBundle.envId;
   const patchedBundleKeys = new Set(patch.changedBundles);
   const outputChangedKeys = collectChangedOutputKeys(previous, next);
-  const outputOnlyChanges = outputChangedKeys.filter(
-    (key) => !patchedBundleKeys.has(key),
-  );
-  if (outputOnlyChanges.length > 0) {
-    return { type: "reload", reason: "bundle-output-changed-without-patch" };
-  }
   if (patch.changedBundles.length === 0) {
+    if (outputChangedKeys.length > 0) {
+      return {
+        type: "reload",
+        reason: "bundle-output-changed-without-patch",
+      };
+    }
     return { type: "noop" };
   }
   if (!patch.changedBundles.every((key) => key.startsWith(`${clientEnv}:`))) {
     return { type: "reload", reason: "non-client-bundle-changed" };
   }
 
-  const changedModules = collectModulesForBundleKeys(
-    next,
-    patch.changedBundles,
+  const outputOnlyChanges = outputChangedKeys.filter(
+    (key) => !patchedBundleKeys.has(key),
   );
-  const nonClientModules = collectNonClientModules(next, clientEnv);
-  const previousNonClientModules = collectNonClientModules(previous, clientEnv);
-  for (const moduleId of changedModules) {
-    if (
-      nonClientModules.has(moduleId) ||
-      previousNonClientModules.has(moduleId)
-    ) {
-      return {
-        type: "reload",
-        reason: "shared-module-changed",
-      };
-    }
+  if (outputOnlyChanges.some((key) => !key.startsWith(`${clientEnv}:`))) {
+    return { type: "reload", reason: "bundle-output-changed-without-patch" };
   }
 
   return { type: "patch", patch };
+}
+
+export function addClientPatchImports(
+  patch: Extract<HmrMessage, { type: "patch" }>,
+  build: BuildResult,
+  clientEntryId: string,
+  version?: number,
+): Extract<HmrMessage, { type: "patch" }> {
+  const importedBundles = patch.changedBundles
+    .map((key) =>
+      build.manifest.bundles.find(
+        (bundle) => `${bundle.envId}:${bundle.entryId}` === key,
+      ),
+    )
+    .filter((bundle): bundle is NonNullable<typeof bundle> => {
+      if (!bundle) {
+        return false;
+      }
+      return (
+        bundle.entryId !== clientEntryId &&
+        !bundle.entryId.endsWith(clientEntryId) &&
+        !entryBasenameMatches(bundle.entryId, clientEntryId)
+      );
+    });
+  const imports = importedBundles.map(
+    (bundle) =>
+      `/assets/${bundle.fileName}?hmr=${encodeURIComponent(bundle.fileName)}&rsc-id=${encodeURIComponent(bundle.entryId)}${version == null ? "" : `&v=${encodeURIComponent(String(version))}`}`,
+  );
+  const importedBundleKeys = new Set(
+    importedBundles.map((bundle) => `${bundle.envId}:${bundle.entryId}`),
+  );
+  const patchRecords =
+    patch.recordBundles && patch.recordBundles.length === patch.records.length
+      ? patch.records.filter(
+          (_record, index) =>
+            !importedBundleKeys.has(patch.recordBundles![index]),
+        )
+      : patch.records;
+  const chunkUpdates = Object.fromEntries(
+    importedBundles.map((bundle) => [bundle.entryId, bundle.fileName]),
+  );
+  const records =
+    Object.keys(chunkUpdates).length > 0
+      ? [
+          ...patchRecords,
+          `Object.assign(globalThis.__BUNDLER_RSC_CHUNKS__ ??= {}, ${JSON.stringify(chunkUpdates)});`,
+        ]
+      : patchRecords;
+  if (imports.length === 0 && records === patch.records) {
+    return patch;
+  }
+  return {
+    ...patch,
+    recordBundles: undefined,
+    records,
+    imports,
+  };
 }
 
 function collectChangedOutputKeys(
@@ -289,38 +343,6 @@ function collectChangedOutputKeys(
   return Array.from(nextOutputs.entries())
     .filter(([key, fileName]) => previousOutputs.get(key) !== fileName)
     .map(([key]) => key);
-}
-
-function collectModulesForBundleKeys(
-  build: BuildResult,
-  bundleKeys: string[],
-): Set<string> {
-  const modules = new Set<string>();
-  for (const key of bundleKeys) {
-    const bundle = build.manifest.bundles.find(
-      (item) => `${item.envId}:${item.entryId}` === key,
-    );
-    for (const moduleId of bundle?.modules ?? []) {
-      modules.add(moduleId);
-    }
-  }
-  return modules;
-}
-
-function collectNonClientModules(
-  build: BuildResult,
-  clientEnv: string,
-): Set<string> {
-  const modules = new Set<string>();
-  for (const bundle of build.manifest.bundles) {
-    if (bundle.envId === clientEnv) {
-      continue;
-    }
-    for (const moduleId of bundle.modules) {
-      modules.add(moduleId);
-    }
-  }
-  return modules;
 }
 
 async function loadServerModule({
@@ -406,13 +428,23 @@ async function serveAsset(
   response: http.ServerResponse,
 ): Promise<void> {
   const bundle = build.bundles.find((item) => item.fileName === fileName);
-  if (!bundle) {
+  const asset = build.manifest.assets?.find(
+    (item) => item.fileName === fileName,
+  );
+  if (!bundle && !asset) {
     response.statusCode = 404;
     response.end("Not found");
     return;
   }
-  response.setHeader("content-type", "text/javascript; charset=utf-8");
-  response.end(await fsp.readFile(path.join(config.outputs.outDir, fileName)));
+  response.setHeader(
+    "content-type",
+    asset?.contentType ?? "text/javascript; charset=utf-8",
+  );
+  response.end(
+    await fsp.readFile(
+      path.join(config.outputs.outDir, asset?.fileName ?? fileName),
+    ),
+  );
 }
 
 function matchAssetRequest(pathname: string): string | null {

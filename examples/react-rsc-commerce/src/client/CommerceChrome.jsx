@@ -3,7 +3,7 @@
 import React from "react";
 import { useCart } from "./CartContext.jsx";
 
-export function CommerceChrome({ children, onNavigate, path }) {
+export function CommerceChrome({ children, path }) {
   const cart = useCart();
 
   function handleClick(event) {
@@ -12,7 +12,12 @@ export function CommerceChrome({ children, onNavigate, path }) {
       return;
     }
     event.preventDefault();
-    onNavigate(anchor.pathname + anchor.search);
+    window.dispatchEvent(
+      new CustomEvent("bundler:rsc-navigate", {
+        cancelable: true,
+        detail: { path: anchor.pathname + anchor.search },
+      }),
+    );
   }
 
   return (

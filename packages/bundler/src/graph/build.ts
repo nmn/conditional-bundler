@@ -2,6 +2,7 @@ import type { ModuleNode, IRHeader } from "@bundler/shared";
 import type { ConditionExpr } from "@bundler/shared";
 import type { Resolver } from "../resolver.js";
 import { combineOr } from "@bundler/shared";
+import { sourceLookupKey } from "./source-key.js";
 
 export type ModuleGraph = {
   envId: string;
@@ -44,7 +45,7 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
         importEntry.attributes ?? undefined,
       );
       node.deps.push(resolved.id);
-      node.resolvedSources.set(importEntry.source, resolved.id);
+      node.resolvedSources.set(sourceLookupKey(importEntry), resolved.id);
       if (importEntry.condition) {
         const existing = node.conditionalDeps.get(resolved.id);
         node.conditionalDeps.set(
@@ -66,7 +67,10 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
             "conditional-else",
           );
           node.deps.push(elseResolved.id);
-          node.resolvedSources.set(elseSource, elseResolved.id);
+          node.resolvedSources.set(
+            conditionalImport.elseRequest ?? elseSource,
+            elseResolved.id,
+          );
           const elseCondition = { NOT: importEntry.condition };
           const existingElse = node.conditionalDeps.get(elseResolved.id);
           node.conditionalDeps.set(
@@ -93,7 +97,7 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
       );
       node.deps.push(resolved.id);
       node.unconditionalDeps.add(resolved.id);
-      node.resolvedSources.set(star.source, resolved.id);
+      node.resolvedSources.set(sourceLookupKey(star), resolved.id);
     }
     for (const reexport of node.irHeader.reexportsNamed) {
       if (reexport.external) {
@@ -108,7 +112,7 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
       );
       node.deps.push(resolved.id);
       node.unconditionalDeps.add(resolved.id);
-      node.resolvedSources.set(reexport.source, resolved.id);
+      node.resolvedSources.set(sourceLookupKey(reexport), resolved.id);
     }
   }
 

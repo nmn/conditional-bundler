@@ -22,9 +22,7 @@ function ${prefix}_wrap(value) {
 
 test("renames top-level class bindings and their references", async () => {
   const prefix = prefixFor(defaultFilePath);
-  const result = await transform(
-    "class Thing {} export const value = Thing;",
-  );
+  const result = await transform("class Thing {} export const value = Thing;");
 
   expect(trimCode(result)).toBe(
     `class ${prefix}_Thing {}

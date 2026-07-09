@@ -1,6 +1,6 @@
 import React from "react";
+import { ProductActionBoundary } from "../components/ProductActionBoundary.jsx";
 import { categories, productsByCategory } from "../data/catalog.js";
-import { ProductActions } from "../client/ProductActions.jsx";
 import { formatCurrency, shippingWindow } from "../lib/pricing.js";
 
 export default function Catalog({ searchParams }) {
@@ -38,7 +38,7 @@ export default function Catalog({ searchParams }) {
               </h2>
               <strong>{formatCurrency(product.price)}</strong>
             </div>
-            <ProductActions product={product} />
+            <ProductActionBoundary product={product} />
           </article>
         ))}
       </div>

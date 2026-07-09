@@ -19,7 +19,15 @@ type HmrMetadata = {
 };
 
 export type HmrMessage =
-  | { type: "patch"; records: string[]; changedBundles: string[] }
+  | {
+      type: "patch";
+      records: string[];
+      recordBundles?: string[];
+      changedBundles: string[];
+      imports?: string[];
+      styles?: string[];
+    }
+  | { type: "rsc-refresh" }
   | { type: "reload" }
   | { type: "error"; message: string };
 
@@ -103,18 +111,33 @@ async function handleRequest(
 
   const fileName = path.basename(url.pathname);
   const bundle = build.bundles.find((item) => item.fileName === fileName);
-  if (!bundle) {
+  const asset = build.manifest.assets?.find(
+    (item) => item.fileName === fileName,
+  );
+  if (!bundle && !asset) {
     response.statusCode = 404;
     response.end("Not found");
     return;
   }
-  response.setHeader("content-type", "text/javascript; charset=utf-8");
+  response.setHeader(
+    "content-type",
+    asset?.contentType ?? "text/javascript; charset=utf-8",
+  );
   response.end(
-    await fsp.readFile(path.join(config.outputs.outDir, bundle.fileName)),
+    await fsp.readFile(
+      path.join(config.outputs.outDir, asset?.fileName ?? bundle!.fileName),
+    ),
   );
 }
 
 function renderIndex(build: BuildResult): string {
+  const styles = (build.manifest.assets ?? [])
+    .filter((asset) => asset.type === "style")
+    .map(
+      (asset) =>
+        `<link rel="stylesheet" href="/assets/${escapeHtml(asset.fileName)}" data-bundler-style="${escapeHtml(asset.bundleKey ?? asset.fileName)}">`,
+    )
+    .join("\n");
   const scripts = build.bundles
     .filter((bundle) => bundle.envId && bundle.entryId)
     .map(
@@ -124,7 +147,7 @@ function renderIndex(build: BuildResult): string {
     .join("\n");
   return `<!doctype html>
 <html>
-  <head><meta charset="utf-8"><title>conditional-bundler dev</title></head>
+  <head><meta charset="utf-8"><title>conditional-bundler dev</title>${styles}</head>
   <body>${scripts}</body>
 </html>`;
 }
@@ -136,6 +159,9 @@ export function watchProject(
   const roots = new Set<string>();
   for (const entry of config.entries) {
     roots.add(path.dirname(path.resolve(entry.path)));
+  }
+  if (config.configFile) {
+    roots.add(path.dirname(path.resolve(config.configFile)));
   }
   const root = commonRoot(Array.from(roots));
   if (!root) {
@@ -169,7 +195,13 @@ export function createPatch(
     return null;
   }
 
+  const stylePatch = createStylePatch(previous, next);
+  if (stylePatch === null) {
+    return null;
+  }
+
   const records: string[] = [];
+  const recordBundles: string[] = [];
   const changedBundles: string[] = [];
   for (const [key, nextBundle] of Object.entries(nextHmr.bundles)) {
     const previousBundle = previousHmr.bundles[key];
@@ -192,14 +224,26 @@ export function createPatch(
           changedBundles.push(key);
         }
         records.push(cell.code);
+        recordBundles.push(key);
       }
     }
   }
 
   if (records.length === 0) {
-    return { type: "patch", records: [], changedBundles: [] };
+    return {
+      type: "patch",
+      records: [],
+      changedBundles: [],
+      styles: stylePatch,
+    };
   }
-  return { type: "patch", records, changedBundles };
+  return {
+    type: "patch",
+    records,
+    recordBundles,
+    changedBundles,
+    styles: stylePatch,
+  };
 }
 
 export function acceptWebSocket(
@@ -262,6 +306,36 @@ function sameStrings(left: string[], right: string[]): boolean {
   return (
     left.length === right.length &&
     left.every((value, index) => right[index] === value)
+  );
+}
+
+function createStylePatch(
+  previous: BuildResult,
+  next: BuildResult,
+): string[] | null {
+  const previousStyles = collectStyleAssets(previous);
+  const nextStyles = collectStyleAssets(next);
+  if (
+    !sameStrings(
+      Array.from(previousStyles.keys()).sort(),
+      Array.from(nextStyles.keys()).sort(),
+    )
+  ) {
+    return null;
+  }
+  return Array.from(nextStyles.entries())
+    .filter(([key, nextFile]) => previousStyles.get(key) !== nextFile)
+    .map(
+      ([key, fileName]) =>
+        `/assets/${fileName}?hmr=${encodeURIComponent(fileName)}&key=${encodeURIComponent(key)}`,
+    );
+}
+
+function collectStyleAssets(build: BuildResult): Map<string, string> {
+  return new Map(
+    (build.manifest.assets ?? [])
+      .filter((asset) => asset.type === "style")
+      .map((asset) => [asset.bundleKey ?? asset.fileName, asset.fileName]),
   );
 }
 

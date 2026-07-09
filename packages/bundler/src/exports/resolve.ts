@@ -1,4 +1,5 @@
 import type { CellRecord, ModuleNode, Provider } from "@bundler/shared";
+import { sourceLookupKey } from "../graph/source-key.js";
 
 export function resolveExportTables(
   nodes: ModuleNode[],
@@ -19,11 +20,11 @@ export function resolveExportTables(
       }
       return (
         node.irHeader.exportStars.every((star) => {
-          const sourceId = node.resolvedSources.get(star.source);
+          const sourceId = node.resolvedSources.get(sourceLookupKey(star));
           return !sourceId || !remaining.has(sourceId);
         }) &&
         node.irHeader.reexportsNamed.every((reexport) => {
-          const sourceId = node.resolvedSources.get(reexport.source);
+          const sourceId = node.resolvedSources.get(sourceLookupKey(reexport));
           return !sourceId || !remaining.has(sourceId);
         })
       );
@@ -59,7 +60,7 @@ export function resolveExportTables(
       }
 
       for (const star of node.irHeader.exportStars) {
-        const sourceId = node.resolvedSources.get(star.source);
+        const sourceId = node.resolvedSources.get(sourceLookupKey(star));
         if (!sourceId) {
           continue;
         }
@@ -101,7 +102,7 @@ export function resolveExportTables(
           continue;
         }
 
-        const sourceId = node.resolvedSources.get(reexport.source);
+        const sourceId = node.resolvedSources.get(sourceLookupKey(reexport));
         if (!sourceId) {
           continue;
         }

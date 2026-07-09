@@ -5,6 +5,7 @@ export default function rscTransformBabelPlugin(api, options) {
   const root = options.root;
   const rscEnv = options.rscEnv ?? "rsc";
   const clientEnv = options.clientEnv ?? "client";
+  const discoverClientEntrypoints = options.discoverClientEntrypoints !== false;
 
   return {
     name: "react-rsc-example-transform",
@@ -20,24 +21,26 @@ export default function rscTransformBabelPlugin(api, options) {
           return;
         }
 
+        if (options.envId !== rscEnv) {
+          return;
+        }
+
         const exports = collectExports(programPath.node.body, t);
-        state.file.metadata.conditionalBundlerDiscoveredEntrypoints = [
-          {
-            id: clientId,
-            request: `./${path.basename(filePath)}`,
-            envs: [clientEnv],
-          },
-        ];
+        if (discoverClientEntrypoints) {
+          state.file.metadata.conditionalBundlerDiscoveredEntrypoints = [
+            {
+              id: clientId,
+              request: `./${path.basename(filePath)}`,
+              envs: [clientEnv],
+            },
+          ];
+        }
         state.file.metadata.conditionalBundlerExtraOutputs = {
           "rsc-client-reference": {
             contents: JSON.stringify({ clientId, exports }, null, 2),
             metadata: { clientId, exports },
           },
         };
-
-        if (options.envId !== rscEnv) {
-          return;
-        }
 
         const body = [];
 

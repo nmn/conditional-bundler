@@ -18,6 +18,7 @@
     "@babel/types": "^7.24.0",
     "@bundler/shared": "workspace:*",
     "@bundler/worker": "workspace:*",
+    "lightningcss": "^1.29.1",
     "react-refresh": "0.14.2"
   }
 }

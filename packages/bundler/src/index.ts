@@ -1,4 +1,5 @@
 export * from "./config.js";
+export * from "./cache.js";
 export * from "./cli.js";
 export * from "./builder.js";
 export * from "./worker-pool.js";

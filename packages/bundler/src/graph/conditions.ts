@@ -65,7 +65,11 @@ export function resolveEntryConditions(
 
       const edgeCondition = node.conditionalDeps.get(dep);
       if (edgeCondition) {
-        mergeState(states, dep, combinePathCondition(nodeCondition, edgeCondition));
+        mergeState(
+          states,
+          dep,
+          combinePathCondition(nodeCondition, edgeCondition),
+        );
       }
     }
   }
@@ -77,9 +81,7 @@ function combinePathCondition(
   inherited: ConditionExpr | undefined,
   edgeCondition: ConditionExpr,
 ): ConditionExpr {
-  return inherited
-    ? combineAnd([inherited, edgeCondition])
-    : edgeCondition;
+  return inherited ? combineAnd([inherited, edgeCondition]) : edgeCondition;
 }
 
 function mergeState(

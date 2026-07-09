@@ -1,5 +1,6 @@
 import type {
   Diagnostic,
+  ConditionExpr,
   DiscoveredEntrypoint,
   ExtraTransformOutput,
   FileRecord,
@@ -66,7 +67,9 @@ export type EmitFileInput = {
   contents: string;
   envId?: string;
   hash?: boolean;
-  type?: "asset" | "manifest";
+  type?: "asset" | "manifest" | "style";
+  contentType?: string;
+  bundleKey?: string;
 };
 
 export type EmitFile = (file: EmitFileInput) => void;
@@ -88,6 +91,8 @@ export type BundlePlanDraft = {
   entryId: string;
   exportMode: "entry" | "dynamic";
   modules: string[];
+  conditions: Array<{ moduleId: string; condition: ConditionExpr }>;
+  conditionNames: string[];
   orderedParts: string[];
   dynamicImports: DynamicImportDraft[];
   diagnostics: Diagnostic[];

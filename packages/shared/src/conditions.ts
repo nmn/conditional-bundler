@@ -28,6 +28,39 @@ export function normalizeCondition(condition: ConditionExpr): ConditionExpr {
   return condition;
 }
 
+export function extractConditionNames(condition: ConditionExpr): string[] {
+  const names = new Set<string>();
+  visitCondition(condition, (name) => names.add(name));
+  return Array.from(names).sort();
+}
+
+export function evaluateConditionExpr(
+  condition: ConditionExpr,
+  evaluateCondition: (name: string) => boolean,
+): boolean {
+  if (typeof condition === "string") {
+    const value = evaluateCondition(condition);
+    if (typeof value !== "boolean") {
+      throw new Error(`Condition '${condition}' did not resolve to a boolean.`);
+    }
+    return value;
+  }
+  if ("AND" in condition) {
+    return condition.AND.every((part) =>
+      evaluateConditionExpr(part, evaluateCondition),
+    );
+  }
+  if ("OR" in condition) {
+    return condition.OR.some((part) =>
+      evaluateConditionExpr(part, evaluateCondition),
+    );
+  }
+  if ("NOT" in condition) {
+    return !evaluateConditionExpr(condition.NOT, evaluateCondition);
+  }
+  throw new Error(`Invalid condition expression: ${JSON.stringify(condition)}`);
+}
+
 export function combineOr(conditions: ConditionExpr[]): ConditionExpr {
   const flattened: ConditionExpr[] = [];
   for (const condition of conditions) {
@@ -41,6 +74,31 @@ export function combineOr(conditions: ConditionExpr[]): ConditionExpr {
     return flattened[0];
   }
   return { OR: flattened };
+}
+
+function visitCondition(
+  condition: ConditionExpr,
+  visit: (name: string) => void,
+): void {
+  if (typeof condition === "string") {
+    visit(condition);
+    return;
+  }
+  if ("AND" in condition) {
+    for (const part of condition.AND) {
+      visitCondition(part, visit);
+    }
+    return;
+  }
+  if ("OR" in condition) {
+    for (const part of condition.OR) {
+      visitCondition(part, visit);
+    }
+    return;
+  }
+  if ("NOT" in condition) {
+    visitCondition(condition.NOT, visit);
+  }
 }
 
 export function combineAnd(conditions: ConditionExpr[]): ConditionExpr {

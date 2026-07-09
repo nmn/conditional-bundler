@@ -29,6 +29,8 @@ async function buildFixture(name, options = {}) {
         fileName: `${name}.[env].[hash].js`,
       },
       cacheDir,
+      cache: options.cache,
+      css: options.css,
       maxWorkers: 2,
       diagnostics: "human",
       plugins: options.configPlugins ?? [],
@@ -110,6 +112,23 @@ const pvain3vm_value = pvain3vm_feature;
 export { pvain3vm_value as value };",
 }
 `);
+});
+
+test("records condition metadata in the bundle manifest", async () => {
+  const result = await buildFixture("conditional");
+  const bundle = result.manifest.bundles[0];
+  const conditionMetadata =
+    result.manifest.metadata.conditions.byBundle[
+      `${bundle.envId}:${bundle.entryId}`
+    ];
+
+  expect(bundle.conditionNames).toEqual(["EXPERIMENT_A"]);
+  expect(conditionMetadata.conditionNames).toEqual(["EXPERIMENT_A"]);
+  expect(conditionMetadata.modules).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ condition: "EXPERIMENT_A" }),
+    ]),
+  );
 });
 
 test("inherits and combines nested conditional imports", async () => {
@@ -326,6 +345,69 @@ test("uses different config roots when the bundler config changes", async () => 
   expect(configRoots).toHaveLength(2);
 });
 
+test("uses different config roots for development and production modes", async () => {
+  const cacheDir = path.join(cacheRoot, "mode-roots");
+  await fs.rm(cacheDir, { recursive: true, force: true });
+
+  const previousMode = process.env.BUNDLER_MODE;
+  try {
+    process.env.BUNDLER_MODE = "development";
+    await buildFixture("simple", { cacheDir });
+    process.env.BUNDLER_MODE = "production";
+    await buildFixture("simple", { cacheDir });
+  } finally {
+    if (previousMode == null) {
+      delete process.env.BUNDLER_MODE;
+    } else {
+      process.env.BUNDLER_MODE = previousMode;
+    }
+  }
+
+  const v2Dir = path.join(cacheDir, "v2");
+  const configRoots = (await fs.readdir(v2Dir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  expect(configRoots).toHaveLength(2);
+});
+
+test("materializes worker artifacts from a remote cache hit", async () => {
+  const cacheDir = path.join(cacheRoot, "remote-cache-local");
+  const remoteDir = path.join(cacheRoot, "remote-cache-store");
+  const pluginModule = path.join(
+    rootDir,
+    "packages/bundler/test/plugins/throw-on-env-plugin.mjs",
+  );
+  const cache = {
+    local: { dir: cacheDir },
+    remote: { kind: "file", dir: remoteDir, prefix: "test" },
+  };
+  await fs.rm(cacheDir, { recursive: true, force: true });
+  await fs.rm(remoteDir, { recursive: true, force: true });
+
+  const first = await buildFixture("simple", {
+    cacheDir,
+    cache,
+    configPlugins: [{ __bundlerPluginRef: true, module: pluginModule }],
+  });
+  await fs.rm(cacheDir, { recursive: true, force: true });
+
+  process.env.BUNDLER_THROW_TRANSFORM = "1";
+  try {
+    const second = await buildFixture("simple", {
+      cacheDir,
+      cache,
+      configPlugins: [{ __bundlerPluginRef: true, module: pluginModule }],
+    });
+    expect(second.bundles[0].fileName).toBe(first.bundles[0].fileName);
+  } finally {
+    delete process.env.BUNDLER_THROW_TRANSFORM;
+  }
+
+  const localRoots = await fs.readdir(path.join(cacheDir, "v2"));
+  expect(localRoots.length).toBeGreaterThan(0);
+});
+
 test("writes bundle manifest and supports entry output placeholder", async () => {
   const outDir = path.join(outRoot, "entry-placeholder");
   const result = await buildFixture("simple", {
@@ -341,6 +423,44 @@ test("writes bundle manifest and supports entry output placeholder", async () =>
     await fs.readFile(path.join(outDir, "manifest.json"), "utf8"),
   );
   expect(manifest.bundles[0].fileName).toBe(result.bundles[0].fileName);
+});
+
+test("extracts CSS and rewrites CSS module imports", async () => {
+  const result = await buildFixture("css-basic", {
+    outputs: {
+      outDir: path.join(outRoot, "css-basic"),
+      fileName: "css-basic.[env].[hash].js",
+    },
+  });
+  const styleAssets = result.manifest.assets.filter(
+    (asset) => asset.type === "style",
+  );
+  expect(styleAssets).toHaveLength(1);
+  expect(styleAssets[0]).toMatchObject({
+    contentType: "text/css; charset=utf-8",
+    bundleKey: `${result.bundles[0].envId}:${result.bundles[0].entryId}`,
+  });
+
+  const css = await fs.readFile(
+    path.join(outRoot, "css-basic", styleAssets[0].fileName),
+    "utf8",
+  );
+  expect(css).toContain("body");
+  expect(css).toContain("color: red");
+
+  const bundleUrl = pathToFileURL(
+    path.join(outRoot, "css-basic", result.bundles[0].fileName),
+  ).href;
+  const { stdout } = await execFileAsync(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    `const mod = await import(${JSON.stringify(bundleUrl)}); console.log(JSON.stringify({ className: mod.className, noCollision: mod.noCollision }));`,
+  ]);
+  const mod = JSON.parse(stdout);
+  const [defaultClass, namedClass, namespaceClass] = mod.className.split(":");
+  expect(defaultClass).toBe(namespaceClass);
+  expect(namedClass).toContain("button");
+  expect(mod.noCollision).toBe(true);
 });
 
 test("dev hmr emits mutable cell installers keyed by identifiers", async () => {
@@ -365,6 +485,8 @@ test("dev hmr emits mutable cell installers keyed by identifiers", async () => {
 
   expect(output).toContain("const __BUNDLER_HMR__");
   expect(output).toContain("__BUNDLER_HMR__.register");
+  expect(output).toContain('message.type === "rsc-refresh"');
+  expect(output).toContain('"bundler:rsc-refresh"');
   expect(output).toContain("let a33jpi1jb_value");
   expect(output).toContain("a33jpi1jb_value = k7isotkd_foo + 1;");
   expect(hmrBundle.reactRefresh).toBe(false);
@@ -496,10 +618,19 @@ export function Unused() {
     path.join(outDir, result.bundles[0].fileName),
     "utf8",
   );
+  const hmrBundle =
+    result.manifest.metadata.hmr.bundles[
+      `${result.bundles[0].envId}:${result.bundles[0].entryId}`
+    ];
+  const usedCell = hmrBundle.cells.find((cell) =>
+    cell.symbols.some((symbol) => symbol.endsWith("_Used")),
+  );
 
   expect(output).toContain("_Used");
   expect(output).toContain("reactRefreshRegister");
   expect(output).not.toContain("_Unused");
+  expect(usedCell).toBeDefined();
+  expect(usedCell.code).toContain("reactRefreshRegister");
 });
 
 test("cli loads async config files", async () => {
@@ -618,6 +749,160 @@ test("supports env-specific externalized imports via resolveImport", async () =>
   expect(clientCode).not.toContain('import { foo } from "./foo.js";');
   expect(ssrCode).toContain('import { foo as a33jpi1jb_foo } from "./foo.js";');
   expect(ssrCode).toContain("globalThis.__SIDE_EFFECT__ = true;");
+});
+
+test("default resolver honors package exports and tsconfig paths aliases", async () => {
+  const projectDir = path.join(outRoot, "resolver-aliases");
+  const srcDir = path.join(projectDir, "src");
+  const pkgDir = path.join(projectDir, "node_modules", "conditional-pkg");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(path.join(srcDir, "alias"), { recursive: true });
+  await fs.mkdir(pkgDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: {
+        baseUrl: ".",
+        paths: {
+          "@alias/*": ["src/alias/*"],
+        },
+      },
+    }),
+  );
+  await fs.writeFile(
+    path.join(pkgDir, "package.json"),
+    JSON.stringify({
+      name: "conditional-pkg",
+      type: "module",
+      exports: {
+        ".": {
+          browser: "./browser.js",
+          node: "./node.js",
+          default: "./default.js",
+        },
+      },
+    }),
+  );
+  await fs.writeFile(
+    path.join(pkgDir, "browser.js"),
+    `export const value = "browser";`,
+  );
+  await fs.writeFile(
+    path.join(pkgDir, "node.js"),
+    `export const value = "node";`,
+  );
+  await fs.writeFile(
+    path.join(pkgDir, "default.js"),
+    `export const value = "default";`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "alias", "value.js"),
+    `export const alias = "paths";`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "index.js"),
+    `import { value } from "conditional-pkg";
+import { alias } from "@alias/value";
+export const result = value + ":" + alias;`,
+  );
+
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: {
+        browser: { conditions: ["browser"], target: "browser" },
+        node: { conditions: ["node"], target: "node" },
+      },
+      entries: [
+        { id: "resolver-aliases", path: path.join(srcDir, "index.js") },
+      ],
+      outputs: { outDir, fileName: "resolver-aliases.[env].[hash].js" },
+      cacheDir: path.join(projectDir, ".cache"),
+      maxWorkers: 2,
+      diagnostics: "human",
+    },
+    [],
+  );
+
+  const browserBundle = result.bundles.find(
+    (bundle) => bundle.envId === "browser",
+  );
+  const nodeBundle = result.bundles.find((bundle) => bundle.envId === "node");
+  const browserOutput = await fs.readFile(
+    path.join(outDir, browserBundle.fileName),
+    "utf8",
+  );
+  const nodeOutput = await fs.readFile(
+    path.join(outDir, nodeBundle.fileName),
+    "utf8",
+  );
+
+  expect(browserOutput).toContain('"browser"');
+  expect(browserOutput).toContain('"paths"');
+  expect(nodeOutput).toContain('"node"');
+  expect(nodeOutput).toContain('"paths"');
+});
+
+test("cache identity changes when resolver aliases change", async () => {
+  const projectDir = path.join(outRoot, "resolver-alias-cache");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  const cacheDir = path.join(projectDir, ".cache");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(path.join(srcDir, "one"), { recursive: true });
+  await fs.mkdir(path.join(srcDir, "two"), { recursive: true });
+  await fs.writeFile(
+    path.join(srcDir, "one", "value.js"),
+    `export const value = "one";`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "two", "value.js"),
+    `export const value = "two";`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "index.js"),
+    `import { value } from "@alias/value";
+export const result = value;`,
+  );
+
+  const { buildProject } = await import("../dist/builder.js");
+  const build = async (target) => {
+    await fs.writeFile(
+      path.join(projectDir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: ".",
+          paths: {
+            "@alias/*": [`src/${target}/*`],
+          },
+        },
+      }),
+    );
+    return buildProject(
+      {
+        envs: { browser: { conditions: ["browser"], target: "browser" } },
+        entries: [
+          { id: "resolver-alias-cache", path: path.join(srcDir, "index.js") },
+        ],
+        outputs: { outDir, fileName: "resolver-alias-cache.[env].[hash].js" },
+        cacheDir,
+        maxWorkers: 1,
+        diagnostics: "human",
+      },
+      [],
+    );
+  };
+
+  await build("one");
+  await build("two");
+
+  const roots = (
+    await fs.readdir(path.join(cacheDir, "v2"), { withFileTypes: true })
+  )
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  expect(roots).toHaveLength(2);
 });
 
 test("renames external import locals across concatenated and dynamic modules", async () => {
@@ -748,7 +1033,10 @@ export const dyn = React.Fragment && typeof fs.readFileSync === "function" && ex
 test("supports virtual modules through resolveImport and load", async () => {
   const fixtureName = "plugin-virtual";
   const virtualPath = path.join(outRoot, ".virtual", "virtual-msg.js");
+  const cacheDir = path.join(cacheRoot, fixtureName);
+  await fs.rm(cacheDir, { recursive: true, force: true });
   const result = await buildFixture(fixtureName, {
+    cacheDir,
     configPlugins: [
       {
         name: "virtual-msg",
@@ -771,6 +1059,26 @@ test("supports virtual modules through resolveImport and load", async () => {
   const output = await readBundle(result, fixtureName);
   expect(output).toContain('"hello from virtual"');
   expect(output).toContain("export {");
+
+  const v2Dir = path.join(cacheDir, "v2");
+  const configRoots = (await fs.readdir(v2Dir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  expect(configRoots).toHaveLength(1);
+  const activeRoot = path.join(v2Dir, configRoots[0]);
+  const virtualFileHash = contentHash(normalizePosixPath(virtualPath));
+  const moduleRoot = path.join(activeRoot, "files", virtualFileHash);
+  const moduleJson = JSON.parse(
+    await fs.readFile(
+      path.join(moduleRoot, await findModuleCacheSuffix(moduleRoot)),
+      "utf8",
+    ),
+  );
+  const fileRecord =
+    moduleJson.fileRecordsByEnv?.browser ??
+    moduleJson.fileRecordsByEnv?.default ??
+    moduleJson.fileRecord;
+  expect(fileRecord.filePath).toBe(path.resolve(virtualPath));
 });
 
 test("runs module-backed worker transforms per environment", async () => {

@@ -65,14 +65,54 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
         runtime.performReactRefresh();
       });
     },
-    async applyPatch(records) {
+    async applyPatch(records, imports, styles) {
       try {
         for (const source of records) (0, eval)(source);
-        if (!runtime.performReactRefresh()) location.reload();
+        for (const href of imports || []) {
+          const module = await import(href);
+          runtime.updateRscModuleCache(href, module);
+        }
+        runtime.updateStyles(styles || []);
+        if ((records.length > 0 || (imports || []).length > 0) && !runtime.performReactRefresh()) location.reload();
       } catch (error) {
         console.error("[bundler] HMR patch failed", error);
         location.reload();
       }
+    },
+    updateStyles(styles) {
+      if (typeof document === "undefined") return;
+      for (const href of styles) {
+        const url = new URL(href, location.href);
+        const fileName = url.pathname.split("/").pop();
+        const styleKey = url.searchParams.get("key") || fileName;
+        if (!fileName) continue;
+        const existing = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).find((link) => {
+          const current = new URL(link.href, location.href);
+          return current.pathname.split("/").pop() === fileName || link.getAttribute("data-bundler-style") === styleKey;
+        });
+        if (existing) {
+          existing.href = href;
+          continue;
+        }
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = href;
+        link.setAttribute("data-bundler-style", styleKey);
+        document.head.appendChild(link);
+      }
+    },
+    updateRscModuleCache(href, module) {
+      if (typeof URL !== "function" || typeof location === "undefined") return;
+      const url = new URL(href, location.href);
+      const rscId = url.searchParams.get("rsc-id");
+      if (!rscId) return;
+      const fileName = url.searchParams.get("hmr") || url.pathname.split("/").pop();
+      const chunks = globalThis.__BUNDLER_RSC_CHUNKS__ ??= {};
+      if (fileName) chunks[rscId] = fileName;
+      const cache = globalThis.__BUNDLER_RSC_MODULE_CACHE__;
+      if (!cache || typeof cache.set !== "function") return;
+      cache.set(rscId, module);
+      if (fileName) cache.set(fileName, module);
     },
     reactRefreshRegister(type, id) {
       const register = globalThis.$RefreshReg$;
@@ -86,13 +126,22 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
       }
       return false;
     },
+    refreshRsc() {
+      if (typeof globalThis.dispatchEvent === "function" && typeof CustomEvent === "function") {
+        const event = new CustomEvent("bundler:rsc-refresh", { cancelable: true });
+        globalThis.dispatchEvent(event);
+        if (event.defaultPrevented) return;
+      }
+      location.reload();
+    },
     connect() {
       if (typeof WebSocket !== "function" || typeof location === "undefined") return;
       const protocol = location.protocol === "https:" ? "wss:" : "ws:";
       const socket = new WebSocket(protocol + "//" + location.host + "/__bundler_hmr");
       socket.addEventListener("message", (event) => {
         const message = JSON.parse(event.data);
-        if (message.type === "patch") runtime.applyPatch(message.records || []);
+        if (message.type === "patch") runtime.applyPatch(message.records || [], message.imports || [], message.styles || []);
+        if (message.type === "rsc-refresh") runtime.refreshRsc();
         if (message.type === "reload") location.reload();
         if (message.type === "error") console.error("[bundler] rebuild failed", message.message);
       });
@@ -226,6 +275,12 @@ function wrapCellInstaller(
   if (isTopLevelModuleSyntax(source)) {
     return source;
   }
+  const refreshRegistrations = symbols
+    .filter(isPotentialComponentSymbol)
+    .map(
+      (symbol) =>
+        `__BUNDLER_HMR__.reactRefreshRegister(${symbol}, ${JSON.stringify(symbol)});`,
+    );
   return `__BUNDLER_HMR__.register({
   id: ${JSON.stringify(cellIdentifier(cell))},
   symbols: ${JSON.stringify(symbols)},
@@ -233,6 +288,7 @@ function wrapCellInstaller(
   hash: ${JSON.stringify(contentHashShort(source))},
   install() {
 ${indent(rewriteProvidedDeclarations(source, symbols), 4)}
+${indent(refreshRegistrations.join("\n"), 4)}
   }
 });`;
 }
@@ -290,7 +346,11 @@ function isPotentialComponentExport(exported: string, symbol: string): boolean {
   if (exported === "default") {
     return true;
   }
-  return /^[A-Z]/.test(exported) || /^[a-z0-9]+_[A-Z]/.test(symbol);
+  return /^[A-Z]/.test(exported) || isPotentialComponentSymbol(symbol);
+}
+
+function isPotentialComponentSymbol(symbol: string): boolean {
+  return /^[A-Z]/.test(symbol) || /^[a-z0-9]+_[A-Z]/.test(symbol);
 }
 
 function indent(source: string, spaces: number): string {

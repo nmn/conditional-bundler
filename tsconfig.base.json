@@ -15,7 +15,8 @@
     "paths": {
       "@bundler/shared": ["packages/shared/src/index.ts"],
       "@bundler/worker": ["packages/worker/src/worker.ts"],
-      "@bundler/bundler": ["packages/bundler/src/index.ts"]
+      "@bundler/bundler": ["packages/bundler/src/index.ts"],
+      "@bundler/assets": ["packages/assets/src/index.ts"]
     }
   }
 }

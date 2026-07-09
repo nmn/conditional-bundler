@@ -11,6 +11,7 @@ An experimental ESM-only bundler that rewrites import use-sites, preserves live 
 ## Packages
 
 - `packages/bundler`: CLI + orchestrator + linker
+- `packages/assets`: generated bundle condition stripping + bitset cache keys
 - `packages/worker`: Babel-based transformer
 - `packages/shared`: types + hashing + utils
 

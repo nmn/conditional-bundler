@@ -7,6 +7,32 @@ export type CachePaths = {
   irPath: string;
 };
 
+export type CloudflareKVRemoteCacheConfig = {
+  kind: "cloudflare-kv";
+  accountId: string;
+  namespaceId: string;
+  apiTokenEnv: string;
+  prefix?: string;
+};
+
+export type FileRemoteCacheConfig = {
+  kind: "file";
+  dir: string;
+  prefix?: string;
+};
+
+export type RemoteCacheConfig =
+  | CloudflareKVRemoteCacheConfig
+  | FileRemoteCacheConfig;
+
+export type CacheConfig = {
+  local?: {
+    dir?: string;
+    retentionDays?: number;
+  };
+  remote?: RemoteCacheConfig | false;
+};
+
 export async function ensureDir(dirPath: string): Promise<void> {
   await fs.mkdir(dirPath, { recursive: true });
 }
@@ -39,9 +65,7 @@ export async function readFileIfExists(
   }
 }
 
-export async function readJsonIfExists<T>(
-  filePath: string,
-): Promise<T | null> {
+export async function readJsonIfExists<T>(filePath: string): Promise<T | null> {
   const raw = await readFileIfExists(filePath);
   if (!raw) {
     return null;
