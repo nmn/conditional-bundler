@@ -398,3 +398,85 @@ test("offsets entry mappings past dynamic-import headers and maps dynamic bundle
     line: 1,
   });
 });
+
+test("offsets entry and common maps past static bundle imports", async () => {
+  const projectDir = path.join(outRoot, "static-imports");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+  await fs.writeFile(
+    path.join(srcDir, "shared.js"),
+    "export const shared = 40;\n",
+  );
+  await fs.writeFile(
+    path.join(srcDir, "a.js"),
+    'import { shared } from "./shared.js";\nexport const a = shared + 1;\n',
+  );
+  await fs.writeFile(
+    path.join(srcDir, "b.js"),
+    'import { shared } from "./shared.js";\nexport const b = shared + 2;\n',
+  );
+
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: { browser: { conditions: ["default"], target: "browser" } },
+      entries: ["a", "b"].map((name) => ({
+        id: name,
+        path: path.join(srcDir, `${name}.js`),
+      })),
+      outputs: {
+        outDir,
+        fileName: "[entry].[env].[hash].js",
+        sourceMap: "external",
+      },
+      cacheDir: path.join(projectDir, ".cache"),
+      css: false,
+      maxWorkers: 2,
+      diagnostics: "human",
+    },
+    [],
+  );
+
+  for (const [entryName, expectedLine] of [
+    ["a.js", 2],
+    ["b.js", 2],
+    ["bundler:common:browser", 1],
+  ]) {
+    const bundle = result.bundles.find((candidate) =>
+      entryName.startsWith("bundler:")
+        ? candidate.entryId === entryName
+        : candidate.entryId.endsWith(entryName),
+    );
+    const code = await fs.readFile(path.join(outDir, bundle.fileName), "utf8");
+    const map = JSON.parse(
+      await fs.readFile(path.join(outDir, bundle.mapFileName), "utf8"),
+    );
+    const declaration = code.match(
+      entryName === "a.js"
+        ? /const [a-z0-9]+_a =/
+        : entryName === "b.js"
+          ? /const [a-z0-9]+_b =/
+          : /const [a-z0-9]+_shared =/,
+    );
+    expect(declaration).not.toBeNull();
+    expect(
+      originalPositionFor(
+        new AnyMap(map),
+        generatedPosition(code, declaration[0]),
+      ),
+    ).toMatchObject({
+      source: expect.stringMatching(
+        entryName.startsWith("bundler:")
+          ? /(?:^|\/)src\/shared\.js$/
+          : new RegExp(`(?:^|/)src/${entryName.replace(".", "\\.")}$`),
+      ),
+      line: expectedLine,
+    });
+  }
+});

@@ -27,9 +27,12 @@ import {
   type BundleTarget,
 } from "./linker/dynamic-import-constants.js";
 import {
+  emitStaticBundleImports,
+  type StaticBundleImport,
+} from "./linker/static-bundle-imports.js";
+import {
   emitHmrBundleMetadata,
   emitHmrCell,
-  emitHmrExportFooter,
   emitHmrPrelude,
   emitHmrSymbolDeclarations,
   emitReactRefreshRegistrations,
@@ -41,7 +44,10 @@ import { assembleBundle, stringifySourceMap } from "./sourcemap/compose.js";
 import type { BundleManifest } from "./manifest.js";
 import { normalizePlugins } from "./plugins/normalize.js";
 import { createCssPlugin } from "./plugins/css.js";
-import { scanModuleRequests } from "./plugins/scan.js";
+import {
+  scanModuleRequests,
+  type ScannedImportRequest,
+} from "./plugins/scan.js";
 import {
   runAfterCombine,
   runBeforeCombine,
@@ -57,6 +63,7 @@ import {
   contentHashShort,
   normalizePosixPath,
   extractConditionNames,
+  combineOr,
   readJsonIfExists,
   writeJsonAtomic,
   ensureDir,
@@ -106,12 +113,28 @@ type BundlePlan = {
   entryId: string;
   exportMode: "entry" | "dynamic";
   parts: BundlePart[];
+  staticImports: StaticBundleImport[];
   dynamicImports: DynamicImportRef[];
   diagnostics: Diagnostic[];
   modules: string[];
   conditions: Array<{ moduleId: string; condition: ConditionExpr }>;
   conditionNames: string[];
   hmr?: HmrBundleRecord;
+};
+
+type BundleEntry = {
+  entryId: string;
+  exportMode: "entry" | "dynamic";
+};
+
+type BundlePartition = BundleEntry & {
+  entryNodeId?: string;
+  selection: Map<string, Set<string>>;
+  conditions: Map<string, ConditionExpr | undefined>;
+  namespaceDemanded: Set<string>;
+  staticImports: StaticBundleImport[];
+  internalExports: Set<string>;
+  diagnostics: Diagnostic[];
 };
 
 type ResolvedSourceMapOutput = {
@@ -126,6 +149,7 @@ type BundlePlanDraftWithHmr = BundlePlanDraft & {
 type WorkerTransformResponse = {
   cacheHit?: boolean;
   needsResolution?: boolean;
+  unresolvedImportsByEnv?: Record<string, ScannedImportRequest[]>;
   fileRecordsByEnv: Record<string, FileRecord>;
 };
 
@@ -257,20 +281,10 @@ export async function buildProject(
     const bundlePlans: BundlePlan[] = [];
     for (const graph of graphs) {
       const entries = pickEntriesForEnv(explicitEntries, graph.envId);
-      let drafts: BundlePlanDraftWithHmr[] = [];
-      for (const entry of entries) {
-        drafts.push(
-          await createBundlePlan(
-            graph,
-            entry.path,
-            config,
-            resolver,
-            "entry",
-            devOptions,
-          ),
-        );
-      }
-
+      const bundleEntries: BundleEntry[] = entries.map((entry) => ({
+        entryId: entry.path,
+        exportMode: "entry",
+      }));
       const dynamicForEnv = dynamicEntries.filter(
         (entry) => entry.envs?.includes(graph.envId) || !entry.envs,
       );
@@ -278,17 +292,17 @@ export async function buildProject(
         if (entries.some((explicit) => explicit.path === entry.path)) {
           continue;
         }
-        drafts.push(
-          await createBundlePlan(
-            graph,
-            resolvedMap.get(entry.path)?.id ?? entry.path,
-            config,
-            resolver,
-            "dynamic",
-            devOptions,
-          ),
-        );
+        bundleEntries.push({
+          entryId: resolvedMap.get(entry.path)?.id ?? entry.path,
+          exportMode: "dynamic",
+        });
       }
+      const partitions = createBundlePartitions(graph, bundleEntries);
+      let drafts = await Promise.all(
+        partitions.map((partition) =>
+          createBundlePlan(graph, partition, config, devOptions),
+        ),
+      );
       drafts = (await runBeforeCombine(normalizedPlugins, {
         envId: graph.envId,
         plans: drafts,
@@ -354,11 +368,12 @@ export async function buildProject(
           `Missing finalized bundle output for '${plan.entryId}' in '${plan.envId}'.`,
         );
       }
-      const header = emitDynamicImportConstants(
-        plan.dynamicImports,
-        bundleMap,
-        plan.envId,
-      );
+      const header = [
+        emitStaticBundleImports(plan.staticImports, bundleMap, plan.envId),
+        emitDynamicImportConstants(plan.dynamicImports, bundleMap, plan.envId),
+      ]
+        .filter(Boolean)
+        .join("\n");
       const finalParts = [{ code: header }, ...plan.parts];
       const assembled = assembleBundle(finalParts, bundleOutput.fileName);
       const mapFileName = sourceMapOutput
@@ -738,24 +753,270 @@ function resolveReactRefreshTransformEnvs(config: BundlerConfig): string[] {
     .map(([envId]) => envId);
 }
 
-async function createBundlePlan(
+function createBundlePartitions(
   graph: ModuleGraph,
-  entryId: string,
-  config: BundlerConfig,
-  _resolver: Resolver,
-  exportMode: "entry" | "dynamic",
-  devOptions: ResolvedDevOptions,
-): Promise<BundlePlanDraftWithHmr> {
-  const entryNode = graph.nodes.get(entryId);
-  if (!entryNode) {
-    throw new Error(`Entry not found in graph: ${entryId}`);
+  rawEntries: BundleEntry[],
+): BundlePartition[] {
+  const entries = Array.from(
+    new Map(rawEntries.map((entry) => [entry.entryId, entry])).values(),
+  );
+  const entryIds = new Set(entries.map((entry) => entry.entryId));
+  const sharedEntryId = `bundler:common:${graph.envId}`;
+  if (entryIds.has(sharedEntryId)) {
+    throw new Error(`Reserved bundle entry id '${sharedEntryId}' is in use.`);
   }
 
-  const { conditions, diagnostics } = resolveEntryConditions(graph, entryId);
+  const entryData = entries.map((entry) => {
+    if (!graph.nodes.has(entry.entryId)) {
+      throw new Error(`Entry not found in graph: ${entry.entryId}`);
+    }
+    const resolution = resolveEntryConditions(graph, entry.entryId);
+    return {
+      ...entry,
+      selection: collectBundleSelection(graph, entry.entryId),
+      conditions: resolution.conditions,
+      diagnostics: resolution.diagnostics,
+    };
+  });
+
+  const consumersByModule = new Map<string, Set<string>>();
+  for (const entry of entryData) {
+    for (const moduleId of entry.selection.keys()) {
+      const consumers = consumersByModule.get(moduleId) ?? new Set<string>();
+      consumers.add(entry.entryId);
+      consumersByModule.set(moduleId, consumers);
+    }
+  }
+
+  const ownerByModule = new Map<string, string>();
+  for (const [moduleId, consumers] of consumersByModule) {
+    if (entryIds.has(moduleId)) {
+      ownerByModule.set(moduleId, moduleId);
+    } else if (consumers.size > 1) {
+      ownerByModule.set(moduleId, sharedEntryId);
+    } else {
+      ownerByModule.set(moduleId, consumers.values().next().value as string);
+    }
+  }
+
+  const selectionsByOwner = new Map<string, Map<string, Set<string>>>();
+  const conditionStatesByOwner = new Map<
+    string,
+    Map<string, { unconditional: boolean; conditional: ConditionExpr[] }>
+  >();
+  const combinedSelection = new Map<string, Set<string>>();
+
+  for (const entry of entryData) {
+    for (const [moduleId, cells] of entry.selection) {
+      const owner = ownerByModule.get(moduleId);
+      if (!owner) {
+        continue;
+      }
+      mergeSelectedCells(selectionsByOwner, owner, moduleId, cells);
+      const combinedCells =
+        combinedSelection.get(moduleId) ?? new Set<string>();
+      for (const cellId of cells) {
+        combinedCells.add(cellId);
+      }
+      combinedSelection.set(moduleId, combinedCells);
+
+      const states =
+        conditionStatesByOwner.get(owner) ??
+        new Map<
+          string,
+          { unconditional: boolean; conditional: ConditionExpr[] }
+        >();
+      const state = states.get(moduleId) ?? {
+        unconditional: false,
+        conditional: [],
+      };
+      const condition = entry.conditions.get(moduleId);
+      if (condition === undefined) {
+        state.unconditional = true;
+      } else {
+        state.conditional.push(condition);
+      }
+      states.set(moduleId, state);
+      conditionStatesByOwner.set(owner, states);
+    }
+  }
+
+  const importsByOwner = new Map<string, Map<string, Set<string>>>();
+  const internalExportsByOwner = new Map<string, Set<string>>();
+  const addBundleDependency = (
+    owner: string,
+    targetOwner: string,
+    symbol?: string,
+  ) => {
+    if (owner === targetOwner) {
+      return;
+    }
+    const imports = importsByOwner.get(owner) ?? new Map<string, Set<string>>();
+    const symbols = imports.get(targetOwner) ?? new Set<string>();
+    if (symbol) {
+      symbols.add(symbol);
+      const exports = internalExportsByOwner.get(targetOwner) ?? new Set();
+      exports.add(symbol);
+      internalExportsByOwner.set(targetOwner, exports);
+    }
+    imports.set(targetOwner, symbols);
+    importsByOwner.set(owner, imports);
+  };
+
+  for (const entry of entryData) {
+    for (const moduleId of entry.selection.keys()) {
+      const node = graph.nodes.get(moduleId);
+      const owner = ownerByModule.get(moduleId);
+      if (!node || !owner) {
+        continue;
+      }
+      for (const dependencyId of collectSelectedFileDeps(
+        node,
+        entry.selection,
+      )) {
+        const targetOwner = ownerByModule.get(dependencyId);
+        if (targetOwner) {
+          addBundleDependency(owner, targetOwner);
+        }
+      }
+    }
+  }
+
+  for (const [owner, selection] of selectionsByOwner) {
+    for (const [moduleId, cells] of selection) {
+      const node = graph.nodes.get(moduleId);
+      if (!node) {
+        continue;
+      }
+      for (const cellId of cells) {
+        const cell = getCellById(node, cellId);
+        if (!cell) {
+          continue;
+        }
+        for (const provider of cell.providerDeps ?? []) {
+          const targetOwner = ownerByModule.get(provider.moduleId);
+          if (targetOwner) {
+            addBundleDependency(owner, targetOwner, provider.symbol);
+          }
+        }
+        for (const dependency of cell.externalDeps) {
+          if (dependency.kind !== "import") {
+            continue;
+          }
+          const sourceId = node.resolvedSources.get(
+            sourceLookupKey(dependency),
+          );
+          const sourceNode = sourceId ? graph.nodes.get(sourceId) : undefined;
+          const targetOwner = sourceId
+            ? ownerByModule.get(sourceId)
+            : undefined;
+          if (!sourceNode || !targetOwner || targetOwner === owner) {
+            continue;
+          }
+          if (dependency.imported === "*") {
+            addBundleDependency(
+              owner,
+              targetOwner,
+              `__NS__${sourceNode.prefix}`,
+            );
+            continue;
+          }
+          const provider = sourceNode.exportTable?.get(dependency.imported);
+          if (provider) {
+            addBundleDependency(owner, targetOwner, provider.symbol);
+          }
+        }
+      }
+    }
+  }
+
+  const allNamespaceDemands = collectNamespaceDemands(combinedSelection, graph);
+  const namespaceDemandsByOwner = new Map<string, Set<string>>();
+  for (const moduleId of allNamespaceDemands) {
+    const owner = ownerByModule.get(moduleId);
+    if (!owner) {
+      continue;
+    }
+    const demands = namespaceDemandsByOwner.get(owner) ?? new Set<string>();
+    demands.add(moduleId);
+    namespaceDemandsByOwner.set(owner, demands);
+  }
+
+  return [
+    ...entries.map((entry) => ({ ...entry, entryNodeId: entry.entryId })),
+    ...(selectionsByOwner.has(sharedEntryId)
+      ? [
+          {
+            entryId: sharedEntryId,
+            exportMode: "dynamic" as const,
+          },
+        ]
+      : []),
+  ].map((entry) => {
+    const conditionStates = conditionStatesByOwner.get(entry.entryId);
+    const conditions = new Map<string, ConditionExpr | undefined>();
+    for (const [moduleId, state] of conditionStates ?? []) {
+      conditions.set(
+        moduleId,
+        state.unconditional ? undefined : combineOr(state.conditional),
+      );
+    }
+    const imports = importsByOwner.get(entry.entryId);
+    return {
+      ...entry,
+      selection: selectionsByOwner.get(entry.entryId) ?? new Map(),
+      conditions,
+      namespaceDemanded:
+        namespaceDemandsByOwner.get(entry.entryId) ?? new Set(),
+      staticImports: Array.from(
+        imports?.entries() ?? [],
+        ([entryId, symbols]) => ({
+          entryId,
+          symbols: Array.from(symbols).sort(),
+        }),
+      ),
+      internalExports:
+        internalExportsByOwner.get(entry.entryId) ?? new Set<string>(),
+      diagnostics:
+        entryData.find((candidate) => candidate.entryId === entry.entryId)
+          ?.diagnostics ?? [],
+    };
+  });
+}
+
+function mergeSelectedCells(
+  selectionsByOwner: Map<string, Map<string, Set<string>>>,
+  owner: string,
+  moduleId: string,
+  cells: Set<string>,
+): void {
+  const selection =
+    selectionsByOwner.get(owner) ?? new Map<string, Set<string>>();
+  const selectedCells = selection.get(moduleId) ?? new Set<string>();
+  for (const cellId of cells) {
+    selectedCells.add(cellId);
+  }
+  selection.set(moduleId, selectedCells);
+  selectionsByOwner.set(owner, selection);
+}
+
+async function createBundlePlan(
+  graph: ModuleGraph,
+  partition: BundlePartition,
+  config: BundlerConfig,
+  devOptions: ResolvedDevOptions,
+): Promise<BundlePlanDraftWithHmr> {
+  const { entryId, exportMode, conditions, diagnostics, selection } = partition;
+  const entryNode = partition.entryNodeId
+    ? graph.nodes.get(partition.entryNodeId)
+    : undefined;
+  if (partition.entryNodeId && !entryNode) {
+    throw new Error(`Entry not found in graph: ${partition.entryNodeId}`);
+  }
+
   const conditionRecordsForGraph = Array.from(conditions.entries())
     .filter((entry): entry is [string, ConditionExpr] => entry[1] !== undefined)
     .map(([moduleId, condition]) => ({ moduleId, condition }));
-  const selection = collectBundleSelection(graph, entryId);
   const orderedFiles = orderSelectedFiles(graph, selection);
   const orderedFileIds = new Set(orderedFiles.map((node) => node.id));
   const conditionRecords = conditionRecordsForGraph.filter((record) =>
@@ -770,7 +1031,7 @@ async function createBundlePlan(
   ).sort();
   const parts: BundlePart[] = [];
   const dynamicImports: DynamicImportRef[] = [];
-  const namespaceDemanded = collectNamespaceDemands(selection, graph);
+  const namespaceDemanded = partition.namespaceDemanded;
   const hmrCells: HmrCellRecord[] = [];
   const hmrSymbols = new Set<string>();
   const useHmr = devOptions.hmr;
@@ -857,11 +1118,12 @@ async function createBundlePlan(
       });
     }
   }
-  const exportFooter = useHmr
-    ? emitHmrExportFooter(graph.nodes.get(entryId))
-    : exportMode === "entry"
-      ? emitEntryExports(graph.nodes.get(entryId))
-      : emitDynamicBundleExports(graph.nodes.get(entryId));
+  const exportFooter = emitBundleExports(
+    entryNode,
+    exportMode,
+    useHmr,
+    partition.internalExports,
+  );
   if (exportFooter) {
     parts.push({ code: exportFooter });
   }
@@ -874,6 +1136,7 @@ async function createBundlePlan(
     conditions: conditionRecords,
     conditionNames,
     orderedParts: parts,
+    staticImports: partition.staticImports,
     dynamicImports,
     diagnostics,
     hmr: useHmr
@@ -1030,11 +1293,25 @@ async function transformModule(
     ...requestBase,
     cacheOnly: true,
   })) as WorkerTransformResponse;
-  if (response.needsResolution) {
-    const resolvedImportsByEnv = await resolveImportsForEnvs(
+  let resolvedImportsByEnv: Awaited<ReturnType<typeof resolveImportsForEnvs>> =
+    {};
+  let resolutionPasses = 0;
+  while (response.needsResolution) {
+    resolutionPasses += 1;
+    if (resolutionPasses > 8) {
+      throw new Error(
+        `Transform plugins kept introducing unresolved imports in '${module.id}'.`,
+      );
+    }
+    const nextResolutions = await resolveImportsForEnvs(
       loadedModule,
       envs,
       resolver,
+      response.unresolvedImportsByEnv,
+    );
+    resolvedImportsByEnv = mergeResolvedImportsByEnv(
+      resolvedImportsByEnv,
+      nextResolutions,
     );
     response = (await pool.run({
       ...requestBase,
@@ -1304,6 +1581,7 @@ async function resolveImportsForEnvs(
   module: LoadedModuleRecord,
   envs: string[],
   resolver: Resolver,
+  additionalRequestsByEnv: Record<string, ScannedImportRequest[]> = {},
 ): Promise<
   Record<
     string,
@@ -1335,11 +1613,18 @@ async function resolveImportsForEnvs(
 
   for (const envId of envs) {
     const code = module.codeByEnv?.[envId] ?? module.code;
-    const requests = scanModuleRequests({
-      code,
-      filePath: module.filePath,
-      syntax: module.syntax,
-    });
+    const requests = Array.from(
+      new Map(
+        [
+          ...scanModuleRequests({
+            code,
+            filePath: module.filePath,
+            syntax: module.syntax,
+          }),
+          ...(additionalRequestsByEnv[envId] ?? []),
+        ].map((request) => [request.key, request]),
+      ).values(),
+    );
     const envResolutions: Record<
       string,
       {
@@ -1371,6 +1656,20 @@ async function resolveImportsForEnvs(
   }
 
   return resolvedByEnv;
+}
+
+function mergeResolvedImportsByEnv(
+  current: Awaited<ReturnType<typeof resolveImportsForEnvs>>,
+  next: Awaited<ReturnType<typeof resolveImportsForEnvs>>,
+): Awaited<ReturnType<typeof resolveImportsForEnvs>> {
+  const merged = { ...current };
+  for (const [envId, resolutions] of Object.entries(next)) {
+    merged[envId] = {
+      ...(merged[envId] ?? {}),
+      ...resolutions,
+    };
+  }
+  return merged;
 }
 
 function collectBundleSelection(
@@ -1780,36 +2079,35 @@ function collectDynamicImportExports(
   }));
 }
 
-function emitEntryExports(node: ModuleNode | undefined): string {
-  if (!node?.exportTable || node.exportTable.size === 0) {
-    return "";
+function emitBundleExports(
+  node: ModuleNode | undefined,
+  exportMode: "entry" | "dynamic",
+  hmr: boolean,
+  internalSymbols: Set<string>,
+): string {
+  const specifiers: string[] = [];
+  const exportedNames = new Set<string>();
+  const addExport = (symbol: string, exported: string) => {
+    if (exportedNames.has(exported)) {
+      return;
+    }
+    exportedNames.add(exported);
+    specifiers.push(symbol === exported ? symbol : `${symbol} as ${exported}`);
+  };
+
+  for (const [exported, provider] of node?.exportTable ?? []) {
+    if (hmr || exportMode === "dynamic") {
+      addExport(provider.symbol, provider.symbol);
+    }
+    if (hmr || exportMode === "entry") {
+      addExport(provider.symbol, exported);
+    }
+  }
+  for (const symbol of Array.from(internalSymbols).sort()) {
+    addExport(symbol, symbol);
   }
 
-  const parts: string[] = [];
-  for (const [exported, provider] of node.exportTable.entries()) {
-    parts.push(
-      provider.symbol === exported
-        ? provider.symbol
-        : `${provider.symbol} as ${exported}`,
-    );
-  }
-
-  return `export { ${parts.join(", ")} };`;
-}
-
-function emitDynamicBundleExports(node: ModuleNode | undefined): string {
-  const exportedSymbols = new Set(
-    Array.from(
-      node?.exportTable?.values() ?? [],
-      (provider) => provider.symbol,
-    ),
-  );
-
-  if (exportedSymbols.size === 0) {
-    return "";
-  }
-
-  return `export { ${Array.from(exportedSymbols).join(", ")} };`;
+  return specifiers.length > 0 ? `export { ${specifiers.join(", ")} };` : "";
 }
 
 function fromBundleDraft(draft: BundlePlanDraftWithHmr): BundlePlan {
@@ -1818,6 +2116,7 @@ function fromBundleDraft(draft: BundlePlanDraftWithHmr): BundlePlan {
     entryId: draft.entryId,
     exportMode: draft.exportMode,
     parts: draft.orderedParts,
+    staticImports: draft.staticImports ?? [],
     dynamicImports: draft.dynamicImports.map((dynamicImport) => ({
       hashKey: dynamicImport.hashKey,
       resolvedId: dynamicImport.resolvedId,

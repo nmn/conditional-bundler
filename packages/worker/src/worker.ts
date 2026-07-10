@@ -80,9 +80,22 @@ type WorkerResponse = {
   ok: boolean;
   cacheHit?: boolean;
   needsResolution?: boolean;
+  unresolvedImportsByEnv?: Record<string, WorkerImportRequest[]>;
   contentHash: string;
   prefix: string;
   fileRecordsByEnv: Record<string, FileRecord>;
+};
+
+type WorkerImportRequest = {
+  key: string;
+  kind:
+    | "import"
+    | "dynamic-import"
+    | "reexport"
+    | "conditional-import"
+    | "conditional-else";
+  request: string;
+  importAttributes?: Record<string, string>;
 };
 
 type ModuleCacheRecord = {
@@ -105,7 +118,7 @@ type RemoteCacheAdapter = {
 };
 
 const babelModuleCache = new Map<string, unknown>();
-const CELL_ARTIFACT_FORMAT = 3;
+const CELL_ARTIFACT_FORMAT = 4;
 const remapping = ((
   remappingModule as unknown as {
     default?: typeof import("@ampproject/remapping").default;
@@ -179,6 +192,21 @@ async function handleTransform(
   const relPath = path.posix.relative(request.pkg.root, normalizedPath);
   const prefix = filePrefix(request.pkg.name, request.pkg.version, relPath);
   const resultsByEnv = await transformFile(request);
+  const unresolvedImportsByEnv = collectUnresolvedImportsByEnv(
+    resultsByEnv,
+    request,
+  );
+  if (Object.keys(unresolvedImportsByEnv).length > 0) {
+    return {
+      ok: true,
+      cacheHit: false,
+      needsResolution: true,
+      unresolvedImportsByEnv,
+      contentHash: fileHash,
+      prefix,
+      fileRecordsByEnv: {},
+    };
+  }
   const fileRecordsByEnv = Object.fromEntries(
     Object.entries(resultsByEnv).map(([envId, result]) => {
       if (!result.fileRecord) {
@@ -221,6 +249,66 @@ async function handleTransform(
     prefix,
     fileRecordsByEnv,
   };
+}
+
+function collectUnresolvedImportsByEnv(
+  resultsByEnv: Record<string, TransformResult>,
+  request: WorkerRequest,
+): Record<string, WorkerImportRequest[]> {
+  const unresolvedByEnv: Record<string, WorkerImportRequest[]> = {};
+
+  for (const [envId, result] of Object.entries(resultsByEnv)) {
+    const fileRecord = result.fileRecord;
+    if (!fileRecord) {
+      continue;
+    }
+    const resolved = request.resolvedImportsByEnv?.[envId] ?? {};
+    const unresolved = new Map<string, WorkerImportRequest>();
+    const add = (
+      kind: WorkerImportRequest["kind"],
+      importRequest: string,
+      importAttributes?: Record<string, string>,
+    ) => {
+      const key = `${kind}:${importRequest}`;
+      if (resolved[key]) {
+        return;
+      }
+      unresolved.set(key, {
+        key,
+        kind,
+        request: importRequest,
+        importAttributes,
+      });
+    };
+
+    for (const entry of fileRecord.imports) {
+      add(
+        entry.condition ? "conditional-import" : "import",
+        entry.request ?? entry.source,
+        entry.attributes ?? undefined,
+      );
+    }
+    for (const entry of fileRecord.conditionalImports) {
+      if (entry.elseSource) {
+        add("conditional-else", entry.elseRequest ?? entry.elseSource);
+      }
+    }
+    for (const entry of [
+      ...fileRecord.exportStars,
+      ...fileRecord.reexportsNamed,
+    ]) {
+      add("reexport", entry.request ?? entry.source);
+    }
+    for (const entry of fileRecord.dynamicImports) {
+      add("dynamic-import", entry.request ?? entry.source);
+    }
+
+    if (unresolved.size > 0) {
+      unresolvedByEnv[envId] = Array.from(unresolved.values());
+    }
+  }
+
+  return unresolvedByEnv;
 }
 
 async function transformFile(

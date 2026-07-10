@@ -42,7 +42,18 @@ export default function reactRscTransformBabelPlugin(api, options) {
           },
         };
 
-        const body = [];
+        const registerClientReferenceLocal = "__rsc_registerClientReference__";
+        const body = [
+          t.importDeclaration(
+            [
+              t.importSpecifier(
+                t.identifier(registerClientReferenceLocal),
+                t.identifier("registerClientReference"),
+              ),
+            ],
+            t.stringLiteral("react-server-dom-webpack/server"),
+          ),
+        ];
 
         for (const exportName of exports) {
           const localName =
@@ -53,31 +64,23 @@ export default function reactRscTransformBabelPlugin(api, options) {
             t.variableDeclaration("const", [
               t.variableDeclarator(
                 t.identifier(localName),
-                t.callExpression(
-                  t.memberExpression(
-                    t.identifier("globalThis"),
-                    t.identifier("__registerClientReference"),
+                t.callExpression(t.identifier(registerClientReferenceLocal), [
+                  t.functionExpression(
+                    exportName === "default" ? null : t.identifier(exportName),
+                    [],
+                    t.blockStatement([
+                      t.throwStatement(
+                        t.newExpression(t.identifier("Error"), [
+                          t.stringLiteral(
+                            "Client references cannot be called on the server.",
+                          ),
+                        ]),
+                      ),
+                    ]),
                   ),
-                  [
-                    t.functionExpression(
-                      exportName === "default"
-                        ? null
-                        : t.identifier(exportName),
-                      [],
-                      t.blockStatement([
-                        t.throwStatement(
-                          t.newExpression(t.identifier("Error"), [
-                            t.stringLiteral(
-                              "Client references cannot be called on the server.",
-                            ),
-                          ]),
-                        ),
-                      ]),
-                    ),
-                    t.stringLiteral(clientId),
-                    t.stringLiteral(exportName),
-                  ],
-                ),
+                  t.stringLiteral(clientId),
+                  t.stringLiteral(exportName),
+                ]),
               ),
             ]),
           );

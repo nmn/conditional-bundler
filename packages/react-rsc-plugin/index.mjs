@@ -363,14 +363,6 @@ function createCjsEsmWrapper({ filePath, envId, mode }) {
     (name) =>
       `export const ${name} = __cjs_default__[${JSON.stringify(name)}];`,
   );
-  const registerGlobal = path
-    .basename(filePath)
-    .startsWith("react-server-dom-webpack-server.node.")
-    ? `if (__cjs_default__.registerClientReference) {
-  globalThis.__registerClientReference = __cjs_default__.registerClientReference;
-}
-`
-    : "";
   const webpackShim = path
     .basename(filePath)
     .startsWith("react-server-dom-webpack-client.browser.")
@@ -399,7 +391,6 @@ ${indent(source, 2)}
   __cjs_default__ = __cjs_module__.exports;
   __cjs_cache__.set(${JSON.stringify(filePath)}, __cjs_default__);
 }
-${registerGlobal}
 export default __cjs_default__;
 ${exportLines.join("\n")}
 `;

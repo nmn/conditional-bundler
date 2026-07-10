@@ -1,5 +1,7 @@
 import React from "react";
 import { Counter } from "./Counter.jsx";
+import { DraftPad } from "./DraftPad.jsx";
+import { PreferenceSwitch } from "./PreferenceSwitch.jsx";
 
 export default function App() {
   return (
@@ -12,7 +14,11 @@ export default function App() {
           second bundler in the toolchain.
         </p>
       </section>
-      <Counter initialCount={2} />
+      <section className="client-grid" aria-label="Client component examples">
+        <Counter initialCount={2} />
+        <PreferenceSwitch />
+        <DraftPad />
+      </section>
     </main>
   );
 }

@@ -11,10 +11,7 @@ import React from "react";
 import { renderToPipeableStream as renderHtmlToPipeableStream } from "react-dom/server";
 import { createFromNodeStream } from "react-server-dom-webpack/client.node";
 import { renderToPipeableStream as renderRscToPipeableStream } from "react-server-dom-webpack/server.node";
-import { registerClientReference as __registerClientReference } from "react-server-dom-webpack/server";
 import App from "./App.jsx";
-
-globalThis.__registerClientReference = __registerClientReference;
 
 const distDir = path.dirname(fileURLToPath(import.meta.url));
 const evaluateCondition = createEnvironmentConditionEvaluator(process.env);
@@ -472,6 +469,52 @@ button {
 .home-counter button:hover {
   background: var(--acid);
 }
+.home-client-tools {
+  border-bottom: 2px solid var(--line);
+  border-top: 2px solid var(--line);
+  display: grid;
+  gap: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 30px 0;
+}
+.home-tool {
+  align-content: start;
+  display: grid;
+  gap: 14px;
+  min-height: 170px;
+  padding: 20px;
+}
+.home-tool + .home-tool {
+  border-left: 1px solid var(--line);
+}
+.home-tool p,
+.home-tool output {
+  margin: 0;
+}
+.home-tool output {
+  font-size: 1.15rem;
+}
+.tool-segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tool-segments button {
+  background: var(--porcelain);
+  padding: 8px 10px;
+}
+.tool-segments button[aria-pressed="true"] {
+  background: var(--acid);
+}
+.delivery-estimator select {
+  appearance: none;
+  background: var(--porcelain);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font: inherit;
+  padding: 10px 12px;
+  width: 100%;
+}
 .product-grid {
   display: grid;
   gap: 18px;
@@ -657,12 +700,17 @@ button {
 @media (max-width: 820px) {
   .store-header,
   .hero-commerce,
+  .home-client-tools,
   .product-detail,
   .journal-layout {
     grid-template-columns: 1fr;
   }
   .nav-strip {
     justify-content: start;
+  }
+  .home-tool + .home-tool {
+    border-left: 0;
+    border-top: 1px solid var(--line);
   }
   .client-rail {
     left: 12px;

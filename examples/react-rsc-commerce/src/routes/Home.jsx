@@ -1,11 +1,16 @@
 import React from "react";
 import { ProductActionBoundary } from "../components/ProductActionBoundary.jsx";
+import { CategoryPicker } from "../client/CategoryPicker.jsx";
+import { DeliveryEstimator } from "../client/DeliveryEstimator.jsx";
 import { HomeCounter } from "../client/HomeCounter.jsx";
 import { featuredProducts } from "../data/catalog.js";
 import { formatCurrency } from "../lib/pricing.js";
 
 export default function Home() {
   const featured = featuredProducts();
+  const categories = Array.from(
+    new Set(featured.map((product) => product.category)),
+  );
   return (
     <>
       <section className="hero-commerce">
@@ -18,6 +23,10 @@ export default function Home() {
           <span>average fulfillment for stocked goods</span>
           <HomeCounter />
         </aside>
+      </section>
+      <section className="home-client-tools" aria-label="Store preferences">
+        <CategoryPicker categories={categories} />
+        <DeliveryEstimator />
       </section>
       <section className="product-grid featured-grid">
         {featured.map((product) => (

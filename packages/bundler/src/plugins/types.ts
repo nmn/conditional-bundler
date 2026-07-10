@@ -86,6 +86,11 @@ export type DynamicImportDraft = {
   exports?: Array<{ exported: string; symbol: string }>;
 };
 
+export type StaticBundleImportDraft = {
+  entryId: string;
+  symbols: string[];
+};
+
 export type BundlePart = {
   code: string;
   map?: string;
@@ -99,6 +104,7 @@ export type BundlePlanDraft = {
   conditions: Array<{ moduleId: string; condition: ConditionExpr }>;
   conditionNames: string[];
   orderedParts: BundlePart[];
+  staticImports?: StaticBundleImportDraft[];
   dynamicImports: DynamicImportDraft[];
   diagnostics: Diagnostic[];
 };

@@ -11,7 +11,7 @@ export function Counter({ initialCount }) {
   useExampleLog("Counter mounted through the DEV branch.");
 
   return (
-    <section className="counter">
+    <section className="client-panel counter">
       <div>
         <p className="label">Client island</p>
         <strong>{count}</strong>

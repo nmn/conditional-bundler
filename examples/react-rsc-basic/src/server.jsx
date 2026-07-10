@@ -11,10 +11,7 @@ import React from "react";
 import { renderToPipeableStream as renderHtmlToPipeableStream } from "react-dom/server";
 import { createFromNodeStream } from "react-server-dom-webpack/client.node";
 import { renderToPipeableStream as renderRscToPipeableStream } from "react-server-dom-webpack/server.node";
-import { registerClientReference as __registerClientReference } from "react-server-dom-webpack/server";
 import App from "./App.jsx";
-
-globalThis.__registerClientReference = __registerClientReference;
 
 const distDir = path.dirname(fileURLToPath(import.meta.url));
 const evaluateCondition = createEnvironmentConditionEvaluator(process.env);
@@ -302,6 +299,15 @@ button {
   font: inherit;
   padding: 0.75rem 1rem;
 }
+textarea {
+  background: #fffdf8;
+  border: 1px solid #1f2524;
+  color: #1f2524;
+  font: inherit;
+  padding: 0.75rem;
+  resize: vertical;
+  width: 100%;
+}
 .shell {
   display: grid;
   gap: 2rem;
@@ -330,17 +336,49 @@ h1 {
   font-size: 1.25rem;
   max-width: 620px;
 }
+.client-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+.client-panel {
+  border: 1px solid #1f2524;
+  display: grid;
+  gap: 18px;
+  min-height: 210px;
+  padding: 20px;
+}
 .counter {
   align-items: center;
-  border: 1px solid #1f2524;
-  display: flex;
+  grid-template-columns: 1fr auto;
   justify-content: space-between;
-  max-width: 460px;
-  padding: 20px;
 }
 .counter strong {
   display: block;
   font-size: 4rem;
   line-height: 1;
+}
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.segmented button {
+  background: #fffdf8;
+  min-width: 0;
+}
+.segmented button[aria-pressed="true"] {
+  background: #1f2524;
+  color: #f6f2ea;
+}
+.client-status {
+  font-size: 1.1rem;
+  margin: 0;
+}
+.draft-pad {
+  align-content: start;
+}
+.draft-pad output {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  justify-self: end;
 }
 `;

@@ -45,6 +45,15 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
   );
   const clientBundle = findBundle(manifest, "client");
   const serverBundle = findBundle(manifest, "rsc");
+  const clientBundles = manifest.bundles.filter(
+    (bundle) => bundle.envId === "client",
+  );
+  const clientBundleFiles = clientBundles
+    .map((bundle) => bundle.fileName)
+    .sort();
+  const commonBundle = clientBundles.find((bundle) =>
+    bundle.entryId.startsWith("bundler:common:"),
+  );
   const counterBundle = manifest.bundles.find(
     (bundle) =>
       bundle.fileName === clientManifest["src/Counter.jsx#Counter"].fileName,
@@ -58,6 +67,48 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
     id: expect.stringMatching(/src\/Counter\.jsx$/),
     fileName: expect.stringMatching(/^Counter\.client\.[a-z0-9]+\.js$/),
     chunks: expect.any(Array),
+  });
+  expect(clientBundleFiles).toHaveLength(5);
+  expect(clientBundleFiles).toEqual(
+    expect.arrayContaining([
+      expect.stringMatching(/^Counter\.client\.[a-z0-9]+\.js$/),
+      expect.stringMatching(/^DraftPad\.client\.[a-z0-9]+\.js$/),
+      expect.stringMatching(/^PreferenceSwitch\.client\.[a-z0-9]+\.js$/),
+      expect.stringMatching(/^bundler-common-client\.client\.[a-z0-9]+\.js$/),
+      expect.stringMatching(/^client\.client\.[a-z0-9]+\.js$/),
+    ]),
+  );
+  expect(commonBundle).toBeDefined();
+  const clientModuleIds = clientBundles.flatMap((bundle) => bundle.modules);
+  expect(new Set(clientModuleIds).size).toBe(clientModuleIds.length);
+  const commonCode = await fs.readFile(
+    path.join(exampleDir, "dist", commonBundle.fileName),
+    "utf8",
+  );
+  expect(commonCode).toContain("ReactSharedInternals");
+  for (const reference of [
+    clientManifest["src/Counter.jsx#Counter"],
+    clientManifest["src/DraftPad.jsx#DraftPad"],
+    clientManifest["src/PreferenceSwitch.jsx#PreferenceSwitch"],
+  ]) {
+    const code = await fs.readFile(
+      path.join(exampleDir, "dist", reference.fileName),
+      "utf8",
+    );
+    expect(code).toContain(`from "./${commonBundle.fileName}"`);
+    expect(code).not.toContain("ReactSharedInternals");
+  }
+  expect(clientManifest["src/DraftPad.jsx#DraftPad"]).toMatchObject({
+    id: expect.stringMatching(/src\/DraftPad\.jsx$/),
+    fileName: expect.stringMatching(/^DraftPad\.client\.[a-z0-9]+\.js$/),
+  });
+  expect(
+    clientManifest["src/PreferenceSwitch.jsx#PreferenceSwitch"],
+  ).toMatchObject({
+    id: expect.stringMatching(/src\/PreferenceSwitch\.jsx$/),
+    fileName: expect.stringMatching(
+      /^PreferenceSwitch\.client\.[a-z0-9]+\.js$/,
+    ),
   });
   expect(counterBundle.conditionNames).toEqual(["DEV"]);
   for (const bundle of manifest.bundles) {
@@ -109,6 +160,8 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
 
     const flight = await fetchText(`${baseUrl}/rsc?path=%2F`);
     expect(flight).toContain("src/Counter.jsx");
+    expect(flight).toContain("src/DraftPad.jsx");
+    expect(flight).toContain("src/PreferenceSwitch.jsx");
     expect(flight).not.toContain(":E");
 
     const counterAsset = await fetchAsset(
@@ -170,6 +223,8 @@ test("react-rsc-basic development serves HMR output and linked source maps", asy
 
       const flight = await fetchText(`${baseUrl}/rsc?path=%2F`);
       expect(flight).toContain("src/Counter.jsx");
+      expect(flight).toContain("src/DraftPad.jsx");
+      expect(flight).toContain("src/PreferenceSwitch.jsx");
       expect(flight).not.toContain(":E");
 
       const manifest = await readManifest();

@@ -235,6 +235,123 @@ export { pjxrtv5k_loadA as loadA, pjxrtv5k_loadB as loadB };",
 `);
 });
 
+test("extracts shared modules and entrypoint dependencies without duplication", async () => {
+  const projectDir = path.join(outRoot, "shared-chunk-ownership");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+  await fs.writeFile(
+    path.join(srcDir, "shared.js"),
+    `globalThis.__SHARED_EVALUATIONS__ = (globalThis.__SHARED_EVALUATIONS__ ?? 0) + 1;
+export const shared = 10;`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "b.js"),
+    `import { shared } from "./shared.js";
+export const b = shared + 1;`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "a.js"),
+    `import { b } from "./b.js";
+import { shared } from "./shared.js";
+export const a = b + shared;`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "c.js"),
+    `import { shared } from "./shared.js";
+export const c = shared + 2;`,
+  );
+
+  const { buildProject } = await import("../dist/builder.js");
+  const entryPaths = Object.fromEntries(
+    ["a", "b", "c"].map((name) => [name, path.join(srcDir, `${name}.js`)]),
+  );
+  const result = await buildProject(
+    {
+      envs: { browser: { conditions: ["default"], target: "browser" } },
+      entries: Object.values(entryPaths).map((entryPath) => ({
+        id: entryPath,
+        path: entryPath,
+      })),
+      outputs: {
+        outDir,
+        fileName: "[entry].[env].[hash].js",
+      },
+      cacheDir: path.join(projectDir, ".cache"),
+      css: false,
+      maxWorkers: 2,
+      diagnostics: "human",
+    },
+    [],
+  );
+
+  const commonBundle = result.bundles.find((bundle) =>
+    bundle.entryId.startsWith("bundler:common:"),
+  );
+  const bundlesByEntry = Object.fromEntries(
+    Object.entries(entryPaths).map(([name, entryPath]) => [
+      name,
+      result.bundles.find((bundle) => bundle.entryId === entryPath),
+    ]),
+  );
+  expect(result.bundles).toHaveLength(4);
+  expect(commonBundle).toBeDefined();
+  expect(Object.values(bundlesByEntry).every(Boolean)).toBe(true);
+
+  const moduleCounts = new Map();
+  for (const bundle of result.manifest.bundles) {
+    for (const moduleId of bundle.modules) {
+      moduleCounts.set(moduleId, (moduleCounts.get(moduleId) ?? 0) + 1);
+    }
+  }
+  expect(
+    [path.join(srcDir, "shared.js"), ...Object.values(entryPaths)].map(
+      (moduleId) => moduleCounts.get(moduleId),
+    ),
+  ).toEqual([1, 1, 1, 1]);
+  expect(commonBundle.entryId).toBe("bundler:common:browser");
+  expect(
+    result.manifest.bundles.find(
+      (bundle) => bundle.entryId === commonBundle.entryId,
+    ).modules,
+  ).toEqual([path.join(srcDir, "shared.js")]);
+
+  const [aCode, bCode, cCode, commonCode] = await Promise.all([
+    fs.readFile(path.join(outDir, bundlesByEntry.a.fileName), "utf8"),
+    fs.readFile(path.join(outDir, bundlesByEntry.b.fileName), "utf8"),
+    fs.readFile(path.join(outDir, bundlesByEntry.c.fileName), "utf8"),
+    fs.readFile(path.join(outDir, commonBundle.fileName), "utf8"),
+  ]);
+  expect(aCode).toContain(`from "./${bundlesByEntry.b.fileName}"`);
+  expect(aCode).toContain(`from "./${commonBundle.fileName}"`);
+  expect(bCode).toContain(`from "./${commonBundle.fileName}"`);
+  expect(cCode).toContain(`from "./${commonBundle.fileName}"`);
+  expect(
+    [aCode, bCode, cCode, commonCode].filter((code) =>
+      code.includes("__SHARED_EVALUATIONS__"),
+    ),
+  ).toHaveLength(1);
+
+  delete globalThis.__SHARED_EVALUATIONS__;
+  const [aModule, bModule, cModule] = await Promise.all([
+    import(pathToFileURL(path.join(outDir, bundlesByEntry.a.fileName)).href),
+    import(pathToFileURL(path.join(outDir, bundlesByEntry.b.fileName)).href),
+    import(pathToFileURL(path.join(outDir, bundlesByEntry.c.fileName)).href),
+  ]);
+  expect({ a: aModule.a, b: bModule.b, c: cModule.c }).toEqual({
+    a: 21,
+    b: 11,
+    c: 12,
+  });
+  expect(globalThis.__SHARED_EVALUATIONS__).toBe(1);
+  delete globalThis.__SHARED_EVALUATIONS__;
+});
+
 test("rewrites import.meta url", async () => {
   const snapshot = await snapshotFixture("import-meta");
   expect(snapshot).toMatchInlineSnapshot(`
@@ -1120,6 +1237,57 @@ test("runs module-backed worker transforms per environment", async () => {
 
   expect(clientCode).toContain('"client"');
   expect(ssrCode).toContain('"server"');
+});
+
+test("resolves imports introduced by transform plugins", async () => {
+  const projectDir = path.join(outRoot, "introduced-transform-import");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+  await fs.writeFile(
+    path.join(srcDir, "index.js"),
+    "export const value = injected + 1;",
+  );
+  await fs.writeFile(
+    path.join(srcDir, "dependency.js"),
+    "export const injected = 41;",
+  );
+
+  const pluginModule = path.join(
+    rootDir,
+    "packages/bundler/test/plugins/introduced-import-plugin.mjs",
+  );
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: { browser: { conditions: ["default"], target: "browser" } },
+      entries: [{ id: "index", path: path.join(srcDir, "index.js") }],
+      outputs: { outDir, fileName: "[entry].[env].[hash].js" },
+      cacheDir: path.join(projectDir, ".cache"),
+      css: false,
+      maxWorkers: 2,
+      diagnostics: "human",
+      plugins: [{ __bundlerPluginRef: true, module: pluginModule }],
+    },
+    [],
+  );
+
+  expect(result.manifest.bundles[0].modules).toEqual(
+    expect.arrayContaining([
+      path.join(srcDir, "index.js"),
+      path.join(srcDir, "dependency.js"),
+    ]),
+  );
+  const bundleUrl = new URL(
+    result.bundles[0].fileName,
+    pathToFileURL(`${outDir}${path.sep}`),
+  );
+  await expect(import(bundleUrl.href)).resolves.toMatchObject({ value: 42 });
 });
 
 test("caches extra transform outputs and exposes them to build plugins", async () => {
