@@ -11,6 +11,9 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.0.2)
+      '@jridgewell/trace-mapping':
+        specifier: ^0.3.31
+        version: 0.3.31
       '@types/jest':
         specifier: ^29.5.12
         version: 29.5.14
@@ -44,12 +47,15 @@ importers:
 
   examples/react-rsc-basic:
     dependencies:
-      '@babel/plugin-transform-react-jsx':
-        specifier: 7.27.1
-        version: 7.27.1(@babel/core@7.28.6)
+      '@bundler/assets':
+        specifier: workspace:*
+        version: link:../../packages/assets
       '@bundler/bundler':
         specifier: workspace:*
         version: link:../../packages/bundler
+      '@bundler/react-rsc-plugin':
+        specifier: workspace:*
+        version: link:../../packages/react-rsc-plugin
       react:
         specifier: 19.2.5
         version: 19.2.5
@@ -62,12 +68,15 @@ importers:
 
   examples/react-rsc-commerce:
     dependencies:
-      '@babel/plugin-transform-react-jsx':
-        specifier: 7.27.1
-        version: 7.27.1(@babel/core@7.28.6)
+      '@bundler/assets':
+        specifier: workspace:*
+        version: link:../../packages/assets
       '@bundler/bundler':
         specifier: workspace:*
         version: link:../../packages/bundler
+      '@bundler/react-rsc-plugin':
+        specifier: workspace:*
+        version: link:../../packages/react-rsc-plugin
       react:
         specifier: 19.2.5
         version: 19.2.5
@@ -95,6 +104,9 @@ importers:
       '@babel/types':
         specifier: ^7.24.0
         version: 7.28.6
+      '@bundler/assets':
+        specifier: workspace:*
+        version: link:../assets
       '@bundler/shared':
         specifier: workspace:*
         version: link:../shared
@@ -108,10 +120,22 @@ importers:
         specifier: 0.14.2
         version: 0.14.2
 
+  packages/react-rsc-plugin:
+    dependencies:
+      '@babel/plugin-transform-react-jsx':
+        specifier: 7.27.1
+        version: 7.27.1(@babel/core@7.28.6)
+      source-map-support:
+        specifier: 0.5.21
+        version: 0.5.21
+
   packages/shared: {}
 
   packages/worker:
     dependencies:
+      '@ampproject/remapping':
+        specifier: ^2.3.0
+        version: 2.3.0
       '@babel/core':
         specifier: ^7.24.0
         version: 7.28.6
@@ -142,6 +166,10 @@ importers:
         version: 7.28.0
 
 packages:
+
+  '@ampproject/remapping@2.3.0':
+    resolution: {integrity: sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw==}
+    engines: {node: '>=6.0.0'}
 
   '@babel/code-frame@7.28.6':
     resolution: {integrity: sha512-JYgintcMjRiCvS8mMECzaEn+m3PfoQiyqukOMCCVQtoJGYJw8j/8LBJEiqkHLkfwCcs74E3pbAUFNg7d9VNJ+Q==}
@@ -1933,6 +1961,11 @@ packages:
     engines: {node: '>=10'}
 
 snapshots:
+
+  '@ampproject/remapping@2.3.0':
+    dependencies:
+      '@jridgewell/gen-mapping': 0.3.13
+      '@jridgewell/trace-mapping': 0.3.31
 
   '@babel/code-frame@7.28.6':
     dependencies:

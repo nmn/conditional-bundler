@@ -1,0 +1,16 @@
+{
+  "name": "@bundler/react-rsc-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./register-source-maps": "./register-source-maps.cjs",
+    "./transform": "./transform.mjs"
+  },
+  "dependencies": {
+    "@babel/plugin-transform-react-jsx": "7.27.1",
+    "source-map-support": "0.5.21"
+  }
+}

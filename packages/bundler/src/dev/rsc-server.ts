@@ -6,6 +6,7 @@ import type { Socket } from "node:net";
 import { buildProject, type BuildResult } from "../builder.js";
 import type { BundlerConfig } from "../config.js";
 import { resolveDevOptions } from "./options.js";
+import { readDevAsset, resolveConditionalPatch } from "./conditional-assets.js";
 import {
   acceptWebSocket,
   broadcast,
@@ -131,15 +132,13 @@ export async function startRscDevServer(
       }
       current = next;
       if (action.type === "patch") {
-        broadcast(
-          clients,
-          addClientPatchImports(
-            action.patch,
-            next,
-            options.clientEntryId,
-            ++clientPatchVersion,
-          ),
+        const patchWithImports = addClientPatchImports(
+          action.patch,
+          next,
+          options.clientEntryId,
+          ++clientPatchVersion,
         );
+        broadcast(clients, await resolveConditionalPatch(patchWithImports));
       } else if (action.type === "reload") {
         broadcast(clients, { type: "rsc-refresh" });
       }
@@ -427,24 +426,14 @@ async function serveAsset(
   fileName: string,
   response: http.ServerResponse,
 ): Promise<void> {
-  const bundle = build.bundles.find((item) => item.fileName === fileName);
-  const asset = build.manifest.assets?.find(
-    (item) => item.fileName === fileName,
-  );
-  if (!bundle && !asset) {
+  const served = await readDevAsset(config, build, fileName);
+  if (!served) {
     response.statusCode = 404;
     response.end("Not found");
     return;
   }
-  response.setHeader(
-    "content-type",
-    asset?.contentType ?? "text/javascript; charset=utf-8",
-  );
-  response.end(
-    await fsp.readFile(
-      path.join(config.outputs.outDir, asset?.fileName ?? fileName),
-    ),
-  );
+  response.setHeader("content-type", served.contentType);
+  response.end(served.body);
 }
 
 function matchAssetRequest(pathname: string): string | null {

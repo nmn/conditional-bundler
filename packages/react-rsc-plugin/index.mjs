@@ -15,16 +15,17 @@ const reactPackagePrefixes = [
   "react-server-dom-webpack/",
 ];
 
-export default function rscExamplePlugin(options) {
-  return createRscExamplePlugin(options);
+const requireFromPlugin = createRequire(import.meta.url);
+
+export default function reactRscPlugin(options) {
+  return createReactRscPlugin(options);
 }
 
-export function createRscExamplePlugin(options) {
+export function createReactRscPlugin(options) {
   const root = options.root;
   if (!root) {
-    throw new Error("rscExamplePlugin requires a project root.");
+    throw new Error("reactRscPlugin requires a project root.");
   }
-  const requireFromRoot = createRequire(`${root}/package.json`);
   const clientEnv = options.clientEnv ?? options.client?.env ?? "client";
   const rscEnv = options.rscEnv ?? options.server?.env ?? "rsc";
   const clientManifestFile =
@@ -132,11 +133,11 @@ export function createRscExamplePlugin(options) {
     transform: {
       default: [
         [
-          requireFromRoot.resolve("@babel/plugin-transform-react-jsx"),
+          requireFromPlugin.resolve("@babel/plugin-transform-react-jsx"),
           jsxOptions,
         ],
         [
-          "./rsc-transform-babel-plugin.mjs",
+          "./transform.mjs",
           { root, clientEnv, rscEnv, discoverClientEntrypoints },
         ],
       ],

@@ -37,7 +37,7 @@ import {
   type HmrCellRecord,
 } from "./dev/hmr-linker.js";
 import { resolveDevOptions, type ResolvedDevOptions } from "./dev/options.js";
-import { concatParts } from "./concat.js";
+import { assembleBundle, stringifySourceMap } from "./sourcemap/compose.js";
 import type { BundleManifest } from "./manifest.js";
 import { normalizePlugins } from "./plugins/normalize.js";
 import { createCssPlugin } from "./plugins/css.js";
@@ -55,6 +55,7 @@ import {
   findPkgRoot,
   contentHash,
   contentHashShort,
+  normalizePosixPath,
   extractConditionNames,
   readJsonIfExists,
   writeJsonAtomic,
@@ -71,6 +72,7 @@ import type {
   ModuleResolution,
   NormalizedPlugin,
   WorkerTransformProfile,
+  BundlePart,
 } from "./plugins/types.js";
 import type { ModuleGraph } from "./graph/build.js";
 import type {
@@ -82,7 +84,12 @@ import type {
 } from "@bundler/shared";
 
 export type BuildResult = {
-  bundles: Array<{ envId: string; entryId: string; fileName: string }>;
+  bundles: Array<{
+    envId: string;
+    entryId: string;
+    fileName: string;
+    mapFileName?: string;
+  }>;
   manifest: BundleManifest;
   diagnostics: Diagnostic[];
 };
@@ -98,14 +105,18 @@ type BundlePlan = {
   envId: string;
   entryId: string;
   exportMode: "entry" | "dynamic";
-  parts: string[];
+  parts: BundlePart[];
   dynamicImports: DynamicImportRef[];
   diagnostics: Diagnostic[];
   modules: string[];
   conditions: Array<{ moduleId: string; condition: ConditionExpr }>;
   conditionNames: string[];
-  map?: string;
   hmr?: HmrBundleRecord;
+};
+
+type ResolvedSourceMapOutput = {
+  mode: "external" | "hidden";
+  sourcesContent: boolean;
 };
 
 type BundlePlanDraftWithHmr = BundlePlanDraft & {
@@ -163,6 +174,7 @@ export async function buildProject(
   const explicitEntries = collectEntries(config.entries);
   const userPlugins = [...(config.plugins ?? []), ...plugins];
   const allPlugins = [...createBuiltinPlugins(config), ...userPlugins];
+  const sourceMapOutput = resolveSourceMapOutput(config.outputs.sourceMap);
   const pendingFiles: PendingEmitFile[] = [];
   const { plugins: normalizedPlugins, workerProfile } =
     await normalizePlugins(allPlugins);
@@ -237,7 +249,9 @@ export async function buildProject(
         );
       }
       normalizeGraphConditions(graph);
-      resolveExportTables(Array.from(graph.nodes.values()), graph.nodes);
+      resolveExportTables(Array.from(graph.nodes.values()), graph.nodes, {
+        hmr: devOptions.hmr,
+      });
     }
 
     const bundlePlans: BundlePlan[] = [];
@@ -291,18 +305,18 @@ export async function buildProject(
       { envId: string; entryId: string; fileName: string; modules: string[] }
     >();
     for (const plan of bundlePlans) {
+      const assembled = assembleBundle(plan.parts);
       const finalBundle = await runAfterCombine(normalizedPlugins, {
         envId: plan.envId,
         entryId: plan.entryId,
         exportMode: plan.exportMode,
-        code: concatParts(plan.parts),
-        map: plan.map,
+        code: assembled.code,
+        map: sourceMapOutput ? stringifySourceMap(assembled.map) : undefined,
         emitFile(file) {
           pendingFiles.push(file);
         },
       });
-      plan.parts = [finalBundle.code];
-      plan.map = finalBundle.map;
+      plan.parts = [{ code: finalBundle.code, map: finalBundle.map }];
       const hash = contentHashShort(finalBundle.code);
       const fileName = config.outputs.fileName
         ? config.outputs.fileName
@@ -327,8 +341,12 @@ export async function buildProject(
     }
 
     await fs.mkdir(config.outputs.outDir, { recursive: true });
-    const bundles: Array<{ envId: string; entryId: string; fileName: string }> =
-      [];
+    const bundles: Array<{
+      envId: string;
+      entryId: string;
+      fileName: string;
+      mapFileName?: string;
+    }> = [];
     for (const plan of bundlePlans) {
       const bundleOutput = bundleOutputs.get(`${plan.envId}:${plan.entryId}`);
       if (!bundleOutput) {
@@ -341,17 +359,33 @@ export async function buildProject(
         bundleMap,
         plan.envId,
       );
-      const patchedBundle = concatParts([header, ...plan.parts]);
+      const finalParts = [{ code: header }, ...plan.parts];
+      const assembled = assembleBundle(finalParts, bundleOutput.fileName);
+      const mapFileName = sourceMapOutput
+        ? `${bundleOutput.fileName}.map`
+        : undefined;
+      const patchedBundle =
+        sourceMapOutput?.mode === "external" && mapFileName
+          ? `${assembled.code}\n//# sourceMappingURL=${path.basename(mapFileName)}`
+          : assembled.code;
 
       const outputPath = path.join(
         config.outputs.outDir,
         bundleOutput.fileName,
       );
       await fs.writeFile(outputPath, patchedBundle, "utf8");
+      if (mapFileName) {
+        await fs.writeFile(
+          path.join(config.outputs.outDir, mapFileName),
+          stringifySourceMap(assembled.map),
+          "utf8",
+        );
+      }
       bundles.push({
         envId: plan.envId,
         entryId: plan.entryId,
         fileName: bundleOutput.fileName,
+        mapFileName,
       });
     }
 
@@ -363,6 +397,7 @@ export async function buildProject(
         ...bundle,
         type: "script",
         contentType: "text/javascript; charset=utf-8",
+        mapFileName: bundle.mapFileName,
         modules:
           bundleOutputs.get(`${bundle.envId}:${bundle.entryId}`)?.modules ?? [],
         conditionNames:
@@ -378,25 +413,41 @@ export async function buildProject(
         ]),
       ),
       emittedFiles: [],
-      assets: bundles.map((bundle) => {
-        const plan = bundlePlans.find(
-          (candidate) =>
-            candidate.envId === bundle.envId &&
-            candidate.entryId === bundle.entryId,
-        );
-        return {
-          fileName: bundle.fileName,
-          type: "script",
-          contentType: "text/javascript; charset=utf-8",
-          envId: bundle.envId,
-          entryId: bundle.entryId,
-          bundleKey: `${bundle.envId}:${bundle.entryId}`,
-          modules:
-            bundleOutputs.get(`${bundle.envId}:${bundle.entryId}`)?.modules ??
-            [],
-          conditionNames: plan?.conditionNames ?? [],
-        };
-      }),
+      assets: [
+        ...bundles.map((bundle) => {
+          const plan = bundlePlans.find(
+            (candidate) =>
+              candidate.envId === bundle.envId &&
+              candidate.entryId === bundle.entryId,
+          );
+          return {
+            fileName: bundle.fileName,
+            type: "script" as const,
+            contentType: "text/javascript; charset=utf-8",
+            envId: bundle.envId,
+            entryId: bundle.entryId,
+            bundleKey: `${bundle.envId}:${bundle.entryId}`,
+            modules:
+              bundleOutputs.get(`${bundle.envId}:${bundle.entryId}`)?.modules ??
+              [],
+            conditionNames: plan?.conditionNames ?? [],
+          };
+        }),
+        ...bundles.flatMap((bundle) =>
+          bundle.mapFileName
+            ? [
+                {
+                  fileName: bundle.mapFileName,
+                  type: "source-map" as const,
+                  contentType: "application/json; charset=utf-8",
+                  envId: bundle.envId,
+                  entryId: bundle.entryId,
+                  bundleKey: `${bundle.envId}:${bundle.entryId}`,
+                },
+              ]
+            : [],
+        ),
+      ],
       metadata: {
         conditions: {
           byBundle: Object.fromEntries(
@@ -525,6 +576,7 @@ function normalizeConfigForCache(
       outDir: path.resolve(config.outputs.outDir),
       fileName: config.outputs.fileName,
       manifestFile: config.outputs.manifestFile,
+      sourceMap: config.outputs.sourceMap,
     },
     workerProfile,
     plugins: serializeConfigValue(plugins),
@@ -567,6 +619,27 @@ function serializeConfigValue(value: unknown): unknown {
     );
   }
   return value;
+}
+
+function resolveSourceMapOutput(
+  sourceMap: BundlerConfig["outputs"]["sourceMap"],
+): ResolvedSourceMapOutput | null {
+  if (!sourceMap) {
+    return null;
+  }
+  if (typeof sourceMap === "string") {
+    if (sourceMap !== "external" && sourceMap !== "hidden") {
+      throw new Error(`Unsupported source map mode '${sourceMap}'.`);
+    }
+    return { mode: sourceMap, sourcesContent: true };
+  }
+  if (sourceMap.mode !== "external" && sourceMap.mode !== "hidden") {
+    throw new Error(`Unsupported source map mode '${String(sourceMap.mode)}'.`);
+  }
+  return {
+    mode: sourceMap.mode,
+    sourcesContent: sourceMap.sourcesContent ?? true,
+  };
 }
 
 function readFunctionCacheDirective(source: string): string | null {
@@ -695,7 +768,7 @@ async function createBundlePlan(
       ),
     ),
   ).sort();
-  const parts: string[] = [];
+  const parts: BundlePart[] = [];
   const dynamicImports: DynamicImportRef[] = [];
   const namespaceDemanded = collectNamespaceDemands(selection, graph);
   const hmrCells: HmrCellRecord[] = [];
@@ -716,18 +789,18 @@ async function createBundlePlan(
   }
 
   if (useHmr) {
-    parts.push(
-      emitHmrPrelude({
+    parts.push({
+      code: emitHmrPrelude({
         connect:
           exportMode === "entry" &&
           config.envs[graph.envId]?.target === "browser",
         reactRefresh:
           useReactRefresh && config.envs[graph.envId]?.target === "browser",
       }),
-    );
+    });
     const declarations = emitHmrSymbolDeclarations(hmrSymbols);
     if (declarations) {
-      parts.push(declarations);
+      parts.push({ code: declarations });
     }
   }
 
@@ -738,7 +811,7 @@ async function createBundlePlan(
     }
     const condition = conditions.get(node.id);
     if (condition) {
-      parts.push(emitConditionalStart(condition));
+      parts.push({ code: emitConditionalStart(condition) });
     }
 
     const orderedCells = useHmr
@@ -752,24 +825,24 @@ async function createBundlePlan(
               collectExternalIdentifierDeps(graph, node, cell),
             );
             hmrCells.push(hmrCell);
-            return hmrCell.code;
+            return { code: hmrCell.code, map: hmrCell.map };
           }),
         )
-      : await Promise.all(orderedCells.map(readCellSource));
-    parts.push(...cellParts.filter((part): part is string => part.length > 0));
+      : await Promise.all(orderedCells.map(readCellPart));
+    parts.push(...cellParts.filter((part) => part.code.length > 0));
 
     if (namespaceDemanded.has(node.id) && node.exportTable) {
-      parts.push(emitNamespaceObject(node));
+      parts.push({ code: emitNamespaceObject(node) });
     }
     if (useHmr && useReactRefresh) {
       const registrations = emitReactRefreshRegistrations(node, selectedCells);
       if (registrations) {
-        parts.push(registrations);
+        parts.push({ code: registrations });
       }
     }
 
     if (condition) {
-      parts.push(emitConditionalEnd());
+      parts.push({ code: emitConditionalEnd() });
     }
 
     for (const dyn of node.irHeader.dynamicImports) {
@@ -788,9 +861,9 @@ async function createBundlePlan(
     ? emitHmrExportFooter(graph.nodes.get(entryId))
     : exportMode === "entry"
       ? emitEntryExports(graph.nodes.get(entryId))
-      : emitDynamicBundleExports(orderedFiles, selection);
+      : emitDynamicBundleExports(graph.nodes.get(entryId));
   if (exportFooter) {
-    parts.push(exportFooter);
+    parts.push({ code: exportFooter });
   }
 
   return {
@@ -921,6 +994,12 @@ async function transformModule(
     jsx: module.filePath.endsWith(".jsx") || module.filePath.endsWith(".tsx"),
     ts: module.filePath.endsWith(".ts") || module.filePath.endsWith(".tsx"),
   };
+  const sourceMapOutput = resolveSourceMapOutput(config.outputs.sourceMap);
+  const outputDir = path.resolve(config.outputs.outDir);
+  const sourceFileName = module.virtual
+    ? `bundler:///${encodeURIComponent(module.id)}`
+    : normalizePosixPath(path.relative(outputDir, module.filePath)) ||
+      path.basename(module.filePath);
   const requestBase = {
     id: module.id,
     realPath: module.filePath,
@@ -933,6 +1012,13 @@ async function transformModule(
     syntax,
     codeByEnv: loadedModule.codeByEnv,
     mapByEnv: loadedModule.mapByEnv,
+    sourceMap: sourceMapOutput
+      ? {
+          sourceFileName,
+          outputDir,
+          sourcesContent: sourceMapOutput.sourcesContent,
+        }
+      : undefined,
     discoveredEntrypointsByEnv: loadedModule.discoveredEntrypointsByEnv,
     extraOutputsByEnv: loadedModule.extraOutputsByEnv,
     workerProfile,
@@ -1655,14 +1741,23 @@ function getCellById(node: ModuleNode, cellId: string): CellRecord | undefined {
   return getAllCells(node).find((cell) => cell.id === cellId);
 }
 
-async function readCellSource(cell: CellRecord): Promise<string> {
-  if (cell.code != null) {
-    return cell.code;
+async function readCellPart(cell: CellRecord): Promise<BundlePart> {
+  const code =
+    cell.code != null
+      ? cell.code
+      : cell.artifactPath
+        ? await fs.readFile(cell.artifactPath, "utf8")
+        : null;
+  if (code == null) {
+    throw new Error(`Cell '${cell.id}' is missing code and artifactPath.`);
   }
-  if (cell.artifactPath) {
-    return fs.readFile(cell.artifactPath, "utf8");
-  }
-  throw new Error(`Cell '${cell.id}' is missing code and artifactPath.`);
+  const map =
+    cell.map != null
+      ? cell.map
+      : cell.mapArtifactPath
+        ? await fs.readFile(cell.mapArtifactPath, "utf8")
+        : undefined;
+  return { code, map };
 }
 
 function findCellProvidingSymbol(
@@ -1702,26 +1797,13 @@ function emitEntryExports(node: ModuleNode | undefined): string {
   return `export { ${parts.join(", ")} };`;
 }
 
-function emitDynamicBundleExports(
-  nodes: ModuleNode[],
-  selection: Map<string, Set<string>>,
-): string {
-  const exportedSymbols = new Set<string>();
-
-  for (const node of nodes) {
-    if (!node.exportTable) {
-      continue;
-    }
-    const selectedCells = selection.get(node.id);
-    if (!selectedCells) {
-      continue;
-    }
-    for (const provider of node.exportTable.values()) {
-      if (selectedCells.has(provider.cellId)) {
-        exportedSymbols.add(provider.symbol);
-      }
-    }
-  }
+function emitDynamicBundleExports(node: ModuleNode | undefined): string {
+  const exportedSymbols = new Set(
+    Array.from(
+      node?.exportTable?.values() ?? [],
+      (provider) => provider.symbol,
+    ),
+  );
 
   if (exportedSymbols.size === 0) {
     return "";

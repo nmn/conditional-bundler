@@ -29,6 +29,10 @@ import {
 
 export type CoreTransformOptions = {
   importAttrAllow: string[];
+  sourceMap?: {
+    sourceFileName: string;
+    sourcesContent: boolean;
+  };
 };
 
 type ResolvedImportInfo = {
@@ -67,7 +71,7 @@ export function transformWithCore(
 
   const ast = parse(input.code, {
     sourceType: "module",
-    sourceFilename: input.realPath,
+    sourceFilename: options.sourceMap?.sourceFileName ?? input.realPath,
     plugins: getParserPlugins(input),
   });
 
@@ -453,7 +457,11 @@ export function transformWithCore(
 
   const output = generate(
     ast,
-    { sourceMaps: true, sourceFileName: input.realPath },
+    {
+      sourceMaps: Boolean(options.sourceMap),
+      sourceFileName: options.sourceMap?.sourceFileName ?? input.realPath,
+      shouldPrintComment: shouldPrintSourceComment,
+    },
     input.code,
   );
   const dynamicImports: DynamicImport[] = Array.from(
@@ -489,6 +497,7 @@ export function transformWithCore(
     conditionalBindingCells,
     generate,
     traverse,
+    options.sourceMap,
   );
   const cells = [...conditionalBindingCells, ...statementCells].sort(
     (left, right) => left.sourceOrder - right.sourceOrder,
@@ -777,7 +786,7 @@ function buildConditionalBindingCells(
       }
       const localName = `${prefix}_${namespaceLocal}`;
       const lines = [
-        `let ${localName};`,
+        ...(input.dev?.hmr ? [] : [`let ${localName};`]),
         emitConditionalStart(entry.condition),
         `${localName} = __NS__${depPrefix};`,
         emitConditionalEnd(),
@@ -834,7 +843,7 @@ function buildConditionalBindingCells(
     for (const spec of entry.specifiers) {
       const localName = `${prefix}_${spec.local}`;
       const lines = [
-        `let ${localName};`,
+        ...(input.dev?.hmr ? [] : [`let ${localName};`]),
         emitConditionalStart(entry.condition),
         `${localName} = ${conditionalImportTarget(entry, spec, depPrefix)};`,
         emitConditionalEnd(),
@@ -974,6 +983,14 @@ function rewriteImportsInAst(
   }
 }
 
+type StatementCellDraft = Omit<
+  CellRecord,
+  "code" | "map" | "artifactPath" | "mapArtifactPath"
+> & {
+  statements: Array<t.Statement | t.ModuleDeclaration>;
+  endSourceOrder: number;
+};
+
 function collectStatementCells(
   ast: t.File,
   input: TransformInput,
@@ -983,6 +1000,7 @@ function collectStatementCells(
   conditionalCells: CellRecord[],
   generate: typeof import("@babel/generator").default,
   traverse: typeof import("@babel/traverse").default,
+  sourceMap: CoreTransformOptions["sourceMap"],
 ): CellRecord[] {
   const programPath = getProgramPath(ast, traverse);
   if (!programPath) {
@@ -1009,7 +1027,7 @@ function collectStatementCells(
     ),
   );
 
-  const cells: CellRecord[] = programPath
+  const drafts: StatementCellDraft[] = programPath
     .get("body")
     .map((statementPath, index) => {
       const statement = statementPath.node as t.Statement | t.ModuleDeclaration;
@@ -1020,14 +1038,13 @@ function collectStatementCells(
         internalSymbols,
         externalSymbolMap,
       );
-      const code = generate(statement, { sourceMaps: false }).code;
-
       return {
         id: `${input.realPath}#stmt:${index}`,
         fileId: input.realPath,
         sourceOrder: index,
+        endSourceOrder: index,
         kind: "worker",
-        code,
+        statements: [statement],
         provides,
         internalDeps,
         externalDeps,
@@ -1035,21 +1052,103 @@ function collectStatementCells(
       };
     });
 
-  return mergeAdjacentStatementCells(cells);
+  return mergeAdjacentStatementCells(drafts).map((draft) => {
+    const statements = input.dev?.hmr
+      ? lowerHmrCellStatements(draft.statements)
+      : draft.statements;
+    const generated = generate(
+      t.program(statements),
+      {
+        sourceMaps: Boolean(sourceMap),
+        sourceFileName: sourceMap?.sourceFileName ?? input.realPath,
+        shouldPrintComment: shouldPrintSourceComment,
+      },
+      input.code,
+    );
+    const generatedMap = generated.map as
+      | (Record<string, unknown> & { sourcesContent?: unknown })
+      | null;
+    if (generatedMap && sourceMap && !sourceMap.sourcesContent) {
+      delete generatedMap.sourcesContent;
+    }
+    return {
+      id: draft.id,
+      fileId: draft.fileId,
+      sourceOrder: draft.sourceOrder,
+      kind: draft.kind,
+      code: generated.code,
+      map: generatedMap ? JSON.stringify(generatedMap) : undefined,
+      provides: draft.provides,
+      internalDeps: draft.internalDeps,
+      externalDeps: draft.externalDeps,
+      providerDeps: draft.providerDeps,
+      eager: draft.eager,
+    };
+  });
 }
 
-function mergeAdjacentStatementCells(cells: CellRecord[]): CellRecord[] {
-  const merged: Array<CellRecord & { endSourceOrder: number }> = [];
+function lowerHmrCellStatements(
+  statements: Array<t.Statement | t.ModuleDeclaration>,
+): Array<t.Statement | t.ModuleDeclaration> {
+  return statements.flatMap((statement) => {
+    if (t.isVariableDeclaration(statement)) {
+      const assignments = statement.declarations.flatMap((declaration) => {
+        if (!declaration.init || t.isVoidPattern(declaration.id)) {
+          return [];
+        }
+        const assignment = t.assignmentExpression(
+          "=",
+          t.cloneNode(declaration.id, true),
+          t.cloneNode(declaration.init, true),
+        );
+        t.inherits(assignment, declaration);
+        return [assignment];
+      });
+      if (assignments.length === 0) {
+        return [];
+      }
+      const expression =
+        assignments.length === 1
+          ? assignments[0]
+          : t.sequenceExpression(assignments);
+      const lowered = t.expressionStatement(expression);
+      t.inherits(lowered, statement);
+      return [lowered];
+    }
+    if (
+      (t.isFunctionDeclaration(statement) || t.isClassDeclaration(statement)) &&
+      statement.id
+    ) {
+      const declaration = t.cloneNode(statement, true);
+      const expression = t.toExpression(declaration);
+      const assignment = t.assignmentExpression(
+        "=",
+        t.cloneNode(statement.id, true),
+        expression,
+      );
+      t.inherits(assignment, statement);
+      const lowered = t.expressionStatement(assignment);
+      t.inherits(lowered, statement);
+      return [lowered];
+    }
+    return [statement];
+  });
+}
+
+function mergeAdjacentStatementCells(
+  cells: StatementCellDraft[],
+): StatementCellDraft[] {
+  const merged: StatementCellDraft[] = [];
 
   for (const cell of cells) {
     const previous = merged.at(-1);
     if (!previous || !shouldMergeIntoPrevious(previous, cell)) {
-      merged.push({ ...cell, endSourceOrder: cell.sourceOrder });
+      merged.push({ ...cell });
       continue;
     }
 
     const previousProvides = new Set(previous.provides);
-    previous.code = `${previous.code}\n${cell.code}`;
+    previous.statements.push(...cell.statements);
     previous.provides = dedupeStrings([...previous.provides, ...cell.provides]);
     previous.internalDeps = dedupeStrings([
       ...previous.internalDeps,
@@ -1063,23 +1162,12 @@ function mergeAdjacentStatementCells(cells: CellRecord[]): CellRecord[] {
     previous.endSourceOrder = cell.sourceOrder;
   }
 
-  return merged.map((cell) => ({
-    id: cell.id,
-    fileId: cell.fileId,
-    sourceOrder: cell.sourceOrder,
-    kind: cell.kind,
-    code: cell.code,
-    provides: cell.provides,
-    internalDeps: cell.internalDeps,
-    externalDeps: cell.externalDeps,
-    providerDeps: cell.providerDeps,
-    eager: cell.eager,
-  }));
+  return merged;
 }
 
 function shouldMergeIntoPrevious(
-  previous: CellRecord & { endSourceOrder: number },
-  current: CellRecord,
+  previous: StatementCellDraft,
+  current: StatementCellDraft,
 ): boolean {
   if (!current.eager) {
     return false;
@@ -1089,6 +1177,10 @@ function shouldMergeIntoPrevious(
   }
   const previousProvides = new Set(previous.provides);
   return current.internalDeps.some((dep) => previousProvides.has(dep));
+}
+
+function shouldPrintSourceComment(comment: string): boolean {
+  return !/[@#]\s*sourceMappingURL\s*=/.test(comment);
 }
 
 function dedupeStrings(values: string[]): string[] {

@@ -1,4 +1,5 @@
 import { getEnvListValue, getEnvValue } from "./normalize.js";
+import { parseSourceMap } from "../sourcemap/compose.js";
 import type {
   AfterCombineContext,
   BeforeCombineContext,
@@ -61,13 +62,13 @@ export async function runBeforeCombine(
   plugins: NormalizedPlugin[],
   context: BeforeCombineContext,
 ): Promise<BundlePlanDraft[]> {
-  let current = context.plans;
+  let current = normalizeBundlePlans(context.plans);
   for (const plugin of plugins) {
     const hooks = getEnvListValue(plugin.beforeCombine, context.envId);
     for (const hook of hooks) {
       const next = await hook({ ...context, plans: current });
       if (next) {
-        current = next;
+        current = normalizeBundlePlans(next);
       }
     }
   }
@@ -84,10 +85,23 @@ export async function runAfterCombine(
     for (const hook of hooks) {
       const next = await hook({ ...context, ...current });
       if (typeof next === "string") {
+        if (current.map && next !== current.code) {
+          throw new Error(
+            `Plugin '${plugin.name}' changed combined code without returning an updated source map.`,
+          );
+        }
         current = { code: next, map: current.map };
         continue;
       }
       if (next) {
+        if (current.map && next.code !== current.code && !next.map) {
+          throw new Error(
+            `Plugin '${plugin.name}' changed combined code without returning an updated source map.`,
+          );
+        }
+        if (next.map) {
+          parseSourceMap(next.map);
+        }
         current = {
           code: next.code,
           map: next.map ?? current.map,
@@ -96,6 +110,15 @@ export async function runAfterCombine(
     }
   }
   return current;
+}
+
+function normalizeBundlePlans(plans: BundlePlanDraft[]): BundlePlanDraft[] {
+  return plans.map((plan) => ({
+    ...plan,
+    orderedParts: (plan.orderedParts as unknown[]).map((part) =>
+      typeof part === "string" ? { code: part } : part,
+    ),
+  })) as BundlePlanDraft[];
 }
 
 export async function runBuildEnd(

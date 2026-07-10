@@ -86,7 +86,9 @@ export type CellRecord = {
   sourceOrder: number;
   kind: "worker" | "conditional" | "generated";
   code?: string;
+  map?: string;
   artifactPath?: string;
+  mapArtifactPath?: string;
   provides: string[];
   internalDeps: string[];
   externalDeps: CellExternalDep[];

@@ -1,42 +1,141 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { PassThrough, Readable } from "node:stream";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  createEnvironmentConditionEvaluator,
+  transformConditionalBundle,
+} from "@bundler/assets/runtime";
 import React from "react";
-import { renderToPipeableStream } from "react-server-dom-webpack/server.node";
+import { renderToPipeableStream as renderHtmlToPipeableStream } from "react-dom/server";
+import { createFromNodeStream } from "react-server-dom-webpack/client.node";
+import { renderToPipeableStream as renderRscToPipeableStream } from "react-server-dom-webpack/server.node";
 import { registerClientReference as __registerClientReference } from "react-server-dom-webpack/server";
 import App from "./App.jsx";
 
 globalThis.__registerClientReference = __registerClientReference;
 
 const distDir = path.dirname(fileURLToPath(import.meta.url));
-const manifest = JSON.parse(
-  fs.readFileSync(path.join(distDir, "manifest.json"), "utf8"),
-);
-const clientBundle = manifest.bundles.find(
-  (bundle) =>
-    bundle.envId === "client" && bundle.entryId.endsWith("client.jsx"),
-);
-const clientManifest = JSON.parse(
-  fs.readFileSync(path.join(distDir, "rsc-client-manifest.json"), "utf8"),
-);
+const evaluateCondition = createEnvironmentConditionEvaluator(process.env);
+const transformedAssetCache = new Map();
 
-const server = http.createServer(async (request, response) => {
-  if (request.url === "/rsc") {
+export function createBasicServer(context = {}) {
+  return http.createServer((request, response) => {
+    void handleBasicRequest({
+      ...context,
+      request,
+      response,
+      url: new URL(request.url ?? "/", "http://localhost"),
+    }).catch((error) => {
+      response.statusCode = 500;
+      response.end("Internal server error");
+      console.error(error);
+    });
+  });
+}
+
+export function disposeBasicServer() {}
+
+export async function handleBasicRequest({
+  request: _request,
+  response,
+  url,
+  clientBundle,
+  dist = distDir,
+} = {}) {
+  const context = loadBasicContext({ dist, clientBundle });
+
+  if (url.pathname === "/rsc") {
     response.setHeader("content-type", "text/x-component");
-    renderToPipeableStream(<App />, clientManifest).pipe(response);
+    renderRscPayload(context.clientManifest).pipe(response);
     return;
   }
 
-  if (request.url?.startsWith("/assets/")) {
-    const fileName = path.basename(request.url);
-    response.setHeader("content-type", "text/javascript");
-    response.end(fs.readFileSync(path.join(distDir, fileName), "utf8"));
+  if (url.pathname.startsWith("/assets/")) {
+    const fileName = path.basename(url.pathname);
+    const asset = context.manifest.assets?.find(
+      (candidate) => candidate.fileName === fileName,
+    );
+    response.setHeader(
+      "content-type",
+      asset?.contentType ?? "application/octet-stream",
+    );
+    response.end(await readStaticAsset(dist, fileName, asset));
     return;
   }
 
-  response.setHeader("content-type", "text/html");
-  response.end(`<!doctype html>
+  response.setHeader("content-type", "text/html; charset=utf-8");
+  response.end(await renderHtml(url, context, dist));
+}
+
+async function readStaticAsset(dist, fileName, asset) {
+  const contents = fs.readFileSync(path.join(dist, fileName), "utf8");
+  if (asset?.type !== "script") {
+    return contents;
+  }
+  const transformed = await transformConditionalBundle(
+    contents,
+    evaluateCondition,
+    {
+      optionSet: asset.conditionNames
+        ? { conditions: asset.conditionNames }
+        : undefined,
+      cache: {
+        get(key) {
+          return transformedAssetCache.get(`${fileName}:${key}`);
+        },
+        set(key, code) {
+          transformedAssetCache.set(`${fileName}:${key}`, code);
+        },
+      },
+    },
+  );
+  return transformed.code;
+}
+
+function loadBasicContext({ dist = distDir, clientBundle } = {}) {
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(dist, "manifest.json"), "utf8"),
+  );
+  const resolvedClientBundle =
+    clientBundle ??
+    manifest.bundles.find(
+      (bundle) =>
+        bundle.envId === "client" && bundle.entryId.endsWith("client.jsx"),
+    );
+  const clientManifest = JSON.parse(
+    fs.readFileSync(path.join(dist, "rsc-client-manifest.json"), "utf8"),
+  );
+
+  if (!resolvedClientBundle) {
+    throw new Error("Missing client bundle. Run the bundler build first.");
+  }
+
+  return {
+    manifest,
+    clientBundle: resolvedClientBundle,
+    clientManifest,
+    serverConsumerManifest: createServerConsumerManifest(clientManifest),
+  };
+}
+
+if (!globalThis.__BUNDLER_RSC_DEV__) {
+  const server = createBasicServer();
+  const port = Number(process.env.PORT ?? 3100);
+  server.listen(port, () => {
+    console.log(`Basic RSC example running at http://localhost:${port}`);
+  });
+}
+
+function renderRscPayload(clientManifest) {
+  return renderRscToPipeableStream(<App />, clientManifest);
+}
+
+async function renderHtml(url, context, dist) {
+  const initialRoute = await renderInitialRoute({ context, dist });
+  const routePath = `${url.pathname}${url.search}`;
+  return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
@@ -45,69 +144,148 @@ const server = http.createServer(async (request, response) => {
     <style>${style}</style>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="importmap">${JSON.stringify(importMap)}</script>
-    <script type="module">${webpackRscShim}</script>
-    <script type="module" src="/assets/${clientBundle.fileName}"></script>
+    <div id="root">${initialRoute.markup}</div>
+    <script id="__BUNDLER_RSC_CHUNKS__" type="application/json">${serializeJsonForScript(createRscChunkMap(context.clientManifest))}</script>
+    <script id="__BUNDLER_RSC_DATA__" type="application/json" data-path="${escapeAttribute(routePath)}">${serializeJsonForScript(initialRoute.flight)}</script>
+    <script type="module" src="/assets/${context.clientBundle.fileName}"></script>
   </body>
-</html>`);
-});
-
-server.listen(3000, () => {
-  console.log("React RSC example running at http://localhost:3000");
-});
-
-const importMap = {
-  imports: {
-    react: cdn("react"),
-    "react/jsx-runtime": cdn("react/jsx-runtime"),
-    "react-dom": cdn("react-dom"),
-    "react-dom/client": cdn("react-dom/client"),
-    "react-server-dom-webpack/client.browser": cdn(
-      "react-server-dom-webpack/client.browser",
-    ),
-  },
-};
-
-function cdn(specifier) {
-  const [pkg, ...subpath] = specifier.split("/");
-  const packageName = pkg.startsWith("@") ? `${pkg}/${subpath.shift()}` : pkg;
-  const rest = subpath.length > 0 ? `/${subpath.join("/")}` : "";
-  const dev = process.env.NODE_ENV === "production" ? "" : "?dev";
-  return `https://esm.sh/${packageName}@19.2.5${rest}${dev}`;
+</html>`;
 }
 
-const webpackRscShim = `
-const moduleCache = new Map();
-const loadChunk = (chunkId) => {
-  const fileName = globalThis.__webpack_require__.u(chunkId);
-  const href = fileName.startsWith("/") ? fileName : "/assets/" + fileName;
-  const loading = import(href).then((module) => {
-    moduleCache.set(chunkId, module);
-    moduleCache.set(fileName, module);
-    return module;
+async function renderInitialRoute({ context, dist }) {
+  installNodeChunkLoader(dist, context.clientManifest);
+  const flight = await renderRscPayloadToString(context.clientManifest);
+  const model = await createFromNodeStream(
+    Readable.from([flight]),
+    context.serverConsumerManifest,
+  );
+  return {
+    flight,
+    markup: await renderReactMarkup(model),
+  };
+}
+
+function renderRscPayloadToString(clientManifest) {
+  return new Promise((resolve, reject) => {
+    const output = new PassThrough();
+    let payload = "";
+    output.setEncoding("utf8");
+    output.on("data", (chunk) => {
+      payload += chunk;
+    });
+    output.on("end", () => resolve(payload));
+    output.on("error", reject);
+    renderRscPayload(clientManifest).pipe(output);
   });
-  moduleCache.set(chunkId, loading);
-  return loading;
-};
-globalThis.__webpack_require__ = (id) => {
-  const module = moduleCache.get(id);
-  if (!module) {
-    throw new Error("RSC client chunk has not loaded: " + id);
+}
+
+function renderReactMarkup(model) {
+  return new Promise((resolve, reject) => {
+    const output = new PassThrough();
+    let markup = "";
+    let didError = false;
+    output.setEncoding("utf8");
+    output.on("data", (chunk) => {
+      markup += chunk;
+    });
+    output.on("end", () => {
+      if (!didError) {
+        resolve(markup);
+      }
+    });
+    output.on("error", reject);
+
+    const htmlStream = renderHtmlToPipeableStream(model, {
+      onAllReady() {
+        htmlStream.pipe(output);
+      },
+      onShellError(error) {
+        didError = true;
+        reject(error);
+      },
+      onError(error) {
+        didError = true;
+        reject(error);
+      },
+    });
+  });
+}
+
+function createServerConsumerManifest(clientManifest) {
+  const moduleMap = {};
+  for (const record of Object.values(clientManifest)) {
+    moduleMap[record.id] ??= {};
+    moduleMap[record.id][record.name] = {
+      id: record.id,
+      chunks: record.chunks,
+      name: record.name,
+      async: record.async,
+    };
   }
-  return module;
-};
-globalThis.__webpack_require__.u = (chunkId) => chunkId;
-globalThis.__webpack_get_script_filename__ = (chunkId) =>
-  globalThis.__webpack_require__.u(chunkId);
-globalThis.__webpack_chunk_load__ = (chunkId) => {
-  const cached = moduleCache.get(chunkId);
-  if (cached) {
-    return typeof cached.then === "function" ? cached : Promise.resolve(cached);
+  return {
+    moduleMap,
+    moduleLoading: null,
+    serverModuleMap: {},
+  };
+}
+
+function installNodeChunkLoader(dist, clientManifest) {
+  const cache = (globalThis.__BUNDLER_RSC_NODE_MODULE_CACHE__ ??= new Map());
+  const chunkFiles = (globalThis.__BUNDLER_RSC_CHUNKS__ ??= {});
+  Object.assign(chunkFiles, createRscChunkMap(clientManifest));
+  globalThis.__webpack_require__ = (id) => {
+    const module = cache.get(id);
+    if (!module || typeof module.then === "function") {
+      throw new Error(`RSC client chunk has not loaded: ${id}`);
+    }
+    return module;
+  };
+  globalThis.__webpack_require__.u = (chunkId) =>
+    chunkFiles[chunkId] ?? chunkId;
+  globalThis.__webpack_get_script_filename__ = (chunkId) =>
+    globalThis.__webpack_require__.u(chunkId);
+  globalThis.__webpack_chunk_load__ = (chunkId) => {
+    const cached = cache.get(chunkId);
+    if (cached) {
+      return typeof cached.then === "function"
+        ? cached
+        : Promise.resolve(cached);
+    }
+    const fileName = globalThis.__webpack_require__.u(chunkId);
+    const loading = import(pathToFileURL(path.join(dist, fileName)).href).then(
+      (module) => {
+        cache.set(chunkId, module);
+        cache.set(fileName, module);
+        return module;
+      },
+    );
+    cache.set(chunkId, loading);
+    cache.set(fileName, loading);
+    return loading;
+  };
+}
+
+function createRscChunkMap(clientManifest) {
+  const chunks = {};
+  for (const record of Object.values(clientManifest)) {
+    if (record?.id && record?.fileName) {
+      chunks[record.id] = record.fileName;
+    }
   }
-  return loadChunk(chunkId);
-};
-`;
+  return chunks;
+}
+
+function serializeJsonForScript(value) {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
+function escapeAttribute(value) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
 
 const style = `
 html {
@@ -115,9 +293,7 @@ html {
   color: #1f2524;
   font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
 }
-body {
-  margin: 0;
-}
+body { margin: 0; }
 button {
   border: 1px solid #1f2524;
   background: #d6ff62;

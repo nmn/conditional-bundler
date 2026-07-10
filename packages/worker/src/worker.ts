@@ -3,6 +3,7 @@ import { parentPort } from "node:worker_threads";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { transformAsync } from "@babel/core";
+import remappingModule from "@ampproject/remapping";
 import { filePrefix, contentHash, normalizePosixPath } from "@bundler/shared";
 import type {
   CellRecord,
@@ -48,6 +49,11 @@ type WorkerRequest = {
   syntax: { jsx: boolean; ts: boolean };
   codeByEnv?: Record<string, string>;
   mapByEnv?: Record<string, string>;
+  sourceMap?: {
+    sourceFileName: string;
+    outputDir: string;
+    sourcesContent: boolean;
+  };
   discoveredEntrypointsByEnv?: Record<string, DiscoveredEntrypoint[]>;
   extraOutputsByEnv?: Record<string, Record<string, ExtraTransformOutput>>;
   workerProfile: WorkerTransformProfile;
@@ -99,6 +105,13 @@ type RemoteCacheAdapter = {
 };
 
 const babelModuleCache = new Map<string, unknown>();
+const CELL_ARTIFACT_FORMAT = 3;
+const remapping = ((
+  remappingModule as unknown as {
+    default?: typeof import("@ampproject/remapping").default;
+  }
+).default ??
+  remappingModule) as unknown as typeof import("@ampproject/remapping").default;
 
 async function handleTransform(
   request: WorkerRequest,
@@ -118,7 +131,10 @@ async function handleTransform(
   if (
     cached &&
     cached.moduleKey === moduleKey &&
-    (await hasCachedArtifacts(cached.fileRecordsByEnv))
+    (await hasCachedArtifacts(
+      cached.fileRecordsByEnv,
+      Boolean(request.sourceMap),
+    ))
   ) {
     const first = Object.values(cached.fileRecordsByEnv)[0];
     return {
@@ -130,7 +146,12 @@ async function handleTransform(
     };
   }
   const remoteCached = remote
-    ? await readRemoteModuleCache(remote, cachePaths, moduleKey)
+    ? await readRemoteModuleCache(
+        remote,
+        cachePaths,
+        moduleKey,
+        Boolean(request.sourceMap),
+      )
     : null;
   if (remoteCached) {
     const first = Object.values(remoteCached.fileRecordsByEnv)[0];
@@ -240,11 +261,22 @@ async function transformFile(
       },
       {
         importAttrAllow: ["json"],
+        sourceMap: request.sourceMap
+          ? {
+              sourceFileName: request.sourceMap.sourceFileName,
+              sourcesContent: request.sourceMap.sourcesContent,
+            }
+          : undefined,
       },
     );
+    const coreMap = composeSourceMaps(coreResult.map, preResult.map);
+    const coreCells = (coreResult.fileRecord?.cells ?? []).map((cell) => ({
+      ...cell,
+      map: composeSourceMaps(cell.map, preResult.map),
+    }));
     const postResult = await applyBabelStage(
       coreResult.code,
-      coreResult.map,
+      coreMap,
       request,
       envId,
       request.workerProfile.transformPost[envId] ??
@@ -253,7 +285,7 @@ async function transformFile(
     );
     const postCells = coreResult.fileRecord
       ? await applyBabelStageToCells(
-          coreResult.fileRecord.cells,
+          coreCells,
           request,
           envId,
           request.workerProfile.transformPost[envId] ??
@@ -280,14 +312,17 @@ async function transformFile(
     results[envId] = {
       ...coreResult,
       code: postResult.code,
-      map: postResult.map,
+      map: normalizeSourceMap(postResult.map, request),
       fileRecord: coreResult.fileRecord
         ? {
             ...coreResult.fileRecord,
             discoveredEntrypoints,
             extraOutputs:
               Object.keys(extraOutputs).length > 0 ? extraOutputs : undefined,
-            cells: postCells,
+            cells: postCells.map((cell) => ({
+              ...cell,
+              map: normalizeSourceMap(cell.map, request),
+            })),
           }
         : undefined,
     };
@@ -324,8 +359,8 @@ async function applyBabelStage(
   );
   const result = await transformAsync(code, {
     filename: request.realPath,
-    sourceMaps: true,
-    inputSourceMap: map ? JSON.parse(map) : undefined,
+    sourceMaps: Boolean(request.sourceMap),
+    inputSourceMap: request.sourceMap && map ? JSON.parse(map) : undefined,
     parserOpts: {
       plugins: [
         ...(request.syntax.jsx ? ["jsx"] : []),
@@ -336,7 +371,11 @@ async function applyBabelStage(
   });
   return {
     code: result?.code ?? code,
-    map: result?.map ? JSON.stringify(result.map) : map,
+    map: request.sourceMap
+      ? result?.map
+        ? JSON.stringify(result.map)
+        : map
+      : undefined,
     metadata: result?.metadata,
   };
 }
@@ -358,7 +397,7 @@ async function applyBabelStageToCells(
     }
     const result = await applyBabelStage(
       cell.code,
-      undefined,
+      cell.map,
       request,
       envId,
       specs,
@@ -366,9 +405,104 @@ async function applyBabelStageToCells(
     transformed.push({
       ...cell,
       code: result.code,
+      map: result.map,
     });
   }
   return transformed;
+}
+
+function composeSourceMaps(
+  generatedMap: string | undefined,
+  inputMap: string | undefined,
+): string | undefined {
+  if (!generatedMap) {
+    return undefined;
+  }
+  if (!inputMap) {
+    return generatedMap;
+  }
+  const maps = [
+    JSON.parse(generatedMap),
+    JSON.parse(inputMap),
+  ] as unknown as Parameters<typeof remapping>[0];
+  return JSON.stringify(remapping(maps, () => null));
+}
+
+function normalizeSourceMap(
+  map: string | undefined,
+  request: WorkerRequest,
+): string | undefined {
+  if (!map || !request.sourceMap) {
+    return undefined;
+  }
+  const parsed = JSON.parse(map) as Record<string, unknown>;
+  normalizeSourceMapObject(parsed, request);
+  return JSON.stringify(parsed);
+}
+
+function normalizeSourceMapObject(
+  map: Record<string, unknown>,
+  request: WorkerRequest,
+): void {
+  if (Array.isArray(map.sections)) {
+    for (const section of map.sections) {
+      if (
+        section &&
+        typeof section === "object" &&
+        "map" in section &&
+        section.map &&
+        typeof section.map === "object"
+      ) {
+        normalizeSourceMapObject(
+          section.map as Record<string, unknown>,
+          request,
+        );
+      }
+    }
+    return;
+  }
+
+  const sourceRoot = typeof map.sourceRoot === "string" ? map.sourceRoot : "";
+  if (Array.isArray(map.sources)) {
+    map.sources = map.sources.map((source) =>
+      typeof source === "string"
+        ? normalizeSourceName(source, sourceRoot, request)
+        : source,
+    );
+  }
+  delete map.sourceRoot;
+  if (!request.sourceMap?.sourcesContent) {
+    delete map.sourcesContent;
+  }
+}
+
+function normalizeSourceName(
+  source: string,
+  sourceRoot: string,
+  request: WorkerRequest,
+): string {
+  if (source === request.sourceMap?.sourceFileName || isUrlLike(source)) {
+    return source;
+  }
+  if (sourceRoot && isUrlLike(sourceRoot)) {
+    try {
+      return new URL(source, sourceRoot).href;
+    } catch {
+      return source;
+    }
+  }
+  const rootedSource = sourceRoot ? path.join(sourceRoot, source) : source;
+  const absoluteSource = path.isAbsolute(rootedSource)
+    ? rootedSource
+    : path.resolve(path.dirname(request.realPath), rootedSource);
+  const relative = normalizePosixPath(
+    path.relative(request.sourceMap!.outputDir, absoluteSource),
+  );
+  return relative || path.basename(absoluteSource);
+}
+
+function isUrlLike(value: string): boolean {
+  return /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value);
 }
 
 async function loadBabelPlugin(modulePath: string): Promise<unknown> {
@@ -413,6 +547,7 @@ function buildModuleKey(request: WorkerRequest): string {
   );
 
   return JSON.stringify({
+    artifactFormat: CELL_ARTIFACT_FORMAT,
     id: request.id,
     realPath: normalizePosixPath(request.realPath),
     pkg: request.pkg,
@@ -421,6 +556,7 @@ function buildModuleKey(request: WorkerRequest): string {
     codeHash: contentHash(request.code),
     envHashes,
     mapHashes,
+    sourceMap: request.sourceMap,
     extraOutputHashes,
     workerProfile: request.workerProfile.fingerprint,
   });
@@ -459,7 +595,15 @@ function finalizeFileRecord(
               envId,
               toCellArtifactFileName(index),
             ),
+            mapArtifactPath: cell.map
+              ? path.join(
+                  fileDir,
+                  envId,
+                  `${toCellArtifactFileName(index)}.map`,
+                )
+              : undefined,
             code: undefined,
+            map: undefined,
           },
     ),
   };
@@ -491,6 +635,10 @@ async function writeFileCache(
         continue;
       }
       await writeFileAtomic(artifactPath, cell.code ?? "");
+      const mapArtifactPath = fileRecord.cells[index]?.mapArtifactPath;
+      if (mapArtifactPath && cell.map) {
+        await writeFileAtomic(mapArtifactPath, cell.map);
+      }
     }
   }
 
@@ -540,6 +688,7 @@ async function readRemoteModuleCache(
   remote: RemoteCacheAdapter,
   cachePaths: FileCachePaths,
   moduleKey: string,
+  sourceMapsRequired: boolean,
 ): Promise<ModuleCacheRecord | null> {
   const raw = await remote.get(
     joinRemoteKey(cachePaths.remoteBaseKey, "module.json"),
@@ -584,11 +733,25 @@ async function readRemoteModuleCache(
         return null;
       }
       await writeFileAtomic(cell.artifactPath, artifact);
+      if (cell.mapArtifactPath) {
+        const relativeMapPath = normalizePosixPath(
+          path.relative(cachePaths.fileDir, cell.mapArtifactPath),
+        );
+        const sourceMap = await remote.get(
+          joinRemoteKey(cachePaths.remoteBaseKey, relativeMapPath),
+        );
+        if (sourceMap == null) {
+          return null;
+        }
+        await writeFileAtomic(cell.mapArtifactPath, sourceMap);
+      }
     }
   }
 
   await writeJsonAtomic(cachePaths.modulePath, hydrated);
-  if (!(await hasCachedArtifacts(hydrated.fileRecordsByEnv))) {
+  if (
+    !(await hasCachedArtifacts(hydrated.fileRecordsByEnv, sourceMapsRequired))
+  ) {
     return null;
   }
   return hydrated;
@@ -622,6 +785,15 @@ async function writeRemoteFileCache(
         joinRemoteKey(cachePaths.remoteBaseKey, relativeArtifactPath),
         artifact,
       );
+      if (cell.mapArtifactPath) {
+        const relativeMapPath = normalizePosixPath(
+          path.relative(cachePaths.fileDir, cell.mapArtifactPath),
+        );
+        await remote.set(
+          joinRemoteKey(cachePaths.remoteBaseKey, relativeMapPath),
+          await fs.readFile(cell.mapArtifactPath, "utf8"),
+        );
+      }
     }
   }
 
@@ -640,11 +812,17 @@ function hydrateRemoteFileRecords(
       envId,
       {
         ...record,
-        cells: record.cells.map((cell) =>
-          cell.artifactPath && !path.isAbsolute(cell.artifactPath)
-            ? { ...cell, artifactPath: path.join(fileDir, cell.artifactPath) }
-            : cell,
-        ),
+        cells: record.cells.map((cell) => ({
+          ...cell,
+          artifactPath:
+            cell.artifactPath && !path.isAbsolute(cell.artifactPath)
+              ? path.join(fileDir, cell.artifactPath)
+              : cell.artifactPath,
+          mapArtifactPath:
+            cell.mapArtifactPath && !path.isAbsolute(cell.mapArtifactPath)
+              ? path.join(fileDir, cell.mapArtifactPath)
+              : cell.mapArtifactPath,
+        })),
       },
     ]),
   );
@@ -659,16 +837,15 @@ function toRemoteFileRecords(
       envId,
       {
         ...record,
-        cells: record.cells.map((cell) =>
-          cell.artifactPath
-            ? {
-                ...cell,
-                artifactPath: normalizePosixPath(
-                  path.relative(fileDir, cell.artifactPath),
-                ),
-              }
-            : cell,
-        ),
+        cells: record.cells.map((cell) => ({
+          ...cell,
+          artifactPath: cell.artifactPath
+            ? normalizePosixPath(path.relative(fileDir, cell.artifactPath))
+            : undefined,
+          mapArtifactPath: cell.mapArtifactPath
+            ? normalizePosixPath(path.relative(fileDir, cell.mapArtifactPath))
+            : undefined,
+        })),
       },
     ]),
   );
@@ -754,6 +931,7 @@ function joinRemoteKey(...parts: Array<string | undefined>): string {
 
 async function hasCachedArtifacts(
   fileRecordsByEnv: Record<string, FileRecord>,
+  sourceMapsRequired = false,
 ): Promise<boolean> {
   for (const fileRecord of Object.values(fileRecordsByEnv)) {
     for (const cell of fileRecord.cells) {
@@ -763,7 +941,17 @@ async function hasCachedArtifacts(
       if (!cell.artifactPath) {
         return false;
       }
+      if (
+        sourceMapsRequired &&
+        cell.kind === "worker" &&
+        !cell.mapArtifactPath
+      ) {
+        return false;
+      }
       if (!(await fileExists(cell.artifactPath))) {
+        return false;
+      }
+      if (cell.mapArtifactPath && !(await fileExists(cell.mapArtifactPath))) {
         return false;
       }
     }

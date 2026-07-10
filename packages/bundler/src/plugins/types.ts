@@ -67,7 +67,7 @@ export type EmitFileInput = {
   contents: string;
   envId?: string;
   hash?: boolean;
-  type?: "asset" | "manifest" | "style";
+  type?: "asset" | "manifest" | "style" | "source-map";
   contentType?: string;
   bundleKey?: string;
 };
@@ -86,6 +86,11 @@ export type DynamicImportDraft = {
   exports?: Array<{ exported: string; symbol: string }>;
 };
 
+export type BundlePart = {
+  code: string;
+  map?: string;
+};
+
 export type BundlePlanDraft = {
   envId: string;
   entryId: string;
@@ -93,7 +98,7 @@ export type BundlePlanDraft = {
   modules: string[];
   conditions: Array<{ moduleId: string; condition: ConditionExpr }>;
   conditionNames: string[];
-  orderedParts: string[];
+  orderedParts: BundlePart[];
   dynamicImports: DynamicImportDraft[];
   diagnostics: Diagnostic[];
 };

@@ -12,10 +12,20 @@ export type EntrySpec = {
   envs?: string[];
 };
 
+export type SourceMapOutput =
+  | false
+  | "external"
+  | "hidden"
+  | {
+      mode: "external" | "hidden";
+      sourcesContent?: boolean;
+    };
+
 export type OutputSpec = {
   outDir: string;
   fileName?: string;
   manifestFile?: string;
+  sourceMap?: SourceMapOutput;
 };
 
 export type DevSpec = {
@@ -52,6 +62,7 @@ export const defaultConfig: BundlerConfig = {
   outputs: {
     outDir: "dist",
     fileName: "bundle.[env].[hash].js",
+    sourceMap: false,
   },
   plugins: [],
   cacheDir: "tmp/.bundler-cache",

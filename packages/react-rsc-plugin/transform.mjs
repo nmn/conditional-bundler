@@ -1,6 +1,6 @@
 import path from "node:path";
 
-export default function rscTransformBabelPlugin(api, options) {
+export default function reactRscTransformBabelPlugin(api, options) {
   const t = api.types;
   const root = options.root;
   const rscEnv = options.rscEnv ?? "rsc";
@@ -8,7 +8,7 @@ export default function rscTransformBabelPlugin(api, options) {
   const discoverClientEntrypoints = options.discoverClientEntrypoints !== false;
 
   return {
-    name: "react-rsc-example-transform",
+    name: "react-rsc-transform",
     visitor: {
       Program(programPath, state) {
         const filePath = options.filePath ?? state.filename;

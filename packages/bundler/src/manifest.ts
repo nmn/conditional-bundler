@@ -7,19 +7,20 @@ export type BundleManifest = {
     type?: "script";
     contentType?: string;
     conditionNames?: string[];
+    mapFileName?: string;
   }>;
   dynamicImports: Record<string, string>;
   emittedFiles: Array<{
     fileName: string;
     originalFileName: string;
-    type: "asset" | "manifest" | "style";
+    type: "asset" | "manifest" | "style" | "source-map";
     envId?: string;
     contentType?: string;
     bundleKey?: string;
   }>;
   assets?: Array<{
     fileName: string;
-    type: "script" | "style" | "asset" | "manifest";
+    type: "script" | "style" | "asset" | "manifest" | "source-map";
     contentType: string;
     envId?: string;
     entryId?: string;

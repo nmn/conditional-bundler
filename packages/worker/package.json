@@ -11,6 +11,7 @@
     "test": "NODE_OPTIONS=--experimental-vm-modules ../../node_modules/.bin/jest"
   },
   "dependencies": {
+    "@ampproject/remapping": "^2.3.0",
     "@babel/core": "^7.24.0",
     "@babel/generator": "^7.24.0",
     "@babel/parser": "^7.24.0",

@@ -172,7 +172,7 @@ test("bundles a hybrid graph with conditionals, barrels, and dynamic namespace u
 {
   "name": "hybrid",
   "outputs": {
-    "hybrid.browser.n3gd2izo.js": "
+    "hybrid.browser.isgubvhv.js": "
 const o5ufutef_suffix = "tail";
 const __NS__o5ufutef = Object.create(null);
 Object.defineProperty(__NS__o5ufutef, Symbol.toStringTag, { value: "Module" });
@@ -181,8 +181,8 @@ Object.preventExtensions(__NS__o5ufutef);
 const kh774klk_default = function kh774klk_finish(input) {
   return \`\${input}:\${__NS__o5ufutef.suffix}:\${__NS__o5ufutef["suffix"]}\`;
 };
-export { o5ufutef_suffix, kh774klk_default };",
-    "hybrid.browser.o84oz7v7.js": "const __IMPORT_kh774klk = () => import("./hybrid.browser.n3gd2izo.js").then((mod) => Object.freeze({ "default": mod["kh774klk_default"] }));
+export { kh774klk_default };",
+    "hybrid.browser.o84oz7v7.js": "const __IMPORT_kh774klk = () => import("./hybrid.browser.isgubvhv.js").then((mod) => Object.freeze({ "default": mod["kh774klk_default"] }));
 const kbgjp98n_label = "base";
 const a7c4iu3zz_label = kbgjp98n_label;
 /////##CONDITION_START##"FLAG_A"

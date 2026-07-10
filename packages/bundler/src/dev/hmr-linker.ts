@@ -3,6 +3,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import type { CellRecord, ModuleNode } from "@bundler/shared";
 import { contentHashShort } from "@bundler/shared";
+import { assembleBundle, stringifySourceMap } from "../sourcemap/compose.js";
 
 export type HmrCellRecord = {
   id: string;
@@ -10,6 +11,8 @@ export type HmrCellRecord = {
   deps: string[];
   hash: string;
   code: string;
+  map?: string;
+  patchCode?: string;
 };
 
 export type HmrBundleRecord = {
@@ -157,15 +160,19 @@ export async function emitHmrCell(
   extraDeps: string[] = [],
 ): Promise<HmrCellRecord> {
   const source = await readCellCode(cell);
+  const sourceMap = await readCellMap(cell);
   const symbols = cell.provides;
   const deps = collectIdentifierDeps(cell, extraDeps);
-  const installer = wrapCellInstaller(cell, source, symbols, deps);
+  const installer = wrapCellInstaller(cell, source, sourceMap, symbols, deps);
+  const id = cellIdentifier(cell);
   return {
-    id: cellIdentifier(cell),
+    id,
     symbols,
     deps,
     hash: contentHashShort(source),
-    code: installer,
+    code: installer.code,
+    map: installer.map,
+    patchCode: emitPatchCode(installer.code, installer.map, id),
   };
 }
 
@@ -266,14 +273,26 @@ async function readCellCode(cell: CellRecord): Promise<string> {
   throw new Error(`Cell '${cell.id}' is missing code and artifactPath.`);
 }
 
+async function readCellMap(cell: CellRecord): Promise<string | undefined> {
+  if (cell.map != null) {
+    return cell.map;
+  }
+  if (cell.mapArtifactPath) {
+    const fs = await import("node:fs/promises");
+    return fs.readFile(cell.mapArtifactPath, "utf8");
+  }
+  return undefined;
+}
+
 function wrapCellInstaller(
   cell: CellRecord,
   source: string,
+  sourceMap: string | undefined,
   symbols: string[],
   deps: string[],
-): string {
+): { code: string; map?: string } {
   if (isTopLevelModuleSyntax(source)) {
-    return source;
+    return { code: source, map: sourceMap };
   }
   const refreshRegistrations = symbols
     .filter(isPotentialComponentSymbol)
@@ -281,43 +300,24 @@ function wrapCellInstaller(
       (symbol) =>
         `__BUNDLER_HMR__.reactRefreshRegister(${symbol}, ${JSON.stringify(symbol)});`,
     );
-  return `__BUNDLER_HMR__.register({
+  const opening = `__BUNDLER_HMR__.register({
   id: ${JSON.stringify(cellIdentifier(cell))},
   symbols: ${JSON.stringify(symbols)},
   deps: ${JSON.stringify(deps)},
   hash: ${JSON.stringify(contentHashShort(source))},
-  install() {
-${indent(rewriteProvidedDeclarations(source, symbols), 4)}
-${indent(refreshRegistrations.join("\n"), 4)}
-  }
-});`;
-}
-
-function rewriteProvidedDeclarations(
-  source: string,
-  symbols: string[],
-): string {
-  let output = source;
-  for (const symbol of symbols) {
-    const escaped = escapeRegExp(symbol);
-    output = output.replace(
-      new RegExp(`\\b(?:const|let|var)\\s+(${escaped})\\s*=`, "g"),
-      "$1 =",
-    );
-    output = output.replace(
-      new RegExp(`\\basync\\s+function\\s+(${escaped})\\s*\\(`, "g"),
-      "$1 = async function $1(",
-    );
-    output = output.replace(
-      new RegExp(`(?<!async\\s)\\bfunction\\s+(${escaped})\\s*\\(`, "g"),
-      "$1 = function $1(",
-    );
-    output = output.replace(
-      new RegExp(`\\bclass\\s+(${escaped})(\\s|\\{)`, "g"),
-      "$1 = class $1$2",
-    );
-  }
-  return output;
+  install() {`;
+  const assembled = assembleBundle([
+    { code: opening },
+    { code: source, map: sourceMap },
+    ...(refreshRegistrations.length > 0
+      ? [{ code: refreshRegistrations.join("\n") }]
+      : []),
+    { code: "  }\n});" },
+  ]);
+  return {
+    code: assembled.code,
+    map: sourceMap ? stringifySourceMap(assembled.map) : undefined,
+  };
 }
 
 function collectIdentifierDeps(
@@ -353,14 +353,23 @@ function isPotentialComponentSymbol(symbol: string): boolean {
   return /^[A-Z]/.test(symbol) || /^[a-z0-9]+_[A-Z]/.test(symbol);
 }
 
+function emitPatchCode(
+  code: string,
+  map: string | undefined,
+  id: string,
+): string {
+  if (!map) {
+    return code;
+  }
+  const encodedMap = Buffer.from(map, "utf8").toString("base64");
+  const sourceUrl = `bundler-hmr:///${encodeURIComponent(id)}.js`;
+  return `${code}\n//# sourceURL=${sourceUrl}\n//# sourceMappingURL=data:application/json;base64,${encodedMap}`;
+}
+
 function indent(source: string, spaces: number): string {
   const prefix = " ".repeat(spaces);
   return source
     .split("\n")
     .map((line) => (line.length === 0 ? line : `${prefix}${line}`))
     .join("\n");
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

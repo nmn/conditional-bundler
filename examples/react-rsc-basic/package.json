@@ -4,12 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bundler build --config bundler.config.mjs",
-    "start": "node --conditions react-server scripts/start.mjs"
+    "clean": "node scripts/clean.mjs",
+    "build": "node scripts/clean.mjs && BUNDLER_MODE=production bundler build --config bundler.config.mjs",
+    "start": "node --import @bundler/assets/register --require @bundler/react-rsc-plugin/register-source-maps --conditions react-server scripts/start.mjs",
+    "prod": "node scripts/clean.mjs && BUNDLER_MODE=production bundler build --config bundler.config.mjs && node --import @bundler/assets/register --require @bundler/react-rsc-plugin/register-source-maps --conditions react-server scripts/start.mjs",
+    "dev": "BUNDLER_MODE=development node --import @bundler/assets/register --require @bundler/react-rsc-plugin/register-source-maps --conditions react-server scripts/dev.mjs"
   },
   "dependencies": {
-    "@babel/plugin-transform-react-jsx": "7.27.1",
+    "@bundler/assets": "workspace:*",
     "@bundler/bundler": "workspace:*",
+    "@bundler/react-rsc-plugin": "workspace:*",
     "react": "19.2.5",
     "react-dom": "19.2.5",
     "react-server-dom-webpack": "19.2.5"

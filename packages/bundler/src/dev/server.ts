@@ -1,6 +1,5 @@
 import http from "node:http";
 import fs from "node:fs";
-import fsp from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import type { Socket } from "node:net";
@@ -8,6 +7,7 @@ import { buildProject, type BuildResult } from "../builder.js";
 import type { BundlerConfig } from "../config.js";
 import type { HmrBundleRecord } from "./hmr-linker.js";
 import { resolveDevOptions } from "./options.js";
+import { readDevAsset, resolveConditionalPatch } from "./conditional-assets.js";
 
 export type DevServer = {
   url: string;
@@ -70,7 +70,10 @@ export async function startDevServer(
       const next = await buildProject(devConfig, []);
       const patch = createPatch(current, next);
       current = next;
-      broadcast(clients, patch ?? { type: "reload" });
+      broadcast(
+        clients,
+        patch ? await resolveConditionalPatch(patch) : { type: "reload" },
+      );
     } catch (error) {
       console.error("[bundler] rebuild failed", error);
       if (devOptions.fullReloadOnFailure) {
@@ -109,25 +112,14 @@ async function handleRequest(
     return;
   }
 
-  const fileName = path.basename(url.pathname);
-  const bundle = build.bundles.find((item) => item.fileName === fileName);
-  const asset = build.manifest.assets?.find(
-    (item) => item.fileName === fileName,
-  );
-  if (!bundle && !asset) {
+  const served = await readDevAsset(config, build, path.basename(url.pathname));
+  if (!served) {
     response.statusCode = 404;
     response.end("Not found");
     return;
   }
-  response.setHeader(
-    "content-type",
-    asset?.contentType ?? "text/javascript; charset=utf-8",
-  );
-  response.end(
-    await fsp.readFile(
-      path.join(config.outputs.outDir, asset?.fileName ?? bundle!.fileName),
-    ),
-  );
+  response.setHeader("content-type", served.contentType);
+  response.end(served.body);
 }
 
 function renderIndex(build: BuildResult): string {
@@ -223,7 +215,7 @@ export function createPatch(
         if (!changedBundles.includes(key)) {
           changedBundles.push(key);
         }
-        records.push(cell.code);
+        records.push(cell.patchCode ?? cell.code);
         recordBundles.push(key);
       }
     }

@@ -12,6 +12,7 @@ export default {
   outputs: {
     outDir: "dist",
     fileName: "bundle.[env].[hash].js",
+    sourceMap: "external",
   },
   cache: {
     local: {
@@ -34,3 +35,8 @@ export default {
 
 `cacheDir` is still supported as a shorthand for `cache.local.dir`, but new
 configs should prefer `cache.local.dir`.
+
+`outputs.sourceMap` defaults to `false`. Use `"external"` to emit a linked
+`<bundle>.js.map` file and a `sourceMappingURL` comment, or `"hidden"` to emit
+the map without the comment. Use an object such as
+`{ mode: "hidden", sourcesContent: false }` to omit embedded sources.

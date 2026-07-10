@@ -4,6 +4,7 @@ import { sourceLookupKey } from "../graph/source-key.js";
 export function resolveExportTables(
   nodes: ModuleNode[],
   nodeMap: Map<string, ModuleNode> = new Map(),
+  options: { hmr?: boolean } = {},
 ): void {
   if (nodeMap.size === 0) {
     for (const node of nodes) {
@@ -87,6 +88,7 @@ export function resolveExportTables(
             star.sourceOrder ?? 0,
             name,
             provider,
+            options.hmr === true,
           );
           generatedCells.push(aliasCell);
           table.set(name, {
@@ -112,7 +114,12 @@ export function resolveExportTables(
         }
 
         if (reexport.isNamespace) {
-          const namespaceCell = createNamespaceCell(node, reexport, sourceNode);
+          const namespaceCell = createNamespaceCell(
+            node,
+            reexport,
+            sourceNode,
+            options.hmr === true,
+          );
           generatedCells.push(namespaceCell);
           table.set(reexport.exported, {
             moduleId: node.id,
@@ -132,6 +139,7 @@ export function resolveExportTables(
           reexport.sourceOrder ?? 0,
           reexport.exported,
           provider,
+          options.hmr === true,
         );
         generatedCells.push(aliasCell);
         table.set(reexport.exported, {
@@ -154,6 +162,7 @@ function createAliasCell(
   sourceOrder: number,
   exported: string,
   provider: Provider,
+  hmr: boolean,
 ): CellRecord {
   const symbol = `${node.prefix}_${exported}`;
   return {
@@ -161,7 +170,7 @@ function createAliasCell(
     fileId: node.id,
     sourceOrder: 10000 + sourceOrder,
     kind: "generated",
-    code: `const ${symbol} = ${provider.symbol};`,
+    code: `${hmr ? "" : "const "}${symbol} = ${provider.symbol};`,
     provides: [symbol],
     internalDeps: [],
     externalDeps: [],
@@ -174,9 +183,10 @@ function createNamespaceCell(
   node: ModuleNode,
   reexport: ModuleNode["irHeader"]["reexportsNamed"][number],
   sourceNode: ModuleNode,
+  hmr: boolean,
 ): CellRecord {
   const symbol = `${node.prefix}_${reexport.exported}`;
-  const lines = [`const ${symbol} = Object.create(null);`];
+  const lines = [`${hmr ? "" : "const "}${symbol} = Object.create(null);`];
   const providerDeps: Provider[] = [];
 
   for (const [name, provider] of sourceNode.exportTable?.entries() ?? []) {

@@ -2,7 +2,7 @@ import {
   evaluateConditionExpr,
   extractConditionNames,
   type ConditionExpr,
-} from "@bundler/shared";
+} from "@bundler/shared/runtime";
 
 const CONDITION_START = "/////##CONDITION_START##";
 const CONDITION_END = "/////##CONDITION_END##";
@@ -32,6 +32,12 @@ export type TransformConditionalBundleResult = {
   optionKey: string;
   cached: boolean;
 };
+
+export function createEnvironmentConditionEvaluator(
+  environment: Readonly<Record<string, string | undefined>>,
+): (name: string) => boolean {
+  return (name) => environment[name] === "1";
+}
 
 export function createOptionSet(
   input:
@@ -120,26 +126,30 @@ export function stripConditionalBlocks(
   bundleCode: string,
   evaluateExpression: (condition: ConditionExpr) => boolean,
 ): string {
-  const lines = bundleCode.split(/\r?\n/);
+  const segments = bundleCode.split(/(\r\n|\n|\r)/);
   const stack: Array<{ active: boolean }> = [];
   const output: string[] = [];
 
-  for (const line of lines) {
+  for (let index = 0; index < segments.length; index += 2) {
+    const line = segments[index];
     const marker = readMarker(line);
     if (marker?.type === "start") {
       const active = evaluateExpression(marker.condition);
       stack.push({ active });
-      continue;
-    }
-    if (marker?.type === "end") {
+      output.push(maskLine(line));
+    } else if (marker?.type === "end") {
       if (stack.length === 0) {
         throw new Error("Encountered CONDITION_END without CONDITION_START.");
       }
       stack.pop();
-      continue;
-    }
-    if (stack.every((entry) => entry.active)) {
+      output.push(maskLine(line));
+    } else if (stack.every((entry) => entry.active)) {
       output.push(line);
+    } else {
+      output.push(maskLine(line));
+    }
+    if (index + 1 < segments.length) {
+      output.push(segments[index + 1]);
     }
   }
 
@@ -147,7 +157,11 @@ export function stripConditionalBlocks(
     throw new Error("Encountered CONDITION_START without CONDITION_END.");
   }
 
-  return output.join("\n");
+  return output.join("");
+}
+
+function maskLine(line: string): string {
+  return " ".repeat(line.length);
 }
 
 function scanConditionExpressions(bundleCode: string): ConditionExpr[] {

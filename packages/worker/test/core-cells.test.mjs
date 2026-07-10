@@ -252,6 +252,24 @@ test("creates conditional binding cells that feed later worker cells", async () 
   ]);
 });
 
+test("assigns conditional bindings into bundle scope for HMR installers", async () => {
+  const prefix = prefixFor(defaultFilePath);
+  const result = await transform(
+    `import { feature } from "./dep.js" with { condition: "FLAG", else: "./fallback.js" };
+     export const value = feature;`,
+    { dev: { hmr: true } },
+  );
+  const conditionalCell = result.fileRecord.cells.find(
+    (cell) => cell.kind === "conditional",
+  );
+
+  expect(conditionalCell.code).not.toContain(`let ${prefix}_feature`);
+  expect(conditionalCell.code).toContain(
+    `${prefix}_feature = ${prefixForSource("./dep.js")}_feature;`,
+  );
+  expect(result.code).not.toContain(`let ${prefix}_feature`);
+});
+
 test("keeps multi-declarator exports together in one cell", async () => {
   const prefix = prefixFor(defaultFilePath);
   const result = await transform("export const alpha = 1, beta = 2;");

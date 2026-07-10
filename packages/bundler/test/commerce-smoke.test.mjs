@@ -70,6 +70,28 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
       expect.stringMatching(/^client-references\.client\.[a-z0-9]+\.js$/),
     ]),
   );
+  expect(
+    buildManifest.bundles.every(
+      (bundle) => bundle.mapFileName === `${bundle.fileName}.map`,
+    ),
+  ).toBe(true);
+  for (const bundle of buildManifest.bundles) {
+    const sourceMap = JSON.parse(
+      await fs.readFile(
+        path.join(exampleDir, "dist", bundle.mapFileName),
+        "utf8",
+      ),
+    );
+    expect(sourceMap).toMatchObject({
+      version: 3,
+      file: bundle.fileName,
+      sections: expect.any(Array),
+    });
+  }
+  const serverBundle = buildManifest.bundles.find(
+    (bundle) => bundle.envId === "rsc" && bundle.entryId.endsWith("server.jsx"),
+  );
+  await expectMappedServerStack(serverBundle.fileName);
   const productActionRef =
     clientManifest["src/client/ProductActions.jsx#ProductActions"];
   expect(productActionRef.name).toMatch(/_ProductActions$/);
@@ -96,10 +118,18 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
   const port = await getFreePort();
   const child = spawn(
     process.execPath,
-    ["--conditions", "react-server", "scripts/start.mjs"],
+    [
+      "--import",
+      "@bundler/assets/register",
+      "--require",
+      "@bundler/react-rsc-plugin/register-source-maps",
+      "--conditions",
+      "react-server",
+      "scripts/start.mjs",
+    ],
     {
       cwd: exampleDir,
-      env: { ...process.env, PORT: String(port) },
+      env: { ...process.env, DEV: "0", PORT: String(port) },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
@@ -133,6 +163,25 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     expect(html).toMatch(
       /<script type="module" src="\/assets\/client\.client\.[a-z0-9]+\.js"><\/script>/,
     );
+    const clientBundle = buildManifest.bundles.find(
+      (bundle) =>
+        bundle.envId === "client" && bundle.entryId.endsWith("client.jsx"),
+    );
+    const clientAsset = await fetchAsset(
+      `${baseUrl}/assets/${clientBundle.fileName}`,
+    );
+    expect(clientAsset.contentType).toContain("text/javascript");
+    expect(clientAsset.text).toContain(
+      `//# sourceMappingURL=${clientBundle.mapFileName}`,
+    );
+    const clientMapAsset = await fetchAsset(
+      `${baseUrl}/assets/${clientBundle.mapFileName}`,
+    );
+    expect(clientMapAsset.contentType).toContain("application/json");
+    expect(JSON.parse(clientMapAsset.text)).toMatchObject({
+      version: 3,
+      file: clientBundle.fileName,
+    });
 
     const catalog = await fetchText(
       `${baseUrl}/rsc?path=${encodeURIComponent("/catalog?category=Coffee")}`,
@@ -147,6 +196,8 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     );
     expect(product).toContain('"path":"/product/copper-kettle"');
     expect(product).toContain("src/client/ProductActions.jsx");
+    expect(product).toContain("available for this batch");
+    expect(product).not.toContain("DEV merchandising");
     expect(product).not.toContain("client-references.client");
     expect(product).not.toContain(":E");
   } finally {
@@ -155,7 +206,153 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     }
     await childExit;
   }
+
+  await withCommerceServer({ DEV: "1" }, async (baseUrl) => {
+    const product = await fetchText(
+      `${baseUrl}/rsc?path=${encodeURIComponent("/product/copper-kettle")}`,
+    );
+    expect(product).toContain("DEV merchandising");
+    expect(product).not.toContain("available for this batch");
+    expect(product).not.toContain(":E");
+  });
 });
+
+test("react-rsc-commerce dev server serves linked source maps", async () => {
+  const port = await getFreePort();
+  const child = spawn(
+    process.execPath,
+    [
+      "--import",
+      "@bundler/assets/register",
+      "--require",
+      "@bundler/react-rsc-plugin/register-source-maps",
+      "--conditions",
+      "react-server",
+      "scripts/dev.mjs",
+    ],
+    {
+      cwd: exampleDir,
+      env: {
+        ...process.env,
+        DEV: "0",
+        BUNDLER_MODE: "development",
+        PORT: String(port),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let childOutput = "";
+  child.stdout.on("data", (chunk) => {
+    childOutput += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    childOutput += chunk;
+  });
+  let childExited = false;
+  const childExit = new Promise((resolve) => {
+    child.once("exit", (code, signal) => {
+      childExited = true;
+      resolve({ code, signal });
+    });
+  });
+
+  try {
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHttp(`${baseUrl}/`, () => childOutput);
+    const html = await fetchText(`${baseUrl}/`);
+    const scriptMatch = html.match(
+      /<script type="module" src="\/assets\/(client\.client\.[a-z0-9]+\.js)"><\/script>/,
+    );
+    expect(scriptMatch).not.toBeNull();
+
+    const bundleFileName = scriptMatch[1];
+    const bundleAsset = await fetchAsset(`${baseUrl}/assets/${bundleFileName}`);
+    expect(bundleAsset.contentType).toContain("text/javascript");
+    expect(bundleAsset.text).toContain(
+      `//# sourceMappingURL=${bundleFileName}.map`,
+    );
+
+    const mapAsset = await fetchAsset(
+      `${baseUrl}/assets/${bundleFileName}.map`,
+    );
+    expect(mapAsset.contentType).toContain("application/json");
+    expect(JSON.parse(mapAsset.text)).toMatchObject({
+      version: 3,
+      file: bundleFileName,
+      sections: expect.any(Array),
+    });
+
+    const product = await fetchText(
+      `${baseUrl}/rsc?path=${encodeURIComponent("/product/copper-kettle")}`,
+    );
+    expect(product).toContain("available for this batch");
+    expect(product).not.toContain("DEV merchandising");
+
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(exampleDir, "dist/manifest.json"), "utf8"),
+    );
+    const serverBundle = manifest.bundles.find(
+      (bundle) =>
+        bundle.envId === "rsc" && bundle.entryId.endsWith("server.jsx"),
+    );
+    expect(serverBundle.mapFileName).toBe(`${serverBundle.fileName}.map`);
+    await expect(
+      fs.stat(path.join(exampleDir, "dist", serverBundle.mapFileName)),
+    ).resolves.toBeDefined();
+    await expectMappedServerStack(serverBundle.fileName, "?stack-probe=1");
+  } finally {
+    if (!childExited) {
+      child.kill("SIGINT");
+    }
+    await childExit;
+  }
+});
+
+async function withCommerceServer(extraEnv, run) {
+  const port = await getFreePort();
+  const child = spawn(
+    process.execPath,
+    [
+      "--import",
+      "@bundler/assets/register",
+      "--require",
+      "@bundler/react-rsc-plugin/register-source-maps",
+      "--conditions",
+      "react-server",
+      "scripts/start.mjs",
+    ],
+    {
+      cwd: exampleDir,
+      env: { ...process.env, DEV: "0", ...extraEnv, PORT: String(port) },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let output = "";
+  child.stdout.on("data", (chunk) => {
+    output += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    output += chunk;
+  });
+  let exited = false;
+  const exit = new Promise((resolve) => {
+    child.once("exit", (code, signal) => {
+      exited = true;
+      resolve({ code, signal });
+    });
+  });
+
+  try {
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHttp(`${baseUrl}/`, () => output);
+    await run(baseUrl);
+  } finally {
+    if (!exited) {
+      child.kill("SIGTERM");
+    }
+    await exit;
+  }
+}
 
 async function fetchText(url) {
   const controller = new AbortController();
@@ -169,6 +366,64 @@ async function fetchText(url) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function fetchAsset(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2_000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`${url} returned ${response.status}: ${text}`);
+    }
+    return {
+      contentType: response.headers.get("content-type") ?? "",
+      text,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function expectMappedServerStack(fileName, query = "") {
+  const specifier = `./dist/${fileName}${query}`;
+  const script = `
+    globalThis.__BUNDLER_RSC_DEV__ = true;
+    import(${JSON.stringify(specifier)}).then(async (module) => {
+      try {
+        await module.handleCommerceRequest({
+          response: null,
+          url: new URL("http://localhost/")
+        });
+      } catch (error) {
+        console.log(error.stack);
+      }
+    });
+  `;
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [
+      "--import",
+      "@bundler/assets/register",
+      "--require",
+      "@bundler/react-rsc-plugin/register-source-maps",
+      "--conditions",
+      "react-server",
+      "-e",
+      script,
+    ],
+    {
+      cwd: exampleDir,
+      env: { ...process.env, DEV: "0" },
+      timeout: 10_000,
+    },
+  );
+
+  expect(stdout).toMatch(
+    /examples\/react-rsc-commerce\/src\/server\.jsx:\d+:\d+/,
+  );
+  expect(stdout).not.toContain(`/dist/${fileName}`);
 }
 
 async function waitForHttp(url, readDiagnostics = () => "") {

@@ -5,6 +5,16 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/index.d.ts",
+      "import": "./runtime.mjs"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "clean": "rimraf dist"

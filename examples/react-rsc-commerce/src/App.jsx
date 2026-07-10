@@ -1,6 +1,6 @@
 import React from "react";
 import "./lib/commerceTelemetry.dev.js" with {
-  condition: "__DEV__",
+  condition: "DEV",
   else: "./lib/commerceTelemetry.prod.js",
 };
 import { CartProvider } from "./client/CartContext.jsx";

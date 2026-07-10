@@ -3,6 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  createEnvironmentConditionEvaluator,
+  transformConditionalBundle,
+} from "@bundler/assets/runtime";
 import React from "react";
 import { renderToPipeableStream as renderHtmlToPipeableStream } from "react-dom/server";
 import { createFromNodeStream } from "react-server-dom-webpack/client.node";
@@ -13,6 +17,8 @@ import App from "./App.jsx";
 globalThis.__registerClientReference = __registerClientReference;
 
 const distDir = path.dirname(fileURLToPath(import.meta.url));
+const evaluateCondition = createEnvironmentConditionEvaluator(process.env);
+const transformedAssetCache = new Map();
 
 export function createCommerceServer(context = {}) {
   return http.createServer((request, response) => {
@@ -45,13 +51,44 @@ export async function handleCommerceRequest({
 
   if (url.pathname.startsWith("/assets/")) {
     const fileName = path.basename(url.pathname);
-    response.setHeader("content-type", "text/javascript; charset=utf-8");
-    response.end(fs.readFileSync(path.join(dist, fileName), "utf8"));
+    const asset = context.manifest.assets?.find(
+      (candidate) => candidate.fileName === fileName,
+    );
+    response.setHeader(
+      "content-type",
+      asset?.contentType ?? "application/octet-stream",
+    );
+    response.end(await readStaticAsset(dist, fileName, asset));
     return;
   }
 
   response.setHeader("content-type", "text/html; charset=utf-8");
   response.end(await renderHtml(url, context, dist));
+}
+
+async function readStaticAsset(dist, fileName, asset) {
+  const contents = fs.readFileSync(path.join(dist, fileName), "utf8");
+  if (asset?.type !== "script") {
+    return contents;
+  }
+  const transformed = await transformConditionalBundle(
+    contents,
+    evaluateCondition,
+    {
+      optionSet: asset.conditionNames
+        ? { conditions: asset.conditionNames }
+        : undefined,
+      cache: {
+        get(key) {
+          return transformedAssetCache.get(`${fileName}:${key}`);
+        },
+        set(key, code) {
+          transformedAssetCache.set(`${fileName}:${key}`, code);
+        },
+      },
+    },
+  );
+  return transformed.code;
 }
 
 function loadCommerceContext({ dist = distDir, clientBundle } = {}) {
@@ -73,6 +110,7 @@ function loadCommerceContext({ dist = distDir, clientBundle } = {}) {
   }
 
   return {
+    manifest,
     clientBundle: resolvedClientBundle,
     clientManifest,
     serverConsumerManifest: createServerConsumerManifest(clientManifest),

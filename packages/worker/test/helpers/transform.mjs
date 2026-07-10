@@ -12,6 +12,8 @@ export async function transform(
     filePath = defaultFilePath,
     root = pkgRoot,
     syntax = { jsx: false, ts: false },
+    sourceMap = false,
+    dev,
   } = {},
 ) {
   const { transformWithCore } = await import("../../dist/transform/core.js");
@@ -22,9 +24,16 @@ export async function transform(
       pkg: { name: pkgName, version: pkgVersion, root },
       syntax,
       envs: ["browser"],
+      dev,
     },
     {
       importAttrAllow: ["json"],
+      sourceMap: sourceMap
+        ? {
+            sourceFileName: filePath,
+            sourcesContent: true,
+          }
+        : undefined,
     },
   );
 }

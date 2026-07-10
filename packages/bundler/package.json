@@ -16,6 +16,7 @@
     "@babel/parser": "^7.24.0",
     "@babel/traverse": "^7.24.0",
     "@babel/types": "^7.24.0",
+    "@bundler/assets": "workspace:*",
     "@bundler/shared": "workspace:*",
     "@bundler/worker": "workspace:*",
     "lightningcss": "^1.29.1",

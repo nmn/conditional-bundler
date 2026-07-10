@@ -2,7 +2,42 @@ import {
   addClientPatchImports,
   classifyRscDevChange,
 } from "../dist/dev/rsc-server.js";
+import { resolveConditionalPatch } from "../dist/dev/conditional-assets.js";
 import { createPatch } from "../dist/dev/server.js";
+
+test("resolves conditional HMR records from environment values", async () => {
+  const previous = process.env.DEV;
+  const record = [
+    '/////##CONDITION_START##"DEV"',
+    'console.log("development");',
+    "/////##CONDITION_END##",
+    '/////##CONDITION_START##{"NOT":"DEV"}',
+    'console.log("production");',
+    "/////##CONDITION_END##",
+  ].join("\n");
+
+  try {
+    delete process.env.DEV;
+    const production = await resolveConditionalPatch({ records: [record] });
+    expect(production.records[0]).toHaveLength(record.length);
+    expect(production.records[0]).not.toContain("CONDITION_START");
+    expect(production.records[0]).not.toContain("development");
+    expect(production.records[0]).toContain("production");
+
+    process.env.DEV = "1";
+    const development = await resolveConditionalPatch({ records: [record] });
+    expect(development.records[0]).toHaveLength(record.length);
+    expect(development.records[0]).not.toContain("CONDITION_START");
+    expect(development.records[0]).toContain("development");
+    expect(development.records[0]).not.toContain("production");
+  } finally {
+    if (previous === undefined) {
+      delete process.env.DEV;
+    } else {
+      process.env.DEV = previous;
+    }
+  }
+});
 
 test("classifies pure client bundle edits as patchable", () => {
   const previous = fakeBuild([

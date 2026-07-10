@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { useExampleLog } from "./useExampleLog.dev.jsx" with {
-  condition: "__DEV__",
+  condition: "DEV",
   else: "./useExampleLog.noop.jsx",
 };
 
 export function Counter({ initialCount }) {
   const [count, setCount] = useState(initialCount);
-  useExampleLog("Counter mounted through the __DEV__ branch.");
+  useExampleLog("Counter mounted through the DEV branch.");
 
   return (
     <section className="counter">

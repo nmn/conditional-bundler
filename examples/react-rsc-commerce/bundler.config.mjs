@@ -9,11 +9,11 @@ export default {
   envs: {
     rsc: {
       target: "node",
-      conditions: ["react-server", "node", ...(isDev ? ["__DEV__"] : [])],
+      conditions: ["react-server", "node"],
     },
     client: {
       target: "browser",
-      conditions: ["browser", ...(isDev ? ["__DEV__"] : [])],
+      conditions: ["browser"],
     },
   },
   entries: [
@@ -27,9 +27,10 @@ export default {
     outDir: path.join(root, "dist"),
     fileName: "[entry].[env].[hash].js",
     manifestFile: "manifest.json",
+    sourceMap: "external",
   },
   plugins: [
-    plugin("../shared/rsc-plugin/rsc-example-plugin.mjs", {
+    plugin("@bundler/react-rsc-plugin", {
       root,
       name: "react-rsc-commerce",
       jsx: "classic",
