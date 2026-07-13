@@ -1,0 +1,15 @@
+import "../modules/esnext.iterator.constructor";
+import "../modules/esnext.iterator.drop";
+import "../modules/esnext.iterator.every";
+import "../modules/esnext.iterator.filter";
+import "../modules/esnext.iterator.find";
+import "../modules/esnext.iterator.flat-map";
+import "../modules/esnext.iterator.for-each";
+import "../modules/esnext.iterator.from";
+import "../modules/esnext.iterator.map";
+import "../modules/esnext.iterator.reduce";
+import "../modules/esnext.iterator.some";
+import "../modules/esnext.iterator.take";
+import "../modules/esnext.iterator.to-array";
+const _cjs_default = {};
+export default _cjs_default;

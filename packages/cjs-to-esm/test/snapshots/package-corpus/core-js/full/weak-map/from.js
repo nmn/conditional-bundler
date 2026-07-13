@@ -1,0 +1,13 @@
+import "../../modules/es.object.to-string";
+import "../../modules/es.array.iterator";
+import "../../modules/es.string.iterator";
+import "../../modules/es.weak-map";
+import "../../modules/esnext.weak-map.from";
+import "../../modules/esnext.weak-map.delete-all";
+import "../../modules/esnext.weak-map.emplace";
+import "../../modules/esnext.weak-map.get-or-insert";
+import "../../modules/esnext.weak-map.get-or-insert-computed";
+import "../../modules/web.dom-collections.iterator";
+import path from "../../internals/path";
+const _cjs_default = path.WeakMap.from;
+export default _cjs_default;

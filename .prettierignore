@@ -5,4 +5,5 @@ test/.out
 tmp
 **/.cache
 coverage
+packages/cjs-to-esm/test/snapshots
 pnpm-lock.yaml

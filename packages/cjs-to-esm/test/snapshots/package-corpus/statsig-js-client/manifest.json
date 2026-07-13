@@ -1,0 +1,11 @@
+{
+  "package": "@statsig/js-client",
+  "version": "3.33.3",
+  "mode": "production",
+  "files": 16,
+  "strategies": {
+    "static": 12,
+    "conditional": 0,
+    "compatibility": 4
+  }
+}

@@ -1,0 +1,11 @@
+import "../modules/esnext.reflect.define-metadata";
+import "../modules/esnext.reflect.delete-metadata";
+import "../modules/esnext.reflect.get-metadata";
+import "../modules/esnext.reflect.get-metadata-keys";
+import "../modules/esnext.reflect.get-own-metadata";
+import "../modules/esnext.reflect.get-own-metadata-keys";
+import "../modules/esnext.reflect.has-metadata";
+import "../modules/esnext.reflect.has-own-metadata";
+import "../modules/esnext.reflect.metadata";
+const _cjs_default = {};
+export default _cjs_default;

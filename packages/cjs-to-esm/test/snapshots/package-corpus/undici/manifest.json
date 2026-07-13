@@ -1,0 +1,11 @@
+{
+  "package": "undici",
+  "version": "8.7.0",
+  "mode": "production",
+  "files": 112,
+  "strategies": {
+    "static": 86,
+    "conditional": 0,
+    "compatibility": 26
+  }
+}

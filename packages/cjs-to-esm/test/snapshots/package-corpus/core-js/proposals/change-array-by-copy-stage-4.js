@@ -1,0 +1,9 @@
+import "../modules/esnext.array.to-reversed";
+import "../modules/esnext.array.to-sorted";
+import "../modules/esnext.array.to-spliced";
+import "../modules/esnext.array.with";
+import "../modules/esnext.typed-array.to-reversed";
+import "../modules/esnext.typed-array.to-sorted";
+import "../modules/esnext.typed-array.with";
+const _cjs_default = {};
+export default _cjs_default;

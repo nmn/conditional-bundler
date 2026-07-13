@@ -1,0 +1,16 @@
+import $ from "../internals/export";
+import NumericRangeIterator from "../internals/numeric-range-iterator";
+// `Number.range` method
+// https://github.com/tc39/proposal-iterator.range
+// TODO: Remove from `core-js@4`
+$({
+  target: 'Number',
+  stat: true,
+  forced: true
+}, {
+  range: function range(start, end, option) {
+    return new NumericRangeIterator(start, end, option, 'number', 0, 1);
+  }
+});
+const _cjs_default = {};
+export default _cjs_default;

@@ -1070,6 +1070,8 @@ async function createBundlePlan(
   const hmrSymbols = new Set<string>();
   const useHmr = devOptions.hmr;
   const useReactRefresh = devOptions.reactRefreshEnvs.has(graph.envId);
+  const conditionalExportAliases = new Map<string, string>();
+  const conditionalAliasNames = new Set<string>();
 
   for (const node of orderedFiles) {
     const selectedCells = selection.get(node.id);
@@ -1088,6 +1090,36 @@ async function createBundlePlan(
     if (declarations) {
       parts.push({ code: declarations });
     }
+  }
+  for (const node of orderedFiles) {
+    if (!conditions.get(node.id)) {
+      continue;
+    }
+    const selectedCells = selection.get(node.id);
+    if (!selectedCells) {
+      continue;
+    }
+    const provided = new Set(
+      collectOrderedCells(node, selectedCells).flatMap((cell) => cell.provides),
+    );
+    if (namespaceDemanded.has(node.id)) {
+      provided.add(`__NS__${node.prefix}`);
+    }
+    for (const symbol of partition.internalExports) {
+      if (provided.has(symbol) && !conditionalExportAliases.has(symbol)) {
+        let alias = `__bundler_conditional_export_${contentHashShort(symbol)}`;
+        while (hmrSymbols.has(alias) || conditionalAliasNames.has(alias)) {
+          alias += "_";
+        }
+        conditionalAliasNames.add(alias);
+        conditionalExportAliases.set(symbol, alias);
+      }
+    }
+  }
+  if (conditionalExportAliases.size > 0) {
+    parts.push({
+      code: `let ${Array.from(conditionalExportAliases.values()).join(", ")};`,
+    });
   }
 
   for (const node of orderedFiles) {
@@ -1127,6 +1159,20 @@ async function createBundlePlan(
       }
     }
 
+    if (condition && conditionalExportAliases.size > 0) {
+      const provided = new Set(orderedCells.flatMap((cell) => cell.provides));
+      if (namespaceDemanded.has(node.id)) {
+        provided.add(`__NS__${node.prefix}`);
+      }
+      const assignments = Array.from(conditionalExportAliases)
+        .filter(([symbol]) => provided.has(symbol))
+        .map(([symbol, alias]) => `${alias} = ${symbol};`)
+        .join("\n");
+      if (assignments) {
+        parts.push({ code: assignments });
+      }
+    }
+
     if (condition) {
       parts.push({ code: emitConditionalEnd() });
     }
@@ -1148,6 +1194,7 @@ async function createBundlePlan(
     exportMode,
     useHmr,
     partition.internalExports,
+    conditionalExportAliases,
   );
   if (exportFooter) {
     parts.push({ code: exportFooter });
@@ -1453,7 +1500,10 @@ async function discoverModulesFromHeader(
         importEntry.request ?? importEntry.source,
         envId,
         importEntry.condition ? "conditional-import" : "import",
-        importEntry.attributes ?? undefined,
+        importEntry.attributes ??
+          (typeof importEntry.condition === "string"
+            ? { condition: importEntry.condition }
+            : undefined),
       ),
     );
   }
@@ -1469,6 +1519,9 @@ async function discoverModulesFromHeader(
         conditionalImport.elseRequest ?? conditionalImport.elseSource,
         envId,
         "conditional-else",
+        typeof conditionalImport.condition === "string"
+          ? { condition: conditionalImport.condition }
+          : undefined,
       ),
     );
   }
@@ -2138,6 +2191,7 @@ function emitBundleExports(
   exportMode: "entry" | "dynamic",
   hmr: boolean,
   internalSymbols: Set<string>,
+  internalAliases: Map<string, string> = new Map(),
 ): string {
   const specifiers: string[] = [];
   const exportedNames = new Set<string>();
@@ -2158,7 +2212,7 @@ function emitBundleExports(
     }
   }
   for (const symbol of Array.from(internalSymbols).sort()) {
-    addExport(symbol, symbol);
+    addExport(internalAliases.get(symbol) ?? symbol, symbol);
   }
 
   return specifiers.length > 0 ? `export { ${specifiers.join(", ")} };` : "";

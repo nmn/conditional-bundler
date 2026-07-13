@@ -1,0 +1,14 @@
+import "../../modules/es.array.iterator";
+import "../../modules/es.object.to-string";
+import "../../modules/es.set";
+import "../../modules/es.set.difference.v2";
+import "../../modules/es.set.intersection.v2";
+import "../../modules/es.set.is-disjoint-from.v2";
+import "../../modules/es.set.is-subset-of.v2";
+import "../../modules/es.set.is-superset-of.v2";
+import "../../modules/es.set.symmetric-difference.v2";
+import "../../modules/es.set.union.v2";
+import "../../modules/es.string.iterator";
+import path from "../../internals/path";
+const _cjs_default = path.Set;
+export default _cjs_default;

@@ -1,0 +1,11 @@
+{
+  "package": "@statsig/client-core",
+  "version": "3.33.3",
+  "mode": "production",
+  "files": 54,
+  "strategies": {
+    "static": 52,
+    "conditional": 0,
+    "compatibility": 2
+  }
+}

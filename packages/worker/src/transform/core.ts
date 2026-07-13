@@ -44,6 +44,21 @@ type ResolvedImportInfo = {
   relPath: string;
 };
 
+function resolvedImportPrefix(resolved: ResolvedImportInfo): string {
+  return filePrefix(
+    resolved.pkg.name,
+    resolved.pkg.version,
+    modulePrefixIdentity(resolved.moduleId, resolved.relPath),
+  );
+}
+
+function modulePrefixIdentity(
+  moduleId: string | null | undefined,
+  relPath: string,
+): string {
+  return moduleId?.startsWith("virtual:") ? moduleId : relPath;
+}
+
 function getParserPlugins(input: TransformInput): ParserPlugin[] {
   const plugins: ParserPlugin[] = ["importAttributes"];
   if (input.syntax.ts) {
@@ -90,7 +105,11 @@ export function transformWithCore(
 
   const normalizedPath = normalizePosixPath(input.realPath);
   const relPath = path.posix.relative(input.pkg.root, normalizedPath);
-  const prefix = filePrefix(input.pkg.name, input.pkg.version, relPath);
+  const prefix = filePrefix(
+    input.pkg.name,
+    input.pkg.version,
+    modulePrefixIdentity(input.id, relPath),
+  );
 
   let hasTopLevelAwait = false;
 
@@ -768,11 +787,7 @@ function buildConditionalBindingCells(
       entry.request ?? entry.source,
       "conditional-import",
     );
-    const depPrefix = filePrefix(
-      resolved.pkg.name,
-      resolved.pkg.version,
-      resolved.relPath,
-    );
+    const depPrefix = resolvedImportPrefix(resolved);
     const conditionalImport = conditionalImports.find(
       (item) =>
         item.source === entry.source &&
@@ -807,11 +822,7 @@ function buildConditionalBindingCells(
           conditionalImport.elseRequest ?? conditionalImport.elseSource,
           "conditional-else",
         );
-        const elsePrefix = filePrefix(
-          elseResolved.pkg.name,
-          elseResolved.pkg.version,
-          elseResolved.relPath,
-        );
+        const elsePrefix = resolvedImportPrefix(elseResolved);
         fallback = `__NS__${elsePrefix}`;
         externalDeps.push({
           kind: "import",
@@ -864,11 +875,7 @@ function buildConditionalBindingCells(
           conditionalImport.elseRequest ?? conditionalImport.elseSource,
           "conditional-else",
         );
-        const elsePrefix = filePrefix(
-          elseResolved.pkg.name,
-          elseResolved.pkg.version,
-          elseResolved.relPath,
-        );
+        const elsePrefix = resolvedImportPrefix(elseResolved);
         fallback = conditionalImportTarget(entry, spec, elsePrefix);
         externalDeps.push({
           kind: "import",
@@ -921,11 +928,7 @@ function rewriteImportsInAst(
       entry.request ?? entry.source,
       entry.condition ? "conditional-import" : "import",
     );
-    const depPrefix = filePrefix(
-      resolved.pkg.name,
-      resolved.pkg.version,
-      resolved.relPath,
-    );
+    const depPrefix = resolvedImportPrefix(resolved);
 
     if (entry.isNamespace) {
       const namespaceLocal = entry.specifiers[0]?.local;
@@ -1211,11 +1214,7 @@ function createExternalSymbolMap(
       entry.request ?? entry.source,
       "import",
     );
-    const depPrefix = filePrefix(
-      resolved.pkg.name,
-      resolved.pkg.version,
-      resolved.relPath,
-    );
+    const depPrefix = resolvedImportPrefix(resolved);
 
     if (entry.isNamespace) {
       if (entry.namespaceUsage === "dynamic") {

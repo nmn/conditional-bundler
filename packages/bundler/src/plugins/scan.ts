@@ -95,6 +95,22 @@ export function scanModuleRequests(input: {
         });
       }
     },
+    CallExpression(path: NodePath<t.CallExpression>) {
+      if (
+        !path.get("callee").isIdentifier({ name: "require" }) ||
+        path.scope.hasBinding("require") ||
+        path.node.arguments.length !== 1 ||
+        !t.isStringLiteral(path.node.arguments[0])
+      ) {
+        return;
+      }
+      const request = path.node.arguments[0].value;
+      requests.set(toImportResolutionKey("import", request), {
+        key: toImportResolutionKey("import", request),
+        kind: "import",
+        request,
+      });
+    },
   });
 
   return Array.from(requests.values());

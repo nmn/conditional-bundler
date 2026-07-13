@@ -36,7 +36,18 @@ export type TransformConditionalBundleResult = {
 export function createEnvironmentConditionEvaluator(
   environment: Readonly<Record<string, string | undefined>>,
 ): (name: string) => boolean {
-  return (name) => environment[name] === "1";
+  return (name) => {
+    if (!name.startsWith("env:")) {
+      return environment[name] === "1";
+    }
+    const match = /^env:([A-Za-z_][A-Za-z0-9_]*)=(.+)$/.exec(name);
+    if (!match) {
+      throw new Error(
+        `Invalid environment condition '${name}'. Expected 'env:NAME=value'.`,
+      );
+    }
+    return environment[match[1]] === match[2];
+  };
 }
 
 export function createOptionSet(

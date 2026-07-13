@@ -1,0 +1,9 @@
+import "../modules/esnext.set.difference.v2";
+import "../modules/esnext.set.intersection.v2";
+import "../modules/esnext.set.is-disjoint-from.v2";
+import "../modules/esnext.set.is-subset-of.v2";
+import "../modules/esnext.set.is-superset-of.v2";
+import "../modules/esnext.set.union.v2";
+import "../modules/esnext.set.symmetric-difference.v2";
+const _cjs_default = {};
+export default _cjs_default;

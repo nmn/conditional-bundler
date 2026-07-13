@@ -42,7 +42,10 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
         importEntry.request ?? importEntry.source,
         input.envId,
         importEntry.condition ? "conditional-import" : "import",
-        importEntry.attributes ?? undefined,
+        importEntry.attributes ??
+          (typeof importEntry.condition === "string"
+            ? { condition: importEntry.condition }
+            : undefined),
       );
       node.deps.push(resolved.id);
       node.resolvedSources.set(sourceLookupKey(importEntry), resolved.id);
@@ -65,6 +68,9 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
             conditionalImport?.elseRequest ?? elseSource,
             input.envId,
             "conditional-else",
+            typeof importEntry.condition === "string"
+              ? { condition: importEntry.condition }
+              : undefined,
           );
           node.deps.push(elseResolved.id);
           node.resolvedSources.set(

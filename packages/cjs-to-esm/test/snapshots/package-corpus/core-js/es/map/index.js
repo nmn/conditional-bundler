@@ -1,0 +1,10 @@
+import "../../modules/es.array.iterator";
+import "../../modules/es.map";
+import "../../modules/es.map.group-by";
+import "../../modules/es.map.get-or-insert";
+import "../../modules/es.map.get-or-insert-computed";
+import "../../modules/es.object.to-string";
+import "../../modules/es.string.iterator";
+import path from "../../internals/path";
+const _cjs_default = path.Map;
+export default _cjs_default;

@@ -12,6 +12,7 @@ export default tseslint.config(
       "**/*.d.ts",
       "test/.out/**",
       "test/fixtures/**",
+      "packages/cjs-to-esm/test/snapshots/**",
       "tmp/**",
     ],
   },

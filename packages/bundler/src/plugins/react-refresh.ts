@@ -9,7 +9,15 @@ export default function reactRefreshPlugin(options: {
     transformPost: Object.fromEntries(
       envs.map((envId) => [
         envId,
-        [["react-refresh/babel", { skipEnvCheck: true }]],
+        [
+          [
+            "react-refresh/babel",
+            {
+              skipEnvCheck: true,
+              __bundlerExcludeNodeModules: true,
+            },
+          ],
+        ],
       ]),
     ),
   };

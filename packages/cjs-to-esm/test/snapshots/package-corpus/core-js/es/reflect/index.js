@@ -1,0 +1,18 @@
+import "../../modules/es.object.to-string";
+import "../../modules/es.reflect.apply";
+import "../../modules/es.reflect.construct";
+import "../../modules/es.reflect.define-property";
+import "../../modules/es.reflect.delete-property";
+import "../../modules/es.reflect.get";
+import "../../modules/es.reflect.get-own-property-descriptor";
+import "../../modules/es.reflect.get-prototype-of";
+import "../../modules/es.reflect.has";
+import "../../modules/es.reflect.is-extensible";
+import "../../modules/es.reflect.own-keys";
+import "../../modules/es.reflect.prevent-extensions";
+import "../../modules/es.reflect.set";
+import "../../modules/es.reflect.set-prototype-of";
+import "../../modules/es.reflect.to-string-tag";
+import path from "../../internals/path";
+const _cjs_default = path.Reflect;
+export default _cjs_default;

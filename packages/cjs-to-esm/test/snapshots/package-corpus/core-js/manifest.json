@@ -1,0 +1,11 @@
+{
+  "package": "core-js",
+  "version": "3.49.0",
+  "mode": "production",
+  "files": 3684,
+  "strategies": {
+    "static": 3680,
+    "conditional": 0,
+    "compatibility": 4
+  }
+}

@@ -1,0 +1,80 @@
+import { DataAdapterCore as _DataAdapterCore, _normalizeUser, _typedJsonParse, Log as _Log, _getStorageKey, DataAdapterCachePrefix as _DataAdapterCachePrefix, _getFullUserHash } from "@statsig/client-core";
+import Network_1 from "./Network";
+var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, generator) {
+  function adopt(value) {
+    return value instanceof P ? value : new P(function (resolve) {
+      resolve(value);
+    });
+  }
+  return new (P || (P = Promise))(function (resolve, reject) {
+    function fulfilled(value) {
+      try {
+        step(generator.next(value));
+      } catch (e) {
+        reject(e);
+      }
+    }
+    function rejected(value) {
+      try {
+        step(generator["throw"](value));
+      } catch (e) {
+        reject(e);
+      }
+    }
+    function step(result) {
+      result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected);
+    }
+    step((generator = generator.apply(thisArg, _arguments || [])).next());
+  });
+};
+export class StatsigEvaluationsDataAdapter extends _DataAdapterCore {
+  constructor() {
+    super('EvaluationsDataAdapter', 'evaluations');
+    this._network = null;
+    this._options = null;
+  }
+  attach(sdkKey, options, network) {
+    super.attach(sdkKey, options, network);
+    if (network !== null && network instanceof Network_1.default) {
+      this._network = network;
+    } else {
+      this._network = new Network_1.default(options !== null && options !== void 0 ? options : {});
+    }
+  }
+  getDataAsync(current, user, options) {
+    return this._getDataAsyncImpl(current, (0, _normalizeUser)(user, this._options), options);
+  }
+  prefetchData(user, options) {
+    return this._prefetchDataImpl(user, options);
+  }
+  setData(data) {
+    const values = (0, _typedJsonParse)(data, 'has_updates', 'data');
+    if (values && 'user' in values) {
+      super.setData(data, values.user);
+    } else {
+      _Log.error('StatsigUser not found. You may be using an older server SDK version. Please upgrade your SDK or use setDataLegacy.');
+    }
+  }
+  setDataLegacy(data, user) {
+    super.setData(data, user);
+  }
+  _fetchFromNetwork(current, user, options, isCacheValidFor204) {
+    return __awaiter(this, void 0, void 0, function* () {
+      var _a;
+      const result = yield (_a = this._network) === null || _a === void 0 ? void 0 : _a.fetchEvaluations(this._getSdkKey(), current, options === null || options === void 0 ? void 0 : options.priority, user, isCacheValidFor204);
+      return result !== null && result !== void 0 ? result : null;
+    });
+  }
+  _getCacheKey(user) {
+    var _a;
+    const key = (0, _getStorageKey)(this._getSdkKey(), user, (_a = this._options) === null || _a === void 0 ? void 0 : _a.customUserCacheKeyFunc);
+    return `${_DataAdapterCachePrefix}.${this._cacheSuffix}.${key}`;
+  }
+  _isCachedResultValidFor204(result, user) {
+    return result.fullUserHash != null && result.fullUserHash === (0, _getFullUserHash)(user);
+  }
+}
+const _cjs_default = {
+  ["StatsigEvaluationsDataAdapter"]: StatsigEvaluationsDataAdapter
+};
+export default _cjs_default;

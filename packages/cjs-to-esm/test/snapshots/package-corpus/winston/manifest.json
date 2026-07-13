@@ -1,0 +1,11 @@
+{
+  "package": "winston",
+  "version": "3.19.0",
+  "mode": "production",
+  "files": 34,
+  "strategies": {
+    "static": 22,
+    "conditional": 0,
+    "compatibility": 12
+  }
+}

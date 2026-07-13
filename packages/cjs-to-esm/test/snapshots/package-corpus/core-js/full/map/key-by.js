@@ -1,0 +1,28 @@
+import "../../modules/es.object.to-string";
+import "../../modules/es.map";
+import "../../modules/esnext.map.key-by";
+import "../../modules/esnext.map.delete-all";
+import "../../modules/esnext.map.emplace";
+import "../../modules/esnext.map.every";
+import "../../modules/esnext.map.filter";
+import "../../modules/esnext.map.find";
+import "../../modules/esnext.map.find-key";
+import "../../modules/esnext.map.get-or-insert";
+import "../../modules/esnext.map.get-or-insert-computed";
+import "../../modules/esnext.map.includes";
+import "../../modules/esnext.map.key-of";
+import "../../modules/esnext.map.map-keys";
+import "../../modules/esnext.map.map-values";
+import "../../modules/esnext.map.merge";
+import "../../modules/esnext.map.reduce";
+import "../../modules/esnext.map.some";
+import "../../modules/esnext.map.update";
+import call from "../../internals/function-call";
+import isCallable from "../../internals/is-callable";
+import path from "../../internals/path";
+var Map = path.Map;
+var mapKeyBy = Map.keyBy;
+const _cjs_default = function keyBy(source, iterable, keyDerivative) {
+  return call(mapKeyBy, isCallable(this) ? this : Map, source, iterable, keyDerivative);
+};
+export default _cjs_default;

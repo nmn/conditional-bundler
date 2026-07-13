@@ -1,0 +1,11 @@
+import "../../modules/es.object.to-string";
+import "../../modules/es.array.iterator";
+import "../../modules/es.string.iterator";
+import "../../modules/es.weak-set";
+import "../../modules/esnext.weak-set.from";
+import "../../modules/esnext.weak-set.add-all";
+import "../../modules/esnext.weak-set.delete-all";
+import "../../modules/web.dom-collections.iterator";
+import path from "../../internals/path";
+const _cjs_default = path.WeakSet.from;
+export default _cjs_default;

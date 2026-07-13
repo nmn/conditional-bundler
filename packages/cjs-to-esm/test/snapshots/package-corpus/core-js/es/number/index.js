@@ -1,0 +1,16 @@
+import "../../modules/es.number.constructor";
+import "../../modules/es.number.epsilon";
+import "../../modules/es.number.is-finite";
+import "../../modules/es.number.is-integer";
+import "../../modules/es.number.is-nan";
+import "../../modules/es.number.is-safe-integer";
+import "../../modules/es.number.max-safe-integer";
+import "../../modules/es.number.min-safe-integer";
+import "../../modules/es.number.parse-float";
+import "../../modules/es.number.parse-int";
+import "../../modules/es.number.to-exponential";
+import "../../modules/es.number.to-fixed";
+import "../../modules/es.number.to-precision";
+import path from "../../internals/path";
+const _cjs_default = path.Number;
+export default _cjs_default;

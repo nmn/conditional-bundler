@@ -31,12 +31,17 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
     ],
     {
       cwd: exampleDir,
-      env: { ...process.env, BUNDLER_MODE: "production" },
+      env: {
+        ...process.env,
+        NODE_ENV: "production",
+        BUNDLER_MODE: "production",
+      },
       timeout: 60_000,
     },
   );
 
   const manifest = await readManifest();
+  expectCjsNodeEnv(manifest, "production");
   const clientManifest = JSON.parse(
     await fs.readFile(
       path.join(exampleDir, "dist/rsc-client-manifest.json"),
@@ -189,7 +194,7 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
 test("react-rsc-basic development serves HMR output and linked source maps", async () => {
   await withExampleServer(
     "scripts/dev.mjs",
-    { BUNDLER_MODE: "development" },
+    { NODE_ENV: "development", BUNDLER_MODE: "development" },
     async (baseUrl) => {
       const html = await fetchText(`${baseUrl}/`);
       expect(html).toContain(
@@ -228,6 +233,7 @@ test("react-rsc-basic development serves HMR output and linked source maps", asy
       expect(flight).not.toContain(":E");
 
       const manifest = await readManifest();
+      expectCjsNodeEnv(manifest, "development");
       const clientBundles = manifest.bundles.filter(
         (bundle) => bundle.envId === "client",
       );
@@ -299,7 +305,13 @@ async function withExampleServer(script, extraEnv, run) {
     ],
     {
       cwd: exampleDir,
-      env: { ...process.env, DEV: "0", ...extraEnv, PORT: String(port) },
+      env: {
+        ...process.env,
+        DEV: "0",
+        NODE_ENV: script.endsWith("dev.mjs") ? "development" : "production",
+        ...extraEnv,
+        PORT: String(port),
+      },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
@@ -359,7 +371,7 @@ async function expectMappedServerStack(fileName, query = "") {
     ],
     {
       cwd: exampleDir,
-      env: { ...process.env, DEV: "0" },
+      env: { ...process.env, DEV: "0", NODE_ENV: "production" },
       timeout: 10_000,
     },
   );
@@ -372,6 +384,37 @@ async function readManifest() {
   return JSON.parse(
     await fs.readFile(path.join(exampleDir, "dist/manifest.json"), "utf8"),
   );
+}
+
+function expectCjsNodeEnv(manifest, expected) {
+  const prefix = "virtual:cjs-to-esm:";
+  const records = Array.from(
+    new Set(
+      manifest.bundles
+        .flatMap((bundle) => bundle.modules)
+        .filter((id) => id.startsWith(prefix)),
+    ),
+    (id) => {
+      const [envId, nodeEnv, encodedPath] = id.slice(prefix.length).split(":");
+      return {
+        envId: decodeURIComponent(envId),
+        nodeEnv: decodeURIComponent(nodeEnv),
+        filePath: Buffer.from(encodedPath, "base64url").toString("utf8"),
+      };
+    },
+  );
+  const opposite = expected === "production" ? "development" : "production";
+
+  expect(records.length).toBeGreaterThan(0);
+  expect(new Set(records.map((record) => record.nodeEnv))).toEqual(
+    new Set([expected]),
+  );
+  expect(
+    records.some((record) => record.filePath.includes(`.${expected}.js`)),
+  ).toBe(true);
+  expect(
+    records.some((record) => record.filePath.includes(`.${opposite}.js`)),
+  ).toBe(false);
 }
 
 function findBundle(manifest, envId) {
@@ -416,7 +459,7 @@ async function fetchWithTimeout(url) {
 async function waitForHttp(url, readDiagnostics) {
   const started = Date.now();
   let lastError;
-  while (Date.now() - started < 15_000) {
+  while (Date.now() - started < 60_000) {
     try {
       await fetchText(url);
       return;

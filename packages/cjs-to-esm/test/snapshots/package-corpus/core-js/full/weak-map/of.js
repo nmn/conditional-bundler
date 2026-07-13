@@ -1,0 +1,11 @@
+import "../../modules/es.object.to-string";
+import "../../modules/es.array.iterator";
+import "../../modules/es.weak-map";
+import "../../modules/esnext.weak-map.of";
+import "../../modules/esnext.weak-map.delete-all";
+import "../../modules/esnext.weak-map.emplace";
+import "../../modules/esnext.weak-map.get-or-insert";
+import "../../modules/esnext.weak-map.get-or-insert-computed";
+import path from "../../internals/path";
+const _cjs_default = path.WeakMap.of;
+export default _cjs_default;

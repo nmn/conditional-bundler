@@ -1,0 +1,11 @@
+import "../../modules/es.date.get-year";
+import "../../modules/es.date.now";
+import "../../modules/es.date.set-year";
+import "../../modules/es.date.to-gmt-string";
+import "../../modules/es.date.to-iso-string";
+import "../../modules/es.date.to-json";
+import "../../modules/es.date.to-string";
+import "../../modules/es.date.to-primitive";
+import path from "../../internals/path";
+const _cjs_default = path.Date;
+export default _cjs_default;

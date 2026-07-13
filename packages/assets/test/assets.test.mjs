@@ -5,15 +5,19 @@ import {
   transformConditionalBundle,
 } from "../dist/index.js";
 
-test("resolves environment conditions only from values set to 1", () => {
+test("resolves boolean flags and environment value predicates", () => {
   const evaluate = createEnvironmentConditionEvaluator({
     DEV: "1",
     DEBUG: "true",
+    NODE_ENV: "production",
   });
 
   expect(evaluate("DEV")).toBe(true);
   expect(evaluate("DEBUG")).toBe(false);
   expect(evaluate("MISSING")).toBe(false);
+  expect(evaluate("env:NODE_ENV=production")).toBe(true);
+  expect(evaluate("env:NODE_ENV=development")).toBe(false);
+  expect(() => evaluate("env:NODE_ENV")).toThrow("Expected 'env:NAME=value'");
 });
 
 test("creates a minimal sorted option set from bundle markers", () => {

@@ -118,7 +118,7 @@ type RemoteCacheAdapter = {
 };
 
 const babelModuleCache = new Map<string, unknown>();
-const CELL_ARTIFACT_FORMAT = 4;
+const CELL_ARTIFACT_FORMAT = 7;
 const remapping = ((
   remappingModule as unknown as {
     default?: typeof import("@ampproject/remapping").default;
@@ -135,6 +135,7 @@ async function handleTransform(
     request.cacheDir,
     request.realPath,
     request.envs,
+    request.id,
   );
   const remote = createRemoteCacheAdapter(
     request.remoteCache,
@@ -190,7 +191,11 @@ async function handleTransform(
 
   const normalizedPath = normalizePosixPath(request.realPath);
   const relPath = path.posix.relative(request.pkg.root, normalizedPath);
-  const prefix = filePrefix(request.pkg.name, request.pkg.version, relPath);
+  const prefix = filePrefix(
+    request.pkg.name,
+    request.pkg.version,
+    request.id.startsWith("virtual:") ? request.id : relPath,
+  );
   const resultsByEnv = await transformFile(request);
   const unresolvedImportsByEnv = collectUnresolvedImportsByEnv(
     resultsByEnv,
@@ -285,12 +290,21 @@ function collectUnresolvedImportsByEnv(
       add(
         entry.condition ? "conditional-import" : "import",
         entry.request ?? entry.source,
-        entry.attributes ?? undefined,
+        entry.attributes ??
+          (typeof entry.condition === "string"
+            ? { condition: entry.condition }
+            : undefined),
       );
     }
     for (const entry of fileRecord.conditionalImports) {
       if (entry.elseSource) {
-        add("conditional-else", entry.elseRequest ?? entry.elseSource);
+        add(
+          "conditional-else",
+          entry.elseRequest ?? entry.elseSource,
+          typeof entry.condition === "string"
+            ? { condition: entry.condition }
+            : undefined,
+        );
       }
     }
     for (const entry of [
@@ -426,16 +440,23 @@ async function applyBabelStage(
   envId: string,
   specs: WorkerBabelPluginSpec[],
 ): Promise<{ code: string; map?: string; metadata?: Record<string, unknown> }> {
-  if (specs.length === 0) {
+  const applicableSpecs = specs.filter(
+    (spec) =>
+      spec.options?.__bundlerExcludeNodeModules !== true ||
+      !isNodeModulesPath(request.realPath),
+  );
+  if (applicableSpecs.length === 0) {
     return { code, map };
   }
   const plugins = await Promise.all(
-    specs.map(async (spec, index) => {
+    applicableSpecs.map(async (spec, index) => {
       const loaded = await loadBabelPlugin(spec.modulePath);
+      const pluginOptions = { ...(spec.options ?? {}) };
+      delete pluginOptions.__bundlerExcludeNodeModules;
       return [
         loaded,
         {
-          ...(spec.options ?? {}),
+          ...pluginOptions,
           envId,
           filePath: request.realPath,
           id: request.id,
@@ -466,6 +487,10 @@ async function applyBabelStage(
       : undefined,
     metadata: result?.metadata,
   };
+}
+
+function isNodeModulesPath(filePath: string): boolean {
+  return normalizePosixPath(filePath).split("/").includes("node_modules");
 }
 
 async function applyBabelStageToCells(
@@ -654,8 +679,12 @@ function buildFileCachePaths(
   cacheRoot: string,
   realPath: string,
   envs: string[],
+  moduleId: string,
 ): FileCachePaths {
-  const fileHash = contentHash(normalizePosixPath(realPath));
+  const cacheIdentity = moduleId.startsWith("virtual:")
+    ? moduleId
+    : normalizePosixPath(realPath);
+  const fileHash = contentHash(cacheIdentity);
   const envHash = contentHash(JSON.stringify([...envs].sort())).slice(0, 12);
   const fileDir = path.join(cacheRoot, "files", fileHash, envHash);
   return {

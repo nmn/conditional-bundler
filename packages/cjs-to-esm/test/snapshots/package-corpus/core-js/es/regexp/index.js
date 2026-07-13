@@ -1,0 +1,14 @@
+import "../../modules/es.regexp.constructor";
+import "../../modules/es.regexp.escape";
+import "../../modules/es.regexp.to-string";
+import "../../modules/es.regexp.dot-all";
+import "../../modules/es.regexp.exec";
+import "../../modules/es.regexp.flags";
+import "../../modules/es.regexp.sticky";
+import "../../modules/es.regexp.test";
+import "../../modules/es.string.match";
+import "../../modules/es.string.replace";
+import "../../modules/es.string.search";
+import "../../modules/es.string.split";
+const _cjs_default = {};
+export default _cjs_default;

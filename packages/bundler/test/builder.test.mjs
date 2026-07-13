@@ -352,6 +352,26 @@ export const c = shared + 2;`,
   delete globalThis.__SHARED_EVALUATIONS__;
 });
 
+test("tree-shakes independent static CommonJS exports", async () => {
+  const result = await buildFixture("cjs-static-tree-shake", {
+    configPlugins: [
+      {
+        __bundlerPluginRef: true,
+        module: path.join(
+          rootDir,
+          "packages/bundler/test/plugins/cjs-to-esm-plugin.mjs",
+        ),
+      },
+    ],
+  });
+  const output = await readBundle(result, "cjs-static-tree-shake");
+
+  expect(output).toContain("USED_CJS_MARKER");
+  expect(output).not.toContain("UNUSED_CJS_MARKER");
+  expect(output).not.toContain("__cjs_require__");
+  expect(output).not.toContain("__BUNDLER_CJS_CACHE__");
+});
+
 test("uses the same consumer-set bundle boundaries in development and production", async () => {
   const projectDir = path.join(outRoot, "consumer-set-boundaries");
   const srcDir = path.join(projectDir, "src");
@@ -1310,7 +1330,7 @@ test("supports virtual modules through resolveImport and load", async () => {
     .map((entry) => entry.name);
   expect(configRoots).toHaveLength(1);
   const activeRoot = path.join(v2Dir, configRoots[0]);
-  const virtualFileHash = contentHash(normalizePosixPath(virtualPath));
+  const virtualFileHash = contentHash("virtual:msg");
   const moduleRoot = path.join(activeRoot, "files", virtualFileHash);
   const moduleJson = JSON.parse(
     await fs.readFile(

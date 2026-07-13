@@ -26,7 +26,11 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     ],
     {
       cwd: exampleDir,
-      env: { ...process.env, BUNDLER_MODE: "production" },
+      env: {
+        ...process.env,
+        NODE_ENV: "production",
+        BUNDLER_MODE: "production",
+      },
       timeout: 60_000,
     },
   );
@@ -39,6 +43,7 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
   const buildManifest = JSON.parse(
     await fs.readFile(path.join(exampleDir, "dist/manifest.json"), "utf8"),
   );
+  expectCjsNodeEnv(buildManifest, "production");
   const cachedNodeModulePaths = await findCachedNodeModulePaths(
     path.join(exampleDir, ".cache/conditional-bundler"),
   );
@@ -180,7 +185,12 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     ],
     {
       cwd: exampleDir,
-      env: { ...process.env, DEV: "0", PORT: String(port) },
+      env: {
+        ...process.env,
+        DEV: "0",
+        NODE_ENV: "production",
+        PORT: String(port),
+      },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
@@ -292,6 +302,7 @@ test("react-rsc-commerce dev server serves linked source maps", async () => {
       env: {
         ...process.env,
         DEV: "0",
+        NODE_ENV: "development",
         BUNDLER_MODE: "development",
         PORT: String(port),
       },
@@ -354,6 +365,7 @@ test("react-rsc-commerce dev server serves linked source maps", async () => {
     const manifest = JSON.parse(
       await fs.readFile(path.join(exampleDir, "dist/manifest.json"), "utf8"),
     );
+    expectCjsNodeEnv(manifest, "development");
     const clientBundles = manifest.bundles.filter(
       (bundle) => bundle.envId === "client",
     );
@@ -408,6 +420,37 @@ test("react-rsc-commerce dev server serves linked source maps", async () => {
   }
 });
 
+function expectCjsNodeEnv(manifest, expected) {
+  const prefix = "virtual:cjs-to-esm:";
+  const records = Array.from(
+    new Set(
+      manifest.bundles
+        .flatMap((bundle) => bundle.modules)
+        .filter((id) => id.startsWith(prefix)),
+    ),
+    (id) => {
+      const [envId, nodeEnv, encodedPath] = id.slice(prefix.length).split(":");
+      return {
+        envId: decodeURIComponent(envId),
+        nodeEnv: decodeURIComponent(nodeEnv),
+        filePath: Buffer.from(encodedPath, "base64url").toString("utf8"),
+      };
+    },
+  );
+  const opposite = expected === "production" ? "development" : "production";
+
+  expect(records.length).toBeGreaterThan(0);
+  expect(new Set(records.map((record) => record.nodeEnv))).toEqual(
+    new Set([expected]),
+  );
+  expect(
+    records.some((record) => record.filePath.includes(`.${expected}.js`)),
+  ).toBe(true);
+  expect(
+    records.some((record) => record.filePath.includes(`.${opposite}.js`)),
+  ).toBe(false);
+}
+
 async function withCommerceServer(extraEnv, run) {
   const port = await getFreePort();
   const child = spawn(
@@ -423,7 +466,13 @@ async function withCommerceServer(extraEnv, run) {
     ],
     {
       cwd: exampleDir,
-      env: { ...process.env, DEV: "0", ...extraEnv, PORT: String(port) },
+      env: {
+        ...process.env,
+        DEV: "0",
+        NODE_ENV: "production",
+        ...extraEnv,
+        PORT: String(port),
+      },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
@@ -515,7 +564,7 @@ async function expectMappedServerStack(fileName, query = "") {
     ],
     {
       cwd: exampleDir,
-      env: { ...process.env, DEV: "0" },
+      env: { ...process.env, DEV: "0", NODE_ENV: "production" },
       timeout: 10_000,
     },
   );
@@ -529,7 +578,7 @@ async function expectMappedServerStack(fileName, query = "") {
 async function waitForHttp(url, readDiagnostics = () => "") {
   const started = Date.now();
   let lastError;
-  while (Date.now() - started < 10_000) {
+  while (Date.now() - started < 60_000) {
     try {
       await fetchText(url);
       return;

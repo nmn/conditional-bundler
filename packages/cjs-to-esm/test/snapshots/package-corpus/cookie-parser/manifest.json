@@ -1,0 +1,11 @@
+{
+  "package": "cookie-parser",
+  "version": "1.4.7",
+  "mode": "production",
+  "files": 1,
+  "strategies": {
+    "static": 1,
+    "conditional": 0,
+    "compatibility": 0
+  }
+}

@@ -1,0 +1,10 @@
+import "../modules/esnext.map.from";
+import "../modules/esnext.map.of";
+import "../modules/esnext.set.from";
+import "../modules/esnext.set.of";
+import "../modules/esnext.weak-map.from";
+import "../modules/esnext.weak-map.of";
+import "../modules/esnext.weak-set.from";
+import "../modules/esnext.weak-set.of";
+const _cjs_default = {};
+export default _cjs_default;

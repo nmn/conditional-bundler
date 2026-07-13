@@ -1,0 +1,13 @@
+import "../../modules/es.typed-array.int8-array";
+import "../../modules/es.typed-array.uint8-array";
+import "../../modules/es.typed-array.uint8-clamped-array";
+import "../../modules/es.typed-array.int16-array";
+import "../../modules/es.typed-array.uint16-array";
+import "../../modules/es.typed-array.int32-array";
+import "../../modules/es.typed-array.uint32-array";
+import "../../modules/es.typed-array.float32-array";
+import "../../modules/es.typed-array.float64-array";
+import "./methods";
+import _cjs_import from "../../internals/global-this";
+const _cjs_default = _cjs_import;
+export default _cjs_default;

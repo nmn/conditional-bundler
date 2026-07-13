@@ -1,0 +1,13 @@
+import "../../modules/es.aggregate-error";
+import "../../modules/es.array.iterator";
+import "../../modules/es.object.to-string";
+import "../../modules/es.promise";
+import "../../modules/es.promise.all-settled";
+import "../../modules/es.promise.any";
+import "../../modules/es.promise.try";
+import "../../modules/es.promise.with-resolvers";
+import "../../modules/es.promise.finally";
+import "../../modules/es.string.iterator";
+import path from "../../internals/path";
+const _cjs_default = path.Promise;
+export default _cjs_default;
