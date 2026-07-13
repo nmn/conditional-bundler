@@ -352,6 +352,122 @@ export const c = shared + 2;`,
   delete globalThis.__SHARED_EVALUATIONS__;
 });
 
+test("uses the same consumer-set bundle boundaries in development and production", async () => {
+  const projectDir = path.join(outRoot, "consumer-set-boundaries");
+  const srcDir = path.join(projectDir, "src");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+  await Promise.all([
+    fs.writeFile(
+      path.join(srcDir, "shared-all.js"),
+      "export const sharedAll = 10;",
+    ),
+    fs.writeFile(
+      path.join(srcDir, "shared-ab.js"),
+      "export const sharedAB = 20;",
+    ),
+    fs.writeFile(path.join(srcDir, "only-a.js"), "export const onlyA = 1;"),
+    fs.writeFile(
+      path.join(srcDir, "a.js"),
+      `import { sharedAll } from "./shared-all.js";
+import { sharedAB } from "./shared-ab.js";
+import { onlyA } from "./only-a.js";
+export const a = sharedAll + sharedAB + onlyA;`,
+    ),
+    fs.writeFile(
+      path.join(srcDir, "b.js"),
+      `import { sharedAll } from "./shared-all.js";
+import { sharedAB } from "./shared-ab.js";
+export const b = sharedAll + sharedAB;`,
+    ),
+    fs.writeFile(
+      path.join(srcDir, "c.js"),
+      `import { sharedAll } from "./shared-all.js";
+export const c = sharedAll;`,
+    ),
+  ]);
+
+  const { buildProject } = await import("../dist/builder.js");
+  const entries = ["a", "b", "c"].map((name) => ({
+    id: name,
+    path: path.join(srcDir, `${name}.js`),
+  }));
+  const build = (mode, dev) =>
+    buildProject(
+      {
+        envs: { browser: { conditions: ["default"], target: "browser" } },
+        entries,
+        outputs: {
+          outDir: path.join(projectDir, mode),
+          fileName: "[entry].[env].[hash].js",
+        },
+        cacheDir: path.join(projectDir, `.cache-${mode}`),
+        css: false,
+        maxWorkers: 2,
+        diagnostics: "human",
+        dev,
+      },
+      [],
+    );
+  const [production, development] = await Promise.all([
+    build("production"),
+    build("development", { hmr: true, reactRefresh: false }),
+  ]);
+  const moduleOwners = (result) =>
+    Object.fromEntries(
+      result.manifest.bundles.flatMap((bundle) =>
+        bundle.modules.map((moduleId) => [moduleId, bundle.entryId]),
+      ),
+    );
+
+  expect(moduleOwners(development)).toEqual(moduleOwners(production));
+  expect(production.bundles).toHaveLength(5);
+  expect(development.bundles).toHaveLength(6);
+  expect(
+    production.bundles.filter((bundle) =>
+      bundle.entryId.startsWith("bundler:common:"),
+    ),
+  ).toHaveLength(2);
+  expect(moduleOwners(production)[path.join(srcDir, "shared-all.js")]).toBe(
+    "bundler:common:browser",
+  );
+  expect(moduleOwners(production)[path.join(srcDir, "shared-ab.js")]).toMatch(
+    /^bundler:common:browser:[a-z0-9]+$/,
+  );
+  expect(moduleOwners(production)[path.join(srcDir, "only-a.js")]).toBe(
+    path.join(srcDir, "a.js"),
+  );
+
+  const developmentOutputs = await Promise.all(
+    development.bundles.map(async (bundle) => ({
+      bundle,
+      code: await fs.readFile(
+        path.join(projectDir, "development", bundle.fileName),
+        "utf8",
+      ),
+    })),
+  );
+  const runtimeOutput = developmentOutputs.find(({ bundle }) =>
+    bundle.entryId.startsWith("bundler:hmr-runtime:"),
+  );
+  expect(runtimeOutput).toBeDefined();
+  expect(
+    developmentOutputs.filter(({ code }) =>
+      code.includes("const __BUNDLER_HMR__"),
+    ),
+  ).toEqual([runtimeOutput]);
+  for (const { bundle, code } of developmentOutputs) {
+    if (bundle === runtimeOutput.bundle) {
+      continue;
+    }
+    expect(code).toContain(`from "./${runtimeOutput.bundle.fileName}";`);
+  }
+});
+
 test("rewrites import.meta url", async () => {
   const snapshot = await snapshotFixture("import-meta");
   expect(snapshot).toMatchInlineSnapshot(`
@@ -594,16 +710,27 @@ test("dev hmr emits mutable cell installers keyed by identifiers", async () => {
     result.bundles[0].fileName,
   );
   const output = await fs.readFile(bundlePath, "utf8");
+  const runtimeBundle = result.bundles.find((bundle) =>
+    bundle.entryId.startsWith("bundler:hmr-runtime:"),
+  );
+  const runtimeOutput = await fs.readFile(
+    path.join(outRoot, "simple-hmr", runtimeBundle.fileName),
+    "utf8",
+  );
   const hmrBundle =
     result.manifest.metadata.hmr.bundles[
       `${result.bundles[0].envId}:${result.bundles[0].entryId}`
     ];
   const symbolCell = hmrBundle.cells.find((cell) => cell.symbols.length > 0);
 
-  expect(output).toContain("const __BUNDLER_HMR__");
+  expect(output).toContain(
+    `import { __BUNDLER_HMR__ } from "./${runtimeBundle.fileName}";`,
+  );
   expect(output).toContain("__BUNDLER_HMR__.register");
-  expect(output).toContain('message.type === "rsc-refresh"');
-  expect(output).toContain('"bundler:rsc-refresh"');
+  expect(output).not.toContain("const __BUNDLER_HMR__");
+  expect(runtimeOutput).toContain("const __BUNDLER_HMR__");
+  expect(runtimeOutput).toContain('message.type === "rsc-refresh"');
+  expect(runtimeOutput).toContain('"bundler:rsc-refresh"');
   expect(output).toContain("let a33jpi1jb_value");
   expect(output).toContain("a33jpi1jb_value = k7isotkd_foo + 1;");
   expect(hmrBundle.reactRefresh).toBe(false);

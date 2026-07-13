@@ -300,9 +300,22 @@ export async function buildProject(
       const partitions = createBundlePartitions(graph, bundleEntries);
       let drafts = await Promise.all(
         partitions.map((partition) =>
-          createBundlePlan(graph, partition, config, devOptions),
+          createBundlePlan(graph, partition, devOptions),
         ),
       );
+      if (devOptions.hmr) {
+        const runtimeEntryId = `bundler:hmr-runtime:${graph.envId}`;
+        drafts = drafts.map((draft) => ({
+          ...draft,
+          staticImports: [
+            ...(draft.staticImports ?? []),
+            { entryId: runtimeEntryId, symbols: ["__BUNDLER_HMR__"] },
+          ],
+        }));
+        drafts.push(
+          createHmrRuntimePlan(graph.envId, runtimeEntryId, config, devOptions),
+        );
+      }
       drafts = (await runBeforeCombine(normalizedPlugins, {
         envId: graph.envId,
         plans: drafts,
@@ -761,10 +774,8 @@ function createBundlePartitions(
     new Map(rawEntries.map((entry) => [entry.entryId, entry])).values(),
   );
   const entryIds = new Set(entries.map((entry) => entry.entryId));
-  const sharedEntryId = `bundler:common:${graph.envId}`;
-  if (entryIds.has(sharedEntryId)) {
-    throw new Error(`Reserved bundle entry id '${sharedEntryId}' is in use.`);
-  }
+  const allEntryIds = entries.map((entry) => entry.entryId).sort();
+  const sharedEntryIds = new Set<string>();
 
   const entryData = entries.map((entry) => {
     if (!graph.nodes.has(entry.entryId)) {
@@ -793,6 +804,17 @@ function createBundlePartitions(
     if (entryIds.has(moduleId)) {
       ownerByModule.set(moduleId, moduleId);
     } else if (consumers.size > 1) {
+      const sharedEntryId = createSharedBundleEntryId(
+        graph.envId,
+        consumers,
+        allEntryIds,
+      );
+      if (entryIds.has(sharedEntryId)) {
+        throw new Error(
+          `Reserved bundle entry id '${sharedEntryId}' is in use.`,
+        );
+      }
+      sharedEntryIds.add(sharedEntryId);
       ownerByModule.set(moduleId, sharedEntryId);
     } else {
       ownerByModule.set(moduleId, consumers.values().next().value as string);
@@ -944,14 +966,12 @@ function createBundlePartitions(
 
   return [
     ...entries.map((entry) => ({ ...entry, entryNodeId: entry.entryId })),
-    ...(selectionsByOwner.has(sharedEntryId)
-      ? [
-          {
-            entryId: sharedEntryId,
-            exportMode: "dynamic" as const,
-          },
-        ]
-      : []),
+    ...Array.from(sharedEntryIds)
+      .sort()
+      .map((entryId) => ({
+        entryId,
+        exportMode: "dynamic" as const,
+      })),
   ].map((entry) => {
     const conditionStates = conditionStatesByOwner.get(entry.entryId);
     const conditions = new Map<string, ConditionExpr | undefined>();
@@ -984,6 +1004,21 @@ function createBundlePartitions(
   });
 }
 
+function createSharedBundleEntryId(
+  envId: string,
+  consumers: Set<string>,
+  allEntryIds: string[],
+): string {
+  const consumerIds = Array.from(consumers).sort();
+  if (
+    consumerIds.length === allEntryIds.length &&
+    consumerIds.every((entryId, index) => entryId === allEntryIds[index])
+  ) {
+    return `bundler:common:${envId}`;
+  }
+  return `bundler:common:${envId}:${contentHashShort(consumerIds.join("\0"))}`;
+}
+
 function mergeSelectedCells(
   selectionsByOwner: Map<string, Map<string, Set<string>>>,
   owner: string,
@@ -1003,7 +1038,6 @@ function mergeSelectedCells(
 async function createBundlePlan(
   graph: ModuleGraph,
   partition: BundlePartition,
-  config: BundlerConfig,
   devOptions: ResolvedDevOptions,
 ): Promise<BundlePlanDraftWithHmr> {
   const { entryId, exportMode, conditions, diagnostics, selection } = partition;
@@ -1050,15 +1084,6 @@ async function createBundlePlan(
   }
 
   if (useHmr) {
-    parts.push({
-      code: emitHmrPrelude({
-        connect:
-          exportMode === "entry" &&
-          config.envs[graph.envId]?.target === "browser",
-        reactRefresh:
-          useReactRefresh && config.envs[graph.envId]?.target === "browser",
-      }),
-    });
     const declarations = emitHmrSymbolDeclarations(hmrSymbols);
     if (declarations) {
       parts.push({ code: declarations });
@@ -1148,6 +1173,35 @@ async function createBundlePlan(
           cells: hmrCells,
         }
       : undefined,
+  };
+}
+
+function createHmrRuntimePlan(
+  envId: string,
+  entryId: string,
+  config: BundlerConfig,
+  devOptions: ResolvedDevOptions,
+): BundlePlanDraftWithHmr {
+  const browser = config.envs[envId]?.target === "browser";
+  return {
+    envId,
+    entryId,
+    exportMode: "dynamic",
+    modules: [],
+    conditions: [],
+    conditionNames: [],
+    orderedParts: [
+      {
+        code: emitHmrPrelude({
+          connect: browser,
+          reactRefresh: browser && devOptions.reactRefreshEnvs.has(envId),
+        }),
+      },
+      { code: "export { __BUNDLER_HMR__ };" },
+    ],
+    staticImports: [],
+    dynamicImports: [],
+    diagnostics: [],
   };
 }
 

@@ -228,6 +228,43 @@ test("react-rsc-basic development serves HMR output and linked source maps", asy
       expect(flight).not.toContain(":E");
 
       const manifest = await readManifest();
+      const clientBundles = manifest.bundles.filter(
+        (bundle) => bundle.envId === "client",
+      );
+      const runtimeBundle = clientBundles.find(
+        (bundle) => bundle.entryId === "bundler:hmr-runtime:client",
+      );
+      const commonBundle = clientBundles.find(
+        (bundle) => bundle.entryId === "bundler:common:client",
+      );
+      const clientModuleIds = clientBundles.flatMap((bundle) => bundle.modules);
+      expect(new Set(clientModuleIds).size).toBe(clientModuleIds.length);
+      expect(runtimeBundle).toBeDefined();
+      expect(commonBundle).toBeDefined();
+      const clientOutputs = await Promise.all(
+        clientBundles.map(async (bundle) => ({
+          bundle,
+          code: await fs.readFile(
+            path.join(exampleDir, "dist", bundle.fileName),
+            "utf8",
+          ),
+        })),
+      );
+      expect(
+        clientOutputs.filter(({ code }) =>
+          code.includes("const __BUNDLER_HMR__"),
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          bundle: expect.objectContaining({ entryId: runtimeBundle.entryId }),
+        }),
+      ]);
+      for (const { bundle, code } of clientOutputs) {
+        if (bundle.entryId === runtimeBundle.entryId) {
+          continue;
+        }
+        expect(code).toContain(`from "./${runtimeBundle.fileName}"`);
+      }
       const serverBundle = findBundle(manifest, "rsc");
       const counterBundle = manifest.bundles.find((bundle) =>
         bundle.conditionNames?.includes("DEV"),

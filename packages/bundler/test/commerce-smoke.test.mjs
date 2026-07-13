@@ -354,6 +354,43 @@ test("react-rsc-commerce dev server serves linked source maps", async () => {
     const manifest = JSON.parse(
       await fs.readFile(path.join(exampleDir, "dist/manifest.json"), "utf8"),
     );
+    const clientBundles = manifest.bundles.filter(
+      (bundle) => bundle.envId === "client",
+    );
+    const runtimeBundle = clientBundles.find(
+      (bundle) => bundle.entryId === "bundler:hmr-runtime:client",
+    );
+    const commonBundle = clientBundles.find(
+      (bundle) => bundle.entryId === "bundler:common:client",
+    );
+    const clientModuleIds = clientBundles.flatMap((bundle) => bundle.modules);
+    expect(new Set(clientModuleIds).size).toBe(clientModuleIds.length);
+    expect(runtimeBundle).toBeDefined();
+    expect(commonBundle).toBeDefined();
+    const clientOutputs = await Promise.all(
+      clientBundles.map(async (bundle) => ({
+        bundle,
+        code: await fs.readFile(
+          path.join(exampleDir, "dist", bundle.fileName),
+          "utf8",
+        ),
+      })),
+    );
+    expect(
+      clientOutputs.filter(({ code }) =>
+        code.includes("const __BUNDLER_HMR__"),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        bundle: expect.objectContaining({ entryId: runtimeBundle.entryId }),
+      }),
+    ]);
+    for (const { bundle, code } of clientOutputs) {
+      if (bundle.entryId === runtimeBundle.entryId) {
+        continue;
+      }
+      expect(code).toContain(`from "./${runtimeBundle.fileName}"`);
+    }
     const serverBundle = manifest.bundles.find(
       (bundle) =>
         bundle.envId === "rsc" && bundle.entryId.endsWith("server.jsx"),
