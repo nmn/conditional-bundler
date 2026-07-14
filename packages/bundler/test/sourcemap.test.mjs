@@ -1,6 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { AnyMap, originalPositionFor } from "@jridgewell/trace-mapping";
+import {
+  AnyMap,
+  originalPositionFor,
+  sourceContentFor,
+} from "@jridgewell/trace-mapping";
 
 const rootDir = path.resolve(process.cwd());
 const fixturesDir = path.join(rootDir, "test/fixtures");
@@ -78,6 +82,9 @@ test("emits one indexed map whose cell sections trace across modules", async () 
   const entryOriginal = originalPositionFor(traceMap, entryPosition);
   expect(entryOriginal.source).toMatch(/fixtures\/simple\/src\/index\.js$/);
   expect(entryOriginal.line).toBe(4);
+  expect(sourceContentFor(traceMap, entryOriginal.source)).toContain(
+    'import { foo } from "./foo.js"',
+  );
 
   const dependencyPosition = generatedPosition(code, "const k7isotkd_foo");
   const dependencyOriginal = originalPositionFor(traceMap, dependencyPosition);

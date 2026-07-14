@@ -6,8 +6,7 @@
   "main": "./index.mjs",
   "exports": {
     ".": "./index.mjs",
-    "./bundler": "./bundler.mjs",
-    "./react-rsc": "./react-rsc.mjs"
+    "./bundler": "./bundler.mjs"
   },
   "scripts": {
     "test": "NODE_OPTIONS=--experimental-vm-modules ../../node_modules/.bin/jest --config ../../jest.config.cjs packages/cjs-to-esm/test",

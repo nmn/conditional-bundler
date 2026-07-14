@@ -159,9 +159,15 @@ importers:
 
   packages/react-rsc-plugin:
     dependencies:
+      '@babel/parser':
+        specifier: ^7.24.0
+        version: 7.28.6
       '@babel/plugin-transform-react-jsx':
         specifier: 7.27.1
         version: 7.27.1(@babel/core@7.28.6)
+      '@bundler/cjs-to-esm':
+        specifier: workspace:*
+        version: link:../cjs-to-esm
       source-map-support:
         specifier: 0.5.21
         version: 0.5.21

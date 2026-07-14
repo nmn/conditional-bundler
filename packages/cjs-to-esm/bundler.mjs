@@ -12,8 +12,6 @@ const transformPath = fileURLToPath(new URL("./index.mjs", import.meta.url));
 const packageTypeCache = new Map();
 
 export default function cjsToEsmBundlerPlugin(options = {}) {
-  const dependencyMappings = options.dependencyMappings ?? {};
-  const entryMappings = options.entryMappings ?? {};
   const nodeEnv = resolveNodeEnv(options);
   const mode = nodeEnv === "production" ? "production" : "development";
 
@@ -39,20 +37,14 @@ export default function cjsToEsmBundlerPlugin(options = {}) {
       }
 
       const parent = isCjsVirtualId(fromId) ? decodeCjsVirtualId(fromId) : null;
-      const mapping = parent
-        ? dependencyMappings[parent.envId ?? envId]?.[request]
-        : entryMappings[envId]?.[request];
-      const normalizedMapping = normalizeMapping(mapping);
-      const resolved = normalizedMapping?.filePath
-        ? { filePath: normalizedMapping.filePath }
-        : await context.resolveDefault();
+      const resolved = await context.resolveDefault();
       if (!resolved || !isCommonJsFile(resolved.filePath)) {
         return resolved;
       }
 
       return {
         id: encodeCjsVirtualId(
-          normalizedMapping?.envId ?? parent?.envId ?? envId,
+          parent?.envId ?? envId,
           resolved.filePath,
           undefined,
           nodeEnv,
@@ -76,8 +68,6 @@ export default function cjsToEsmBundlerPlugin(options = {}) {
           strategy: options.strategy ?? "auto",
           mode,
           nodeEnv,
-          dependencyMappings,
-          preambles: options.preambles,
         },
       ],
     ],
@@ -95,11 +85,6 @@ function resolveNodeEnv(options) {
     throw new Error("cjs-to-esm requires NODE_ENV to be a non-empty string.");
   }
   return nodeEnv;
-}
-
-function normalizeMapping(mapping) {
-  if (!mapping) return null;
-  return typeof mapping === "string" ? { filePath: mapping } : mapping;
 }
 
 function isCommonJsFile(filePath) {

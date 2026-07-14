@@ -1,7 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { plugin } from "@bundler/bundler";
-import { createReactRscCjsOptions } from "@bundler/cjs-to-esm/react-rsc";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.BUNDLER_MODE === "development";
@@ -31,7 +30,6 @@ export default {
     sourceMap: "external",
   },
   plugins: [
-    plugin("@bundler/cjs-to-esm/bundler", createReactRscCjsOptions({ root })),
     plugin("@bundler/react-rsc-plugin", {
       root,
       name: "react-rsc-basic",
@@ -39,6 +37,7 @@ export default {
       clientEntry: false,
       runtimeEntry: true,
     }),
+    plugin("@bundler/cjs-to-esm/bundler"),
   ],
   cacheDir: path.join(root, ".cache/conditional-bundler"),
   maxWorkers: 2,

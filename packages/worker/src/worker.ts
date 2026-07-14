@@ -57,20 +57,6 @@ type WorkerRequest = {
   discoveredEntrypointsByEnv?: Record<string, DiscoveredEntrypoint[]>;
   extraOutputsByEnv?: Record<string, Record<string, ExtraTransformOutput>>;
   workerProfile: WorkerTransformProfile;
-  cacheOnly?: boolean;
-  resolvedImportsByEnv?: Record<
-    string,
-    Record<
-      string,
-      {
-        id: string | null;
-        filePath: string | null;
-        external: boolean;
-        virtual?: boolean;
-        meta?: Record<string, unknown>;
-      }
-    >
-  >;
   dev?: {
     hmr?: boolean;
   };
@@ -79,8 +65,6 @@ type WorkerRequest = {
 type WorkerResponse = {
   ok: boolean;
   cacheHit?: boolean;
-  needsResolution?: boolean;
-  unresolvedImportsByEnv?: Record<string, WorkerImportRequest[]>;
   contentHash: string;
   prefix: string;
   fileRecordsByEnv: Record<string, FileRecord>;
@@ -96,6 +80,27 @@ type WorkerImportRequest = {
     | "conditional-else";
   request: string;
   importAttributes?: Record<string, string>;
+};
+
+type ResolvedImportsByEnv = Record<
+  string,
+  Record<
+    string,
+    {
+      id: string | null;
+      filePath: string | null;
+      external: boolean;
+      virtual?: boolean;
+      meta?: Record<string, unknown>;
+    }
+  >
+>;
+
+type CoordinatorResponseMessage = {
+  type: "coordinator-response";
+  requestId: number;
+  payload?: unknown;
+  error?: string;
 };
 
 type ModuleCacheRecord = {
@@ -118,7 +123,12 @@ type RemoteCacheAdapter = {
 };
 
 const babelModuleCache = new Map<string, unknown>();
-const CELL_ARTIFACT_FORMAT = 7;
+const pendingCoordinatorRequests = new Map<
+  number,
+  { resolve: (value: unknown) => void; reject: (error: Error) => void }
+>();
+let nextCoordinatorRequestId = 1;
+const CELL_ARTIFACT_FORMAT = 9;
 const remapping = ((
   remappingModule as unknown as {
     default?: typeof import("@ampproject/remapping").default;
@@ -178,17 +188,6 @@ async function handleTransform(
     };
   }
 
-  if (request.cacheOnly) {
-    return {
-      ok: true,
-      cacheHit: false,
-      needsResolution: true,
-      contentHash: fileHash,
-      prefix: "",
-      fileRecordsByEnv: {},
-    };
-  }
-
   const normalizedPath = normalizePosixPath(request.realPath);
   const relPath = path.posix.relative(request.pkg.root, normalizedPath);
   const prefix = filePrefix(
@@ -197,21 +196,6 @@ async function handleTransform(
     request.id.startsWith("virtual:") ? request.id : relPath,
   );
   const resultsByEnv = await transformFile(request);
-  const unresolvedImportsByEnv = collectUnresolvedImportsByEnv(
-    resultsByEnv,
-    request,
-  );
-  if (Object.keys(unresolvedImportsByEnv).length > 0) {
-    return {
-      ok: true,
-      cacheHit: false,
-      needsResolution: true,
-      unresolvedImportsByEnv,
-      contentHash: fileHash,
-      prefix,
-      fileRecordsByEnv: {},
-    };
-  }
   const fileRecordsByEnv = Object.fromEntries(
     Object.entries(resultsByEnv).map(([envId, result]) => {
       if (!result.fileRecord) {
@@ -256,80 +240,21 @@ async function handleTransform(
   };
 }
 
-function collectUnresolvedImportsByEnv(
-  resultsByEnv: Record<string, TransformResult>,
-  request: WorkerRequest,
-): Record<string, WorkerImportRequest[]> {
-  const unresolvedByEnv: Record<string, WorkerImportRequest[]> = {};
-
-  for (const [envId, result] of Object.entries(resultsByEnv)) {
-    const fileRecord = result.fileRecord;
-    if (!fileRecord) {
-      continue;
-    }
-    const resolved = request.resolvedImportsByEnv?.[envId] ?? {};
-    const unresolved = new Map<string, WorkerImportRequest>();
-    const add = (
-      kind: WorkerImportRequest["kind"],
-      importRequest: string,
-      importAttributes?: Record<string, string>,
-    ) => {
-      const key = `${kind}:${importRequest}`;
-      if (resolved[key]) {
-        return;
-      }
-      unresolved.set(key, {
-        key,
-        kind,
-        request: importRequest,
-        importAttributes,
-      });
-    };
-
-    for (const entry of fileRecord.imports) {
-      add(
-        entry.condition ? "conditional-import" : "import",
-        entry.request ?? entry.source,
-        entry.attributes ??
-          (typeof entry.condition === "string"
-            ? { condition: entry.condition }
-            : undefined),
-      );
-    }
-    for (const entry of fileRecord.conditionalImports) {
-      if (entry.elseSource) {
-        add(
-          "conditional-else",
-          entry.elseRequest ?? entry.elseSource,
-          typeof entry.condition === "string"
-            ? { condition: entry.condition }
-            : undefined,
-        );
-      }
-    }
-    for (const entry of [
-      ...fileRecord.exportStars,
-      ...fileRecord.reexportsNamed,
-    ]) {
-      add("reexport", entry.request ?? entry.source);
-    }
-    for (const entry of fileRecord.dynamicImports) {
-      add("dynamic-import", entry.request ?? entry.source);
-    }
-
-    if (unresolved.size > 0) {
-      unresolvedByEnv[envId] = Array.from(unresolved.values());
-    }
-  }
-
-  return unresolvedByEnv;
-}
-
 async function transformFile(
   request: WorkerRequest,
 ): Promise<Record<string, TransformResult>> {
-  const { transformWithCore } = await import("./transform/core.js");
+  const { prepareCoreTransform, transformWithCore } =
+    await import("./transform/core.js");
   const results: Record<string, TransformResult> = {};
+  const preResults: Record<
+    string,
+    Awaited<ReturnType<typeof applyBabelStage>>
+  > = {};
+  const preparedByEnv: Record<
+    string,
+    ReturnType<typeof prepareCoreTransform>
+  > = {};
+  const requestsByEnv: Record<string, WorkerImportRequest[]> = {};
 
   for (const envId of request.envs) {
     const initialCode = request.codeByEnv?.[envId] ?? request.code;
@@ -349,6 +274,31 @@ async function transformFile(
       envId,
       transformSpecs,
     );
+    preResults[envId] = preResult;
+    const prepared = prepareCoreTransform(
+      {
+        code: preResult.code,
+        realPath: request.realPath,
+        syntax: request.syntax,
+      },
+      request.sourceMap?.sourceFileName,
+    );
+    preparedByEnv[envId] = prepared;
+    requestsByEnv[envId] = prepared.importRequests;
+  }
+
+  const hasImports = Object.values(requestsByEnv).some(
+    (requests) => requests.length > 0,
+  );
+  const resolvedImportsByEnv = hasImports
+    ? await requestCoordinator<ResolvedImportsByEnv>({
+        type: "resolve-imports",
+        requestsByEnv,
+      })
+    : {};
+
+  for (const envId of request.envs) {
+    const preResult = preResults[envId];
     const coreResult = transformWithCore(
       {
         id: request.id,
@@ -358,43 +308,48 @@ async function transformFile(
         syntax: request.syntax,
         envs: request.envs,
         envId,
-        resolvedImports: request.resolvedImportsByEnv?.[envId],
+        resolvedImports: resolvedImportsByEnv[envId],
         dev: request.dev,
       },
       {
         importAttrAllow: ["json"],
+        generateModuleOutput: false,
         sourceMap: request.sourceMap
           ? {
               sourceFileName: request.sourceMap.sourceFileName,
               sourcesContent: request.sourceMap.sourcesContent,
+              embedCellSourcesContent: false,
             }
           : undefined,
       },
+      preparedByEnv[envId],
     );
-    const coreMap = composeSourceMaps(coreResult.map, preResult.map);
+    const parsedPreMap = preResult.map
+      ? (JSON.parse(preResult.map) as Record<string, unknown>)
+      : undefined;
+    const sourceContents: Record<string, string> = {};
+    if (request.sourceMap?.sourcesContent) {
+      if (parsedPreMap) {
+        collectSourceContents(parsedPreMap, request, sourceContents);
+      } else {
+        sourceContents[request.sourceMap.sourceFileName] = preResult.code;
+      }
+    }
     const coreCells = (coreResult.fileRecord?.cells ?? []).map((cell) => ({
       ...cell,
-      map: composeSourceMaps(cell.map, preResult.map),
+      map: composeSourceMaps(cell.map, preResult.map, parsedPreMap),
     }));
-    const postResult = await applyBabelStage(
-      coreResult.code,
-      coreMap,
-      request,
-      envId,
+    const postSpecs =
       request.workerProfile.transformPost[envId] ??
-        request.workerProfile.transformPost.default ??
-        [],
-    );
+      request.workerProfile.transformPost.default ??
+      [];
     const postCells = coreResult.fileRecord
-      ? await applyBabelStageToCells(
-          coreCells,
-          request,
-          envId,
-          request.workerProfile.transformPost[envId] ??
-            request.workerProfile.transformPost.default ??
-            [],
-        )
+      ? await applyBabelStageToCells(coreCells, request, envId, postSpecs)
       : [];
+    const normalizedCells = postCells.map((cell) => ({
+      ...cell,
+      map: normalizeSourceMap(cell.map, request, sourceContents),
+    }));
     const metadata = preResult.metadata as
       | {
           conditionalBundlerExtraOutputs?: Record<string, ExtraTransformOutput>;
@@ -413,18 +368,17 @@ async function transformFile(
     ];
     results[envId] = {
       ...coreResult,
-      code: postResult.code,
-      map: normalizeSourceMap(postResult.map, request),
       fileRecord: coreResult.fileRecord
         ? {
             ...coreResult.fileRecord,
             discoveredEntrypoints,
             extraOutputs:
               Object.keys(extraOutputs).length > 0 ? extraOutputs : undefined,
-            cells: postCells.map((cell) => ({
-              ...cell,
-              map: normalizeSourceMap(cell.map, request),
-            })),
+            sourceContents:
+              Object.keys(sourceContents).length > 0
+                ? sourceContents
+                : undefined,
+            cells: normalizedCells,
           }
         : undefined,
     };
@@ -527,6 +481,7 @@ async function applyBabelStageToCells(
 function composeSourceMaps(
   generatedMap: string | undefined,
   inputMap: string | undefined,
+  parsedInputMap?: Record<string, unknown>,
 ): string | undefined {
   if (!generatedMap) {
     return undefined;
@@ -536,26 +491,69 @@ function composeSourceMaps(
   }
   const maps = [
     JSON.parse(generatedMap),
-    JSON.parse(inputMap),
+    parsedInputMap ?? JSON.parse(inputMap),
   ] as unknown as Parameters<typeof remapping>[0];
-  return JSON.stringify(remapping(maps, () => null));
+  return JSON.stringify(
+    remapping(maps, () => null, {
+      excludeContent: true,
+      decodedMappings: false,
+    }),
+  );
+}
+
+function collectSourceContents(
+  map: Record<string, unknown>,
+  request: WorkerRequest,
+  output: Record<string, string>,
+): void {
+  if (Array.isArray(map.sections)) {
+    for (const section of map.sections) {
+      if (
+        section &&
+        typeof section === "object" &&
+        "map" in section &&
+        section.map &&
+        typeof section.map === "object"
+      ) {
+        collectSourceContents(
+          section.map as Record<string, unknown>,
+          request,
+          output,
+        );
+      }
+    }
+    return;
+  }
+  if (!Array.isArray(map.sources) || !Array.isArray(map.sourcesContent)) {
+    return;
+  }
+  const sourceRoot = typeof map.sourceRoot === "string" ? map.sourceRoot : "";
+  for (const [index, source] of map.sources.entries()) {
+    const content = map.sourcesContent[index];
+    if (typeof source !== "string" || typeof content !== "string") {
+      continue;
+    }
+    output[normalizeSourceName(source, sourceRoot, request)] = content;
+  }
 }
 
 function normalizeSourceMap(
   map: string | undefined,
   request: WorkerRequest,
+  sourceContents?: Record<string, string>,
 ): string | undefined {
   if (!map || !request.sourceMap) {
     return undefined;
   }
   const parsed = JSON.parse(map) as Record<string, unknown>;
-  normalizeSourceMapObject(parsed, request);
+  normalizeSourceMapObject(parsed, request, sourceContents);
   return JSON.stringify(parsed);
 }
 
 function normalizeSourceMapObject(
   map: Record<string, unknown>,
   request: WorkerRequest,
+  sourceContents?: Record<string, string>,
 ): void {
   if (Array.isArray(map.sections)) {
     for (const section of map.sections) {
@@ -569,6 +567,7 @@ function normalizeSourceMapObject(
         normalizeSourceMapObject(
           section.map as Record<string, unknown>,
           request,
+          sourceContents,
         );
       }
     }
@@ -584,7 +583,19 @@ function normalizeSourceMapObject(
     );
   }
   delete map.sourceRoot;
-  if (!request.sourceMap?.sourcesContent) {
+  if (
+    sourceContents &&
+    Array.isArray(map.sources) &&
+    Array.isArray(map.sourcesContent)
+  ) {
+    for (const [index, source] of (map.sources as unknown[]).entries()) {
+      const content = map.sourcesContent[index];
+      if (typeof source === "string" && typeof content === "string") {
+        sourceContents[source] = content;
+      }
+    }
+    delete map.sourcesContent;
+  } else if (!request.sourceMap?.sourcesContent) {
     delete map.sourcesContent;
   }
 }
@@ -1076,12 +1087,51 @@ async function hasCachedArtifacts(
   return true;
 }
 
-parentPort.on("message", async (request: WorkerRequest) => {
-  try {
-    await ensureDir(request.cacheDir);
-    const response = await handleTransform(request);
-    parentPort?.postMessage(response);
-  } catch (error) {
-    parentPort?.postMessage({ ok: false, error: (error as Error).message });
-  }
-});
+function requestCoordinator<T>(payload: unknown): Promise<T> {
+  const requestId = nextCoordinatorRequestId;
+  nextCoordinatorRequestId += 1;
+  return new Promise<T>((resolve, reject) => {
+    pendingCoordinatorRequests.set(requestId, {
+      resolve: (value) => resolve(value as T),
+      reject,
+    });
+    parentPort?.postMessage({
+      type: "coordinator-request",
+      requestId,
+      payload,
+    });
+  });
+}
+
+function isCoordinatorResponse(
+  message: WorkerRequest | CoordinatorResponseMessage,
+): message is CoordinatorResponseMessage {
+  return "type" in message && message.type === "coordinator-response";
+}
+
+parentPort.on(
+  "message",
+  async (request: WorkerRequest | CoordinatorResponseMessage) => {
+    if (isCoordinatorResponse(request)) {
+      const pending = pendingCoordinatorRequests.get(request.requestId);
+      if (!pending) {
+        return;
+      }
+      pendingCoordinatorRequests.delete(request.requestId);
+      if (request.error) {
+        pending.reject(new Error(request.error));
+      } else {
+        pending.resolve(request.payload);
+      }
+      return;
+    }
+
+    try {
+      await ensureDir(request.cacheDir);
+      const response = await handleTransform(request);
+      parentPort?.postMessage(response);
+    } catch (error) {
+      parentPort?.postMessage({ ok: false, error: (error as Error).message });
+    }
+  },
+);

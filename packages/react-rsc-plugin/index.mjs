@@ -1,7 +1,26 @@
 import { createRequire } from "node:module";
 import path from "node:path";
+import {
+  decodeCjsVirtualId,
+  encodeCjsVirtualId,
+  isCjsVirtualId,
+} from "@bundler/cjs-to-esm";
 
 const requireFromPlugin = createRequire(import.meta.url);
+const reactPackageRequests = new Set([
+  "react",
+  "react/jsx-runtime",
+  "react/jsx-dev-runtime",
+  "react-dom",
+  "react-dom/client",
+  "react-dom/server",
+  "react-dom/server.node",
+  "react-server-dom-webpack/client.browser",
+  "react-server-dom-webpack/client",
+  "react-server-dom-webpack/client.node",
+  "react-server-dom-webpack/server",
+  "react-server-dom-webpack/server.node",
+]);
 
 export default function reactRscPlugin(options) {
   return createReactRscPlugin(options);
@@ -45,6 +64,9 @@ export function createReactRscPlugin(options) {
     jsxRuntime === "classic"
       ? { runtime: "classic" }
       : { runtime: "automatic", importSource: "react" };
+  const projectRequire = createRequire(path.join(root, "package.json"));
+  const nodeEnv =
+    process.env.NODE_ENV ?? process.env.BUNDLER_MODE ?? "development";
   return {
     name: options.name ?? "react-rsc-example",
     buildStart({ addEntry }) {
@@ -66,6 +88,33 @@ export function createReactRscPlugin(options) {
         addEntry({ id: "client", path: runtimeEntry, envs: [clientEnv] });
       }
     },
+    resolveImport(context) {
+      if (
+        isCjsVirtualId(context.request) ||
+        !reactPackageRequests.has(context.request)
+      ) {
+        return undefined;
+      }
+
+      const parent = isCjsVirtualId(context.fromId)
+        ? decodeCjsVirtualId(context.fromId)
+        : null;
+      const parentEnv = parent?.envId ?? context.envId;
+      const cjsEnv = parent
+        ? parentEnv
+        : getReactCjsEnvId(context.request, parentEnv, clientEnv);
+      const filePath = resolveReactImplementation(
+        projectRequire,
+        context.request,
+        cjsEnv,
+        rscEnv,
+      );
+      return {
+        id: encodeCjsVirtualId(cjsEnv, filePath, undefined, nodeEnv),
+        filePath,
+        virtual: true,
+      };
+    },
     load({ id }) {
       if (runtimeEntry && id === runtimeEntry) {
         return { code: createRscRuntimeSource(options) };
@@ -81,6 +130,7 @@ export function createReactRscPlugin(options) {
         "./transform.mjs",
         { root, clientEnv, rscEnv, discoverClientEntrypoints },
       ],
+      ["./webpack-shim-transform.mjs", { clientEnv }],
     ],
     buildEnd({ manifest, modules, emitFile }) {
       const records = {};
@@ -124,6 +174,75 @@ export function createReactRscPlugin(options) {
       });
     },
   };
+}
+
+function resolveReactImplementation(
+  requireFromProject,
+  request,
+  envId,
+  rscEnv,
+) {
+  const reactServer = envId === rscEnv;
+  const packageRoot = (pkg) =>
+    path.dirname(requireFromProject.resolve(`${pkg}/package.json`));
+
+  switch (request) {
+    case "react":
+      return path.join(
+        packageRoot("react"),
+        reactServer ? "react.react-server.js" : "index.js",
+      );
+    case "react/jsx-runtime":
+      return path.join(
+        packageRoot("react"),
+        reactServer ? "jsx-runtime.react-server.js" : "jsx-runtime.js",
+      );
+    case "react/jsx-dev-runtime":
+      return path.join(
+        packageRoot("react"),
+        reactServer ? "jsx-dev-runtime.react-server.js" : "jsx-dev-runtime.js",
+      );
+    case "react-dom":
+      return path.join(
+        packageRoot("react-dom"),
+        reactServer ? "react-dom.react-server.js" : "index.js",
+      );
+    case "react-dom/client":
+      return path.join(packageRoot("react-dom"), "client.js");
+    case "react-dom/server":
+    case "react-dom/server.node":
+      return path.join(packageRoot("react-dom"), "server.node.js");
+    case "react-server-dom-webpack/client.browser":
+    case "react-server-dom-webpack/client":
+      return path.join(
+        packageRoot("react-server-dom-webpack"),
+        "client.browser.js",
+      );
+    case "react-server-dom-webpack/client.node":
+      return path.join(
+        packageRoot("react-server-dom-webpack"),
+        "client.node.js",
+      );
+    case "react-server-dom-webpack/server":
+    case "react-server-dom-webpack/server.node":
+      return path.join(
+        packageRoot("react-server-dom-webpack"),
+        "server.node.js",
+      );
+    default:
+      throw new Error(`Unsupported React RSC package import '${request}'.`);
+  }
+}
+
+function getReactCjsEnvId(request, envId, clientEnv) {
+  if (
+    request === "react-dom/server" ||
+    request === "react-dom/server.node" ||
+    request === "react-server-dom-webpack/client.node"
+  ) {
+    return clientEnv;
+  }
+  return envId;
 }
 
 function resolveProjectPath(root, value) {

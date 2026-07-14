@@ -2,6 +2,7 @@ import {
   assembleBundle,
   stringifySourceMap,
 } from "../dist/sourcemap/compose.js";
+import { AnyMap, sourceContentFor } from "@jridgewell/trace-mapping";
 
 const leafMap = {
   version: 3,
@@ -38,5 +39,30 @@ test("assembles multiline parts and lifts nested indexed sections", () => {
   ]);
   expect(stringifySourceMap(assembled.map)).not.toContain(
     '"map":{"version":3,"sections"',
+  );
+});
+
+test("emits shared source content once across cell sections", () => {
+  const mapWithoutContent = JSON.stringify({
+    ...leafMap,
+    sourcesContent: undefined,
+  });
+  const assembled = assembleBundle([
+    {
+      code: "first();",
+      map: mapWithoutContent,
+      sourceContents: { "source.js": "original();" },
+    },
+    {
+      code: "second();",
+      map: mapWithoutContent,
+      sourceContents: { "source.js": "original();" },
+    },
+  ]);
+
+  expect(assembled.map.sections[0].map.sourcesContent).toEqual(["original();"]);
+  expect(assembled.map.sections[1].map.sourcesContent).toBeUndefined();
+  expect(sourceContentFor(new AnyMap(assembled.map), "source.js")).toBe(
+    "original();",
   );
 });

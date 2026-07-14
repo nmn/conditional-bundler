@@ -1409,6 +1409,7 @@ test("resolves imports introduced by transform plugins", async () => {
     rootDir,
     "packages/bundler/test/plugins/introduced-import-plugin.mjs",
   );
+  const countFile = path.join(projectDir, "transform-count.txt");
   const { buildProject } = await import("../dist/builder.js");
   const result = await buildProject(
     {
@@ -1419,7 +1420,13 @@ test("resolves imports introduced by transform plugins", async () => {
       css: false,
       maxWorkers: 2,
       diagnostics: "human",
-      plugins: [{ __bundlerPluginRef: true, module: pluginModule }],
+      plugins: [
+        {
+          __bundlerPluginRef: true,
+          module: pluginModule,
+          options: { countFile },
+        },
+      ],
     },
     [],
   );
@@ -1435,6 +1442,7 @@ test("resolves imports introduced by transform plugins", async () => {
     pathToFileURL(`${outDir}${path.sep}`),
   );
   await expect(import(bundleUrl.href)).resolves.toMatchObject({ value: 42 });
+  await expect(fs.readFile(countFile, "utf8")).resolves.toBe("transform\n");
 });
 
 test("caches extra transform outputs and exposes them to build plugins", async () => {

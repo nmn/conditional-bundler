@@ -94,6 +94,7 @@ export type StaticBundleImportDraft = {
 export type BundlePart = {
   code: string;
   map?: string;
+  sourceContents?: Record<string, string>;
 };
 
 export type BundlePlanDraft = {

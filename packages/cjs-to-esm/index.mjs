@@ -52,7 +52,6 @@ export default function cjsToEsmBabelPlugin(api, options = {}) {
           mode,
           nodeEnv,
           virtualPrefix,
-          dependencyMappings: pluginOptions.dependencyMappings ?? {},
         };
 
         const strategy = pluginOptions.strategy ?? "auto";
@@ -76,16 +75,10 @@ export default function cjsToEsmBabelPlugin(api, options = {}) {
                   programPath.getData("cjsToEsmFallbackReason") ??
                   "unsupported-commonjs",
               });
-        const preamble = readConfiguredPreamble(
-          filePath,
-          pluginOptions.preambles,
-          t,
-        );
-
         programPath.node.sourceType = "module";
         programPath.node.interpreter = null;
         programPath.node.directives = [];
-        programPath.node.body = [...preamble, ...transformed.body];
+        programPath.node.body = transformed.body;
         state.file.metadata.cjsToEsm = {
           strategy: transformed.strategy,
           ...(transformed.fallbackReason
@@ -166,9 +159,6 @@ function resolveConditionalBranch(request, context) {
   const dependency = resolveCjsDependency({
     filePath: context.filePath,
     request,
-    envId: context.envId,
-    mode: context.mode,
-    dependencyMappings: context.dependencyMappings,
   });
   if (dependency.kind === "builtin") {
     return null;
@@ -958,9 +948,6 @@ function createStaticImportManager(programPath, context) {
     const dependency = resolveCjsDependency({
       filePath: context.filePath,
       request,
-      envId: context.envId,
-      mode: context.mode,
-      dependencyMappings: context.dependencyMappings,
     });
     return {
       dependency,
@@ -1239,7 +1226,7 @@ function removeUnusedCjsHelpers(programPath) {
 }
 
 function createCompatibilityWrapper(programPath, context) {
-  const { t, filePath, envId, mode, nodeEnv, dependencyMappings } = context;
+  const { t, filePath, nodeEnv } = context;
   const originalBody = programPath.node.body;
   const originalDirectives = programPath.node.directives;
   const requires = collectCjsRequires(programPath, t);
@@ -1258,9 +1245,6 @@ function createCompatibilityWrapper(programPath, context) {
     const dependency = resolveCjsDependency({
       filePath,
       request,
-      envId,
-      mode,
-      dependencyMappings,
     });
     if (dependency.kind === "builtin") {
       imports.push(
@@ -1531,13 +1515,7 @@ function createConditionalWrapper(programPath, context) {
   return [...imports, ...exports, ...defaultBody];
 }
 
-function resolveCjsDependency({
-  filePath,
-  request,
-  envId,
-  mode,
-  dependencyMappings,
-}) {
+function resolveCjsDependency({ filePath, request }) {
   if (isNodeBuiltin(request)) {
     return {
       kind: "builtin",
@@ -1545,32 +1523,13 @@ function resolveCjsDependency({
     };
   }
 
-  const mapped = dependencyMappings[envId]?.[request];
-  if (mapped) {
-    return { kind: "cjs", filePath: mapped };
-  }
-
-  const resolved = createRequire(filePath).resolve(request);
-  if (resolved.endsWith(`${path.sep}scheduler${path.sep}index.js`)) {
-    return {
-      kind: "cjs",
-      filePath: path.join(
-        path.dirname(resolved),
-        "cjs",
-        `scheduler.${mode}.js`,
-      ),
-    };
-  }
-  return { kind: "cjs", filePath: resolved };
+  return { kind: "cjs", filePath: createRequire(filePath).resolve(request) };
 }
 
 function encodeCjsDependencySpecifier(context, request) {
   const dependency = resolveCjsDependency({
     filePath: context.filePath,
     request,
-    envId: context.envId,
-    mode: context.mode,
-    dependencyMappings: context.dependencyMappings,
   });
   return dependency.kind === "builtin" ? dependency.request : request;
 }
@@ -1621,19 +1580,6 @@ function readMemberName(node, t) {
     return node.property.name;
   }
   return t.isStringLiteral(node.property) ? node.property.value : null;
-}
-
-function readConfiguredPreamble(filePath, preambles, t) {
-  const configured = (preambles ?? []).find((item) =>
-    item.fileNamePrefix
-      ? path.basename(filePath).startsWith(item.fileNamePrefix)
-      : item.filePath === filePath,
-  );
-  if (!configured?.code) {
-    return [];
-  }
-  const body = parse(configured.code, { sourceType: "module" }).program.body;
-  return body.map((node) => t.removePropertiesDeep(node));
 }
 
 function selectNodeEnvConditional(body, context) {

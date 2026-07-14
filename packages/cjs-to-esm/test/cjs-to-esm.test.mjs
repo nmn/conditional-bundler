@@ -29,8 +29,6 @@ async function transformCjs(source, options = {}) {
           envId,
           mode: options.mode ?? "development",
           strategy: options.strategy,
-          dependencyMappings: options.dependencyMappings,
-          preambles: options.preambles,
         },
       ],
     ],

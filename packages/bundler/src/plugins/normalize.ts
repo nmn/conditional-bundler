@@ -53,6 +53,9 @@ export function getEnvListValue<T>(
   if (!isEnvMap(value)) {
     return value;
   }
+  if (envId === "default") {
+    return [...(value.default ?? [])];
+  }
   return [...(value.default ?? []), ...(value[envId] ?? [])];
 }
 

@@ -45,10 +45,6 @@ import type { BundleManifest } from "./manifest.js";
 import { normalizePlugins } from "./plugins/normalize.js";
 import { createCssPlugin } from "./plugins/css.js";
 import {
-  scanModuleRequests,
-  type ScannedImportRequest,
-} from "./plugins/scan.js";
-import {
   runAfterCombine,
   runBeforeCombine,
   runBuildEnd,
@@ -148,9 +144,24 @@ type BundlePlanDraftWithHmr = BundlePlanDraft & {
 
 type WorkerTransformResponse = {
   cacheHit?: boolean;
-  needsResolution?: boolean;
-  unresolvedImportsByEnv?: Record<string, ScannedImportRequest[]>;
   fileRecordsByEnv: Record<string, FileRecord>;
+};
+
+type WorkerImportRequest = {
+  key: string;
+  kind:
+    | "import"
+    | "dynamic-import"
+    | "reexport"
+    | "conditional-import"
+    | "conditional-else";
+  request: string;
+  importAttributes?: Record<string, string>;
+};
+
+type WorkerCoordinatorRequest = {
+  type: "resolve-imports";
+  requestsByEnv: Record<string, WorkerImportRequest[]>;
 };
 
 type DynamicEntryDiscovery = ModuleResolution & {
@@ -1143,10 +1154,18 @@ async function createBundlePlan(
               collectExternalIdentifierDeps(graph, node, cell),
             );
             hmrCells.push(hmrCell);
-            return { code: hmrCell.code, map: hmrCell.map };
+            return {
+              code: hmrCell.code,
+              map: hmrCell.map,
+              sourceContents: node.irHeader.sourceContents,
+            };
           }),
         )
-      : await Promise.all(orderedCells.map(readCellPart));
+      : await Promise.all(
+          orderedCells.map((cell) =>
+            readCellPart(cell, node.irHeader.sourceContents),
+          ),
+        );
     parts.push(...cellParts.filter((part) => part.code.length > 0));
 
     if (namespaceDemanded.has(node.id) && node.exportTable) {
@@ -1390,35 +1409,20 @@ async function transformModule(
       hmr: config.dev?.hmr === true,
     },
   };
-  let response = (await pool.run({
-    ...requestBase,
-    cacheOnly: true,
-  })) as WorkerTransformResponse;
-  let resolvedImportsByEnv: Awaited<ReturnType<typeof resolveImportsForEnvs>> =
-    {};
-  let resolutionPasses = 0;
-  while (response.needsResolution) {
-    resolutionPasses += 1;
-    if (resolutionPasses > 8) {
+  const response = (await pool.run(requestBase, async (payload) => {
+    const coordinatorRequest = payload as WorkerCoordinatorRequest;
+    if (coordinatorRequest.type !== "resolve-imports") {
       throw new Error(
-        `Transform plugins kept introducing unresolved imports in '${module.id}'.`,
+        `Unknown worker coordinator request '${String(coordinatorRequest.type)}'.`,
       );
     }
-    const nextResolutions = await resolveImportsForEnvs(
-      loadedModule,
+    return resolveImportRequestsForEnvs(
+      module,
       envs,
       resolver,
-      response.unresolvedImportsByEnv,
+      coordinatorRequest.requestsByEnv,
     );
-    resolvedImportsByEnv = mergeResolvedImportsByEnv(
-      resolvedImportsByEnv,
-      nextResolutions,
-    );
-    response = (await pool.run({
-      ...requestBase,
-      resolvedImportsByEnv,
-    })) as WorkerTransformResponse;
-  }
+  })) as WorkerTransformResponse;
   for (const [envId, fileRecord] of Object.entries(response.fileRecordsByEnv)) {
     headersByEnv.get(envId)?.set(fileRecord.id, fileRecord);
     fileRecords.push(fileRecord);
@@ -1684,11 +1688,11 @@ async function loadModuleRecord(
   };
 }
 
-async function resolveImportsForEnvs(
-  module: LoadedModuleRecord,
+async function resolveImportRequestsForEnvs(
+  module: Pick<ScheduledModule, "id" | "filePath">,
   envs: string[],
   resolver: Resolver,
-  additionalRequestsByEnv: Record<string, ScannedImportRequest[]> = {},
+  requestsByEnv: Record<string, WorkerImportRequest[]>,
 ): Promise<
   Record<
     string,
@@ -1718,65 +1722,35 @@ async function resolveImportsForEnvs(
     >
   > = {};
 
-  for (const envId of envs) {
-    const code = module.codeByEnv?.[envId] ?? module.code;
-    const requests = Array.from(
-      new Map(
-        [
-          ...scanModuleRequests({
-            code,
-            filePath: module.filePath,
-            syntax: module.syntax,
-          }),
-          ...(additionalRequestsByEnv[envId] ?? []),
-        ].map((request) => [request.key, request]),
-      ).values(),
-    );
-    const envResolutions: Record<
-      string,
-      {
-        id: string | null;
-        filePath: string | null;
-        external: boolean;
-        virtual?: boolean;
-        meta?: Record<string, unknown>;
-      }
-    > = {};
-    for (const request of requests) {
-      const resolved = await resolver(
-        module.id,
-        module.filePath,
-        request.request,
-        envId,
-        request.kind,
-        request.importAttributes,
+  await Promise.all(
+    envs.map(async (envId) => {
+      const entries = await Promise.all(
+        (requestsByEnv[envId] ?? []).map(async (request) => {
+          const resolved = await resolver(
+            module.id,
+            module.filePath,
+            request.request,
+            envId,
+            request.kind,
+            request.importAttributes,
+          );
+          return [
+            request.key,
+            {
+              id: resolved.external ? null : resolved.id,
+              filePath: resolved.external ? null : resolved.filePath,
+              external: resolved.external,
+              virtual: resolved.virtual,
+              meta: resolved.meta,
+            },
+          ] as const;
+        }),
       );
-      envResolutions[request.key] = {
-        id: resolved.external ? null : resolved.id,
-        filePath: resolved.external ? null : resolved.filePath,
-        external: resolved.external,
-        virtual: resolved.virtual,
-        meta: resolved.meta,
-      };
-    }
-    resolvedByEnv[envId] = envResolutions;
-  }
+      resolvedByEnv[envId] = Object.fromEntries(entries);
+    }),
+  );
 
   return resolvedByEnv;
-}
-
-function mergeResolvedImportsByEnv(
-  current: Awaited<ReturnType<typeof resolveImportsForEnvs>>,
-  next: Awaited<ReturnType<typeof resolveImportsForEnvs>>,
-): Awaited<ReturnType<typeof resolveImportsForEnvs>> {
-  const merged = { ...current };
-  for (const [envId, resolutions] of Object.entries(next)) {
-    merged[envId] = {
-      ...(merged[envId] ?? {}),
-      ...resolutions,
-    };
-  }
-  return merged;
 }
 
 function collectBundleSelection(
@@ -2147,7 +2121,10 @@ function getCellById(node: ModuleNode, cellId: string): CellRecord | undefined {
   return getAllCells(node).find((cell) => cell.id === cellId);
 }
 
-async function readCellPart(cell: CellRecord): Promise<BundlePart> {
+async function readCellPart(
+  cell: CellRecord,
+  sourceContents?: Record<string, string>,
+): Promise<BundlePart> {
   const code =
     cell.code != null
       ? cell.code
@@ -2163,7 +2140,7 @@ async function readCellPart(cell: CellRecord): Promise<BundlePart> {
       : cell.mapArtifactPath
         ? await fs.readFile(cell.mapArtifactPath, "utf8")
         : undefined;
-  return { code, map };
+  return { code, map, sourceContents };
 }
 
 function findCellProvidingSymbol(

@@ -29,9 +29,11 @@ import {
 
 export type CoreTransformOptions = {
   importAttrAllow: string[];
+  generateModuleOutput?: boolean;
   sourceMap?: {
     sourceFileName: string;
     sourcesContent: boolean;
+    embedCellSourcesContent?: boolean;
   };
 };
 
@@ -59,7 +61,9 @@ function modulePrefixIdentity(
   return moduleId?.startsWith("virtual:") ? moduleId : relPath;
 }
 
-function getParserPlugins(input: TransformInput): ParserPlugin[] {
+function getParserPlugins(
+  input: Pick<TransformInput, "syntax">,
+): ParserPlugin[] {
   const plugins: ParserPlugin[] = ["importAttributes"];
   if (input.syntax.ts) {
     plugins.push("typescript");
@@ -70,9 +74,111 @@ function getParserPlugins(input: TransformInput): ParserPlugin[] {
   return plugins;
 }
 
+export type CoreImportRequest = {
+  key: string;
+  kind:
+    | "import"
+    | "dynamic-import"
+    | "reexport"
+    | "conditional-import"
+    | "conditional-else";
+  request: string;
+  importAttributes?: Record<string, string>;
+};
+
+export type PreparedCoreTransform = {
+  ast: t.File;
+  importRequests: CoreImportRequest[];
+};
+
+export function prepareCoreTransform(
+  input: Pick<TransformInput, "code" | "realPath" | "syntax">,
+  sourceFileName = input.realPath,
+): PreparedCoreTransform {
+  const ast = parse(input.code, {
+    sourceType: "module",
+    sourceFilename: sourceFileName,
+    plugins: getParserPlugins(input),
+  });
+  return {
+    ast,
+    importRequests: scanImportRequestsFromAst(ast),
+  };
+}
+
+export function scanImportRequests(
+  input: Pick<TransformInput, "code" | "realPath" | "syntax">,
+): CoreImportRequest[] {
+  return prepareCoreTransform(input).importRequests;
+}
+
+function scanImportRequestsFromAst(ast: t.File): CoreImportRequest[] {
+  const traverse = ((
+    traverseModule as unknown as {
+      default?: typeof import("@babel/traverse").default;
+    }
+  ).default ??
+    (traverseModule as unknown as typeof import("@babel/traverse").default)) as typeof import("@babel/traverse").default;
+  const requests = new Map<string, CoreImportRequest>();
+  const add = (
+    kind: CoreImportRequest["kind"],
+    request: string,
+    importAttributes?: Record<string, string>,
+  ) => {
+    const key = toImportResolutionKey(kind, request);
+    requests.set(key, { key, kind, request, importAttributes });
+  };
+
+  traverse(ast, {
+    ImportDeclaration(path: NodePath<t.ImportDeclaration>) {
+      const request = path.node.source.value;
+      const attributes = readImportAttributes(path.node);
+      add(
+        attributes.condition ? "conditional-import" : "import",
+        request,
+        Object.keys(attributes).length > 0 ? attributes : undefined,
+      );
+      if (attributes.else) {
+        add("conditional-else", attributes.else);
+      }
+    },
+    ExportNamedDeclaration(path: NodePath<t.ExportNamedDeclaration>) {
+      if (path.node.source) {
+        add("reexport", path.node.source.value);
+      }
+    },
+    ExportAllDeclaration(path: NodePath<t.ExportAllDeclaration>) {
+      add("reexport", path.node.source.value);
+    },
+    Import(path: NodePath<t.Import>) {
+      const parent = path.parentPath.node;
+      if (
+        t.isCallExpression(parent) &&
+        parent.arguments.length === 1 &&
+        t.isStringLiteral(parent.arguments[0])
+      ) {
+        add("dynamic-import", parent.arguments[0].value);
+      }
+    },
+    CallExpression(path: NodePath<t.CallExpression>) {
+      if (
+        path.get("callee").isIdentifier({ name: "require" }) &&
+        !path.scope.hasBinding("require") &&
+        path.node.arguments.length === 1 &&
+        t.isStringLiteral(path.node.arguments[0])
+      ) {
+        add("import", path.node.arguments[0].value);
+      }
+    },
+  });
+
+  return Array.from(requests.values());
+}
+
 export function transformWithCore(
   input: TransformInput,
   options: CoreTransformOptions,
+  prepared?: PreparedCoreTransform,
 ): TransformResult {
   const dynamicImportMap = new Map<
     string,
@@ -84,11 +190,13 @@ export function transformWithCore(
     }
   >();
 
-  const ast = parse(input.code, {
-    sourceType: "module",
-    sourceFilename: options.sourceMap?.sourceFileName ?? input.realPath,
-    plugins: getParserPlugins(input),
-  });
+  const ast =
+    prepared?.ast ??
+    parse(input.code, {
+      sourceType: "module",
+      sourceFilename: options.sourceMap?.sourceFileName ?? input.realPath,
+      plugins: getParserPlugins(input),
+    });
 
   const traverse = ((
     traverseModule as unknown as {
@@ -146,39 +254,7 @@ export function transformWithCore(
     },
   });
 
-  const declaredExportNames = new Set<string>();
   const importMeta = collectImports(ast, input, options, traverse);
-
-  traverse(ast, {
-    ExportNamedDeclaration(path: NodePath<t.ExportNamedDeclaration>) {
-      const decl = path.node.declaration;
-      if (!decl) {
-        return;
-      }
-      if (t.isFunctionDeclaration(decl) && decl.id) {
-        declaredExportNames.add(decl.id.name);
-      }
-      if (t.isClassDeclaration(decl) && decl.id) {
-        declaredExportNames.add(decl.id.name);
-      }
-      if (t.isVariableDeclaration(decl)) {
-        for (const varDecl of decl.declarations) {
-          if (t.isIdentifier(varDecl.id)) {
-            declaredExportNames.add(varDecl.id.name);
-          }
-        }
-      }
-    },
-    ExportDefaultDeclaration(path: NodePath<t.ExportDefaultDeclaration>) {
-      const decl = path.node.declaration;
-      if (t.isFunctionDeclaration(decl) && decl.id) {
-        declaredExportNames.add(decl.id.name);
-      }
-      if (t.isClassDeclaration(decl) && decl.id) {
-        declaredExportNames.add(decl.id.name);
-      }
-    },
-  });
 
   const exportStars: ExportStar[] = [];
   const reexportsNamed: ReexportNamed[] = [];
@@ -217,11 +293,9 @@ export function transformWithCore(
         const nextName = `${prefix}_${name}`;
         renameMap.set(name, nextName);
         renameReverse.set(nextName, name);
-        if (declaredExportNames.has(name)) {
-          renameModuleBinding(binding, nextName);
-        } else {
-          path.scope.rename(name, nextName);
-        }
+        renameModuleBinding(binding, name, nextName);
+        delete path.scope.bindings[name];
+        path.scope.bindings[nextName] = binding;
       }
     },
     Import(path: NodePath<t.Import>) {
@@ -474,15 +548,18 @@ export function transformWithCore(
     );
   }
 
-  const output = generate(
-    ast,
-    {
-      sourceMaps: Boolean(options.sourceMap),
-      sourceFileName: options.sourceMap?.sourceFileName ?? input.realPath,
-      shouldPrintComment: shouldPrintSourceComment,
-    },
-    input.code,
-  );
+  const output =
+    options.generateModuleOutput === false
+      ? undefined
+      : generate(
+          ast,
+          {
+            sourceMaps: Boolean(options.sourceMap),
+            sourceFileName: options.sourceMap?.sourceFileName ?? input.realPath,
+            shouldPrintComment: shouldPrintSourceComment,
+          },
+          input.code,
+        );
   const dynamicImports: DynamicImport[] = Array.from(
     dynamicImportMap.entries(),
   ).map(([hashKey, entry]) => ({
@@ -493,14 +570,14 @@ export function transformWithCore(
     external: entry.external,
   }));
 
-  let transformedCode = output.code;
+  let transformedCode = output?.code ?? "";
   const conditionalBindingCells = buildConditionalBindingCells(
     importMeta.imports,
     importMeta.conditionalImports,
     input,
     prefix,
   );
-  if (conditionalBindingCells.length > 0) {
+  if (output && conditionalBindingCells.length > 0) {
     transformedCode = `${conditionalBindingCells.map((cell) => cell.code).join("\n")}\n${transformedCode}`;
   }
   const imports = importMeta.imports.map((entry) => ({
@@ -549,7 +626,7 @@ export function transformWithCore(
 
   return {
     code: transformedCode,
-    map: output.map ? JSON.stringify(output.map) : undefined,
+    map: output?.map ? JSON.stringify(output.map) : undefined,
     fileRecord,
     meta: {
       imports,
@@ -1066,12 +1143,18 @@ function collectStatementCells(
         sourceFileName: sourceMap?.sourceFileName ?? input.realPath,
         shouldPrintComment: shouldPrintSourceComment,
       },
-      input.code,
+      sourceMap && optionsEmbedCellSourcesContent(sourceMap)
+        ? input.code
+        : undefined,
     );
     const generatedMap = generated.map as
       | (Record<string, unknown> & { sourcesContent?: unknown })
       | null;
-    if (generatedMap && sourceMap && !sourceMap.sourcesContent) {
+    if (
+      generatedMap &&
+      sourceMap &&
+      (!sourceMap.sourcesContent || !optionsEmbedCellSourcesContent(sourceMap))
+    ) {
       delete generatedMap.sourcesContent;
     }
     return {
@@ -1088,6 +1171,12 @@ function collectStatementCells(
       eager: draft.eager,
     };
   });
+}
+
+function optionsEmbedCellSourcesContent(
+  sourceMap: NonNullable<CoreTransformOptions["sourceMap"]>,
+): boolean {
+  return sourceMap.embedCellSourcesContent !== false;
 }
 
 function lowerHmrCellStatements(
@@ -1721,7 +1810,11 @@ function exportDefaultToExpression(
   return t.identifier("undefined");
 }
 
-function renameModuleBinding(binding: Binding, newName: string): void {
+function renameModuleBinding(
+  binding: Binding,
+  oldName: string,
+  newName: string,
+): void {
   if (binding.identifier.name === newName) {
     return;
   }
@@ -1733,16 +1826,27 @@ function renameModuleBinding(binding: Binding, newName: string): void {
     if (refPath.node.name === newName) {
       continue;
     }
+    const parent = refPath.parentPath;
+    if (
+      parent?.isObjectProperty() &&
+      parent.node.shorthand &&
+      parent.node.value === refPath.node
+    ) {
+      parent.node.shorthand = false;
+      if (parent.node.key === refPath.node) {
+        parent.node.key = t.identifier(oldName);
+      }
+      if (parent.node.extra?.shorthand) {
+        parent.node.extra.shorthand = false;
+      }
+    }
     refPath.node.name = newName;
   }
-  for (const path of binding.constantViolations) {
-    if (path.isIdentifier()) {
-      path.node.name = newName;
-    } else if (path.isAssignmentExpression()) {
-      const left = path.get("left");
-      if (left.isIdentifier()) {
-        left.node.name = newName;
-      }
+  for (const violationPath of binding.constantViolations) {
+    const identifiers = t.getAssignmentIdentifiers(violationPath.node);
+    const identifier = identifiers[oldName];
+    if (identifier) {
+      identifier.name = newName;
     }
   }
 }

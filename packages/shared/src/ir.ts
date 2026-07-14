@@ -164,6 +164,7 @@ export type FileRecord = Pick<
   envs: string[];
   codeByEnv: Record<string, string>;
   mapByEnv: Record<string, string>;
+  sourceContents?: Record<string, string>;
 };
 
 export type IRHeader = FileRecord;

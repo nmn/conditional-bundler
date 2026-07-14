@@ -34,6 +34,7 @@ export function assembleBundle(
   file?: string,
 ): { code: string; map: IndexedSourceMap } {
   const sections: IndexedSourceMapSection[] = [];
+  const emittedSourceContents = new Set<string>();
   const position: SourceMapOffset = { line: 0, column: 0 };
   let code = "";
 
@@ -43,7 +44,9 @@ export function assembleBundle(
       advancePosition(position, "\n");
     }
     if (part.map) {
-      appendMapSections(sections, parseSourceMap(part.map), position);
+      const map = parseSourceMap(part.map);
+      attachSourceContents(map, part.sourceContents, emittedSourceContents);
+      appendMapSections(sections, map, position);
     }
     code += part.code;
     advancePosition(position, part.code);
@@ -58,6 +61,37 @@ export function assembleBundle(
       sections,
     },
   };
+}
+
+function attachSourceContents(
+  map: SourceMap,
+  sourceContents: Record<string, string> | undefined,
+  emitted: Set<string>,
+): void {
+  if (isIndexedSourceMap(map)) {
+    for (const section of map.sections) {
+      attachSourceContents(section.map, sourceContents, emitted);
+    }
+    return;
+  }
+
+  const existing = map.sourcesContent;
+  const contents = map.sources.map((source, index) => {
+    if (emitted.has(source)) {
+      return null;
+    }
+    const content = existing?.[index] ?? sourceContents?.[source];
+    if (typeof content !== "string") {
+      return null;
+    }
+    emitted.add(source);
+    return content;
+  });
+  if (contents.some((content) => content !== null)) {
+    map.sourcesContent = contents;
+  } else {
+    delete map.sourcesContent;
+  }
 }
 
 export function parseSourceMap(map: string): SourceMap {
