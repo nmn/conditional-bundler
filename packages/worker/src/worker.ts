@@ -20,6 +20,7 @@ import {
   readJsonIfExists,
   fileExists,
 } from "@bundler/shared";
+import { modulePrefixIdentity } from "./module-identity.js";
 
 if (!parentPort) {
   throw new Error("Worker must be spawned with parentPort.");
@@ -128,7 +129,7 @@ const pendingCoordinatorRequests = new Map<
   { resolve: (value: unknown) => void; reject: (error: Error) => void }
 >();
 let nextCoordinatorRequestId = 1;
-const CELL_ARTIFACT_FORMAT = 9;
+const CELL_ARTIFACT_FORMAT = 10;
 const remapping = ((
   remappingModule as unknown as {
     default?: typeof import("@ampproject/remapping").default;
@@ -193,7 +194,7 @@ async function handleTransform(
   const prefix = filePrefix(
     request.pkg.name,
     request.pkg.version,
-    request.id.startsWith("virtual:") ? request.id : relPath,
+    modulePrefixIdentity(request.id, relPath),
   );
   const resultsByEnv = await transformFile(request);
   const fileRecordsByEnv = Object.fromEntries(

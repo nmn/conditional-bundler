@@ -26,6 +26,7 @@ import {
   normalizePosixPath,
   contentHash,
 } from "@bundler/shared";
+import { modulePrefixIdentity } from "../module-identity.js";
 
 export type CoreTransformOptions = {
   importAttrAllow: string[];
@@ -52,13 +53,6 @@ function resolvedImportPrefix(resolved: ResolvedImportInfo): string {
     resolved.pkg.version,
     modulePrefixIdentity(resolved.moduleId, resolved.relPath),
   );
-}
-
-function modulePrefixIdentity(
-  moduleId: string | null | undefined,
-  relPath: string,
-): string {
-  return moduleId?.startsWith("virtual:") ? moduleId : relPath;
 }
 
 function getParserPlugins(

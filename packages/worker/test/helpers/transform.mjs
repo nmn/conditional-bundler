@@ -13,6 +13,8 @@ export async function transform(
     root = pkgRoot,
     syntax = { jsx: false, ts: false },
     sourceMap = false,
+    id,
+    resolvedImports,
     dev,
   } = {},
 ) {
@@ -20,10 +22,12 @@ export async function transform(
   return transformWithCore(
     {
       code,
+      id,
       realPath: filePath,
       pkg: { name: pkgName, version: pkgVersion, root },
       syntax,
       envs: ["browser"],
+      resolvedImports,
       dev,
     },
     {
