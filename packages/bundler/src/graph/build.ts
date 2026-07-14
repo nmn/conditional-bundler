@@ -7,6 +7,7 @@ import { sourceLookupKey } from "./source-key.js";
 export type ModuleGraph = {
   envId: string;
   nodes: Map<string, ModuleNode>;
+  moduleIdentities: Map<string, string>;
 };
 
 export type BuildGraphInput = {
@@ -17,6 +18,7 @@ export type BuildGraphInput = {
 
 export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
   const nodes = new Map<string, ModuleNode>();
+  const moduleIdentities = new Map<string, string>();
   for (const header of input.headers) {
     nodes.set(header.id, {
       id: header.id,
@@ -29,6 +31,9 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
       resolvedSources: new Map<string, string>(),
       irHeader: header,
     });
+    if (header.moduleIdentity) {
+      moduleIdentities.set(header.moduleIdentity, header.id);
+    }
   }
 
   for (const node of nodes.values()) {
@@ -127,5 +132,5 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
     node.deps = unique;
   }
 
-  return { envId: input.envId, nodes };
+  return { envId: input.envId, nodes, moduleIdentities };
 }

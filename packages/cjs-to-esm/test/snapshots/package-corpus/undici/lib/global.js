@@ -15,18 +15,18 @@ function __cjs_require__(request) {
     case "./dispatcher/dispatcher1-wrapper":
       return __cjs_dep_2;
     default:
-      throw new Error("Cannot require " + request + " from undici@8.7.0/lib/global.js");
+      throw new Error("Cannot require " + request + " from undici@8.7.0::lib/global.js");
   }
 }
 const __cjs_cache__ = globalThis.__BUNDLER_CJS_CACHE__ ??= new Map();
-let __cjs_default__ = __cjs_cache__.get("undici@8.7.0/lib/global.js");
+let __cjs_default__ = __cjs_cache__.get("undici@8.7.0::lib/global.js::env=snapshot::NODE_ENV=production");
 if (!__cjs_default__) {
   const __cjs_module__ = {
     exports: {}
   };
   const __cjs_exports__ = __cjs_module__.exports;
-  __cjs_cache__.set("undici@8.7.0/lib/global.js", __cjs_exports__);
-  ((module, exports, require, process) => {
+  __cjs_cache__.set("undici@8.7.0::lib/global.js::env=snapshot::NODE_ENV=production", __cjs_exports__);
+  ((module, exports, require, process, __filename, __dirname) => {
     'use strict';
 
     // We include a version number for the Dispatcher API. In case of breaking changes,
@@ -72,9 +72,9 @@ if (!__cjs_default__) {
       getGlobalDispatcher,
       installedExports
     };
-  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__);
+  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__, "undici@8.7.0::lib/global.js", "undici@8.7.0::lib");
   __cjs_default__ = __cjs_module__.exports;
-  __cjs_cache__.set("undici@8.7.0/lib/global.js", __cjs_default__);
+  __cjs_cache__.set("undici@8.7.0::lib/global.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
 export const getGlobalDispatcher = __cjs_default__["getGlobalDispatcher"];

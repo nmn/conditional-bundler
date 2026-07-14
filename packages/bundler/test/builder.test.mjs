@@ -3,7 +3,12 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { contentHash, normalizePosixPath } from "@bundler/shared";
+import {
+  contentHash,
+  findPkgRoot,
+  packagePathIdentity,
+  readPkgSafe,
+} from "@bundler/shared";
 
 const rootDir = path.resolve(process.cwd());
 const fixturesDir = path.join(rootDir, "test/fixtures");
@@ -522,7 +527,10 @@ test("reuses cached worker artifacts for unchanged modules", async () => {
   expect(configJson.configHash).toBe(configRoots[0]);
 
   const entryPath = path.join(fixturesDir, "simple", "src/index.js");
-  const entryFileHash = contentHash(normalizePosixPath(entryPath));
+  const entryPkgRoot = findPkgRoot(entryPath) ?? path.dirname(entryPath);
+  const entryFileHash = contentHash(
+    packagePathIdentity(readPkgSafe(entryPkgRoot), entryPath),
+  );
   const entryModulePath = path.join(
     activeRoot,
     "files",
@@ -536,7 +544,10 @@ test("reuses cached worker artifacts for unchanged modules", async () => {
     moduleJson.fileRecord;
   const artifactPaths = fileRecord.cells
     .map((cell) => cell.artifactPath)
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((artifactPath) =>
+      path.join(path.dirname(entryModulePath), artifactPath),
+    );
   expect(artifactPaths.length).toBeGreaterThan(0);
   await Promise.all(artifactPaths.map((artifactPath) => fs.stat(artifactPath)));
 
@@ -659,6 +670,121 @@ test("materializes worker artifacts from a remote cache hit", async () => {
 
   const localRoots = await fs.readdir(path.join(cacheDir, "v2"));
   expect(localRoots.length).toBeGreaterThan(0);
+});
+
+test("reuses transformed CJS artifacts after relocating a package", async () => {
+  const firstRoot = path.join(outRoot, "portable-cache-first");
+  const secondRoot = path.join(outRoot, "portable-cache-second");
+  const remoteDir = path.join(cacheRoot, "portable-cache-remote");
+
+  const prepareProject = async (projectRoot) => {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+    await fs.mkdir(path.join(projectRoot, "src"), { recursive: true });
+    await fs.writeFile(
+      path.join(projectRoot, "package.json"),
+      JSON.stringify({
+        name: "portable-cache-fixture",
+        version: "1.0.0",
+        type: "module",
+      }),
+    );
+    await fs.writeFile(
+      path.join(projectRoot, "src/index.js"),
+      'import legacy from "./legacy.cjs"; export const load = legacy;\n',
+    );
+    await fs.writeFile(
+      path.join(projectRoot, "src/legacy.cjs"),
+      "module.exports = name => require(name);\n",
+    );
+    await fs.writeFile(
+      path.join(projectRoot, "portable-plugin.mjs"),
+      'export default function portablePlugin() { return { name: "portable-transform", transform: ["./portable-babel.mjs"] }; }\n',
+    );
+    await fs.writeFile(
+      path.join(projectRoot, "portable-babel.mjs"),
+      'export default function portableBabel() { return { visitor: { Program() { if (process.env.BUNDLER_THROW_TRANSFORM === "1") throw new Error("transform should have been cached"); } } }; }\n',
+    );
+  };
+  const buildRelocated = async (projectRoot) => {
+    const { buildProject } = await import("../dist/builder.js");
+    return buildProject(
+      {
+        envs: {
+          browser: { conditions: ["default"], target: "browser" },
+        },
+        entries: [
+          {
+            id: "portable-cache",
+            path: path.join(projectRoot, "src/index.js"),
+          },
+        ],
+        outputs: {
+          outDir: path.join(projectRoot, "dist"),
+          fileName: "bundle.[env].[hash].js",
+          sourceMap: "external",
+        },
+        cache: {
+          local: { dir: path.join(projectRoot, ".cache") },
+          remote: {
+            kind: "file",
+            dir: remoteDir,
+            prefix: "portable-cache-test",
+          },
+        },
+        maxWorkers: 2,
+        diagnostics: "human",
+        plugins: [
+          {
+            __bundlerPluginRef: true,
+            module: "@bundler/cjs-to-esm/bundler",
+            options: { nodeEnv: "production" },
+          },
+          {
+            __bundlerPluginRef: true,
+            module: path.join(projectRoot, "portable-plugin.mjs"),
+          },
+        ],
+      },
+      [],
+    );
+  };
+
+  await fs.rm(remoteDir, { recursive: true, force: true });
+  await Promise.all([prepareProject(firstRoot), prepareProject(secondRoot)]);
+  const first = await buildRelocated(firstRoot);
+
+  process.env.BUNDLER_THROW_TRANSFORM = "1";
+  let second;
+  try {
+    second = await buildRelocated(secondRoot);
+  } finally {
+    delete process.env.BUNDLER_THROW_TRANSFORM;
+  }
+
+  const firstCode = await fs.readFile(
+    path.join(firstRoot, "dist", first.bundles[0].fileName),
+    "utf8",
+  );
+  const secondCode = await fs.readFile(
+    path.join(secondRoot, "dist", second.bundles[0].fileName),
+    "utf8",
+  );
+  expect(secondCode).toBe(firstCode);
+  expect(secondCode).toContain("portable-cache-fixture@1.0.0::src/legacy.cjs");
+
+  const inspectedFiles = [
+    path.join(secondRoot, "dist", `${second.bundles[0].fileName}.map`),
+    ...(await fs.readdir(remoteDir, { recursive: true })).map((file) =>
+      path.join(remoteDir, file),
+    ),
+  ];
+  for (const filePath of inspectedFiles) {
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) continue;
+    const contents = await fs.readFile(filePath, "utf8");
+    expect(contents).not.toContain(firstRoot);
+    expect(contents).not.toContain(secondRoot);
+  }
 });
 
 test("writes bundle manifest and supports entry output placeholder", async () => {
@@ -1342,7 +1468,8 @@ test("supports virtual modules through resolveImport and load", async () => {
     moduleJson.fileRecordsByEnv?.browser ??
     moduleJson.fileRecordsByEnv?.default ??
     moduleJson.fileRecord;
-  expect(fileRecord.filePath).toBe(path.resolve(virtualPath));
+  expect(fileRecord.filePath).toBe("virtual:msg");
+  expect(JSON.stringify(moduleJson)).not.toContain(path.resolve(virtualPath));
 });
 
 test("runs module-backed worker transforms per environment", async () => {

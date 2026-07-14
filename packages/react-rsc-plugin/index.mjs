@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   decodeCjsVirtualId,
   encodeCjsVirtualId,
+  createCjsModuleIdentity,
   isCjsVirtualId,
 } from "@bundler/cjs-to-esm";
 
@@ -112,6 +113,7 @@ export function createReactRscPlugin(options) {
       return {
         id: encodeCjsVirtualId(cjsEnv, filePath, undefined, nodeEnv),
         filePath,
+        moduleIdentity: createCjsModuleIdentity(filePath),
         virtual: true,
       };
     },

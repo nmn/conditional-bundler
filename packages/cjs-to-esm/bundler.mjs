@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   decodeCjsVirtualId,
   encodeCjsVirtualId,
+  createCjsModuleIdentity,
   isCjsVirtualId,
   isNodeBuiltin,
 } from "./index.mjs";
@@ -32,6 +33,7 @@ export default function cjsToEsmBundlerPlugin(options = {}) {
             nodeEnv,
           ),
           filePath: decoded.filePath,
+          moduleIdentity: createCjsModuleIdentity(decoded.filePath),
           virtual: true,
         };
       }
@@ -50,6 +52,7 @@ export default function cjsToEsmBundlerPlugin(options = {}) {
           nodeEnv,
         ),
         filePath: resolved.filePath,
+        moduleIdentity: createCjsModuleIdentity(resolved.filePath),
         virtual: true,
       };
     },

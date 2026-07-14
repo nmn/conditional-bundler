@@ -102,18 +102,18 @@ function __cjs_require__(request) {
     case "../internals/inherit-if-required":
       return __cjs_dep_31;
     default:
-      throw new Error("Cannot require " + request + " from core-js@3.49.0/internals/typed-array-constructor.js");
+      throw new Error("Cannot require " + request + " from core-js@3.49.0::internals/typed-array-constructor.js");
   }
 }
 const __cjs_cache__ = globalThis.__BUNDLER_CJS_CACHE__ ??= new Map();
-let __cjs_default__ = __cjs_cache__.get("core-js@3.49.0/internals/typed-array-constructor.js");
+let __cjs_default__ = __cjs_cache__.get("core-js@3.49.0::internals/typed-array-constructor.js::env=snapshot::NODE_ENV=production");
 if (!__cjs_default__) {
   const __cjs_module__ = {
     exports: {}
   };
   const __cjs_exports__ = __cjs_module__.exports;
-  __cjs_cache__.set("core-js@3.49.0/internals/typed-array-constructor.js", __cjs_exports__);
-  ((module, exports, require, process) => {
+  __cjs_cache__.set("core-js@3.49.0::internals/typed-array-constructor.js::env=snapshot::NODE_ENV=production", __cjs_exports__);
+  ((module, exports, require, process, __filename, __dirname) => {
     'use strict';
 
     var $ = require('../internals/export');
@@ -319,8 +319,8 @@ if (!__cjs_default__) {
         setSpecies(CONSTRUCTOR_NAME);
       };
     } else module.exports = function () {/* empty */};
-  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__);
+  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__, "core-js@3.49.0::internals/typed-array-constructor.js", "core-js@3.49.0::internals");
   __cjs_default__ = __cjs_module__.exports;
-  __cjs_cache__.set("core-js@3.49.0/internals/typed-array-constructor.js", __cjs_default__);
+  __cjs_cache__.set("core-js@3.49.0::internals/typed-array-constructor.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;

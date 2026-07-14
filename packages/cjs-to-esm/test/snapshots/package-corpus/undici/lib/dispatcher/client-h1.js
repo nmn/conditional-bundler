@@ -36,18 +36,18 @@ function __cjs_require__(request) {
     case "../web/fetch/body.js":
       return __cjs_dep_9;
     default:
-      throw new Error("Cannot require " + request + " from undici@8.7.0/lib/dispatcher/client-h1.js");
+      throw new Error("Cannot require " + request + " from undici@8.7.0::lib/dispatcher/client-h1.js");
   }
 }
 const __cjs_cache__ = globalThis.__BUNDLER_CJS_CACHE__ ??= new Map();
-let __cjs_default__ = __cjs_cache__.get("undici@8.7.0/lib/dispatcher/client-h1.js");
+let __cjs_default__ = __cjs_cache__.get("undici@8.7.0::lib/dispatcher/client-h1.js::env=snapshot::NODE_ENV=production");
 if (!__cjs_default__) {
   const __cjs_module__ = {
     exports: {}
   };
   const __cjs_exports__ = __cjs_module__.exports;
-  __cjs_cache__.set("undici@8.7.0/lib/dispatcher/client-h1.js", __cjs_exports__);
-  ((module, exports, require, process) => {
+  __cjs_cache__.set("undici@8.7.0::lib/dispatcher/client-h1.js::env=snapshot::NODE_ENV=production", __cjs_exports__);
+  ((module, exports, require, process, __filename, __dirname) => {
     'use strict';
 
     /* global WebAssembly */
@@ -1628,8 +1628,8 @@ if (!__cjs_default__) {
       }
     }
     module.exports = connectH1;
-  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__);
+  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__, "undici@8.7.0::lib/dispatcher/client-h1.js", "undici@8.7.0::lib/dispatcher");
   __cjs_default__ = __cjs_module__.exports;
-  __cjs_cache__.set("undici@8.7.0/lib/dispatcher/client-h1.js", __cjs_default__);
+  __cjs_cache__.set("undici@8.7.0::lib/dispatcher/client-h1.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;

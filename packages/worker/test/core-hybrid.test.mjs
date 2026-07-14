@@ -52,11 +52,11 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           condition: "COND_A",
           elseRequest: "./fallback.js",
           elseSource: "src/fallback.js",
-          elseModuleId: "/fixture/src/fallback.js",
+          elseModuleId: "fixture@0.0.0::src/fallback.js",
           elseExternal: false,
           request: "./feature.js",
           source: "src/feature.js",
-          moduleId: "/fixture/src/feature.js",
+          moduleId: "fixture@0.0.0::src/feature.js",
           external: false,
         }),
       ],
@@ -66,7 +66,7 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           hashKey: "__IMPORT_a38syydlx",
           request: "./lazy.js",
           source: "src/lazy.js",
-          moduleId: "/fixture/src/lazy.js",
+          moduleId: "fixture@0.0.0::src/lazy.js",
           external: false,
         }),
       ],
@@ -94,7 +94,7 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           kind: "value",
           request: "./dep.js",
           source: "src/dep.js",
-          moduleId: "/fixture/src/dep.js",
+          moduleId: "fixture@0.0.0::src/dep.js",
           external: false,
           specifiers: [
             {
@@ -118,7 +118,7 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           namespaceUsage: "dynamic",
           request: "./ns.js",
           source: "src/ns.js",
-          moduleId: "/fixture/src/ns.js",
+          moduleId: "fixture@0.0.0::src/ns.js",
           external: false,
           specifiers: [
             {
@@ -136,7 +136,7 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           kind: "value",
           request: "./feature.js",
           source: "src/feature.js",
-          moduleId: "/fixture/src/feature.js",
+          moduleId: "fixture@0.0.0::src/feature.js",
           external: false,
           specifiers: [
             {
@@ -153,7 +153,7 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           imported: "helper",
           request: "./helpers.js",
           source: "src/helpers.js",
-          moduleId: "/fixture/src/helpers.js",
+          moduleId: "fixture@0.0.0::src/helpers.js",
           external: false,
           sourceOrder: 183,
         }),

@@ -9,18 +9,18 @@ function __cjs_require__(request) {
     case "./Log":
       return __cjs_dep_0;
     default:
-      throw new Error("Cannot require " + request + " from @statsig/client-core@3.33.3/src/$_StatsigGlobal.js");
+      throw new Error("Cannot require " + request + " from @statsig/client-core@3.33.3::src/$_StatsigGlobal.js");
   }
 }
 const __cjs_cache__ = globalThis.__BUNDLER_CJS_CACHE__ ??= new Map();
-let __cjs_default__ = __cjs_cache__.get("@statsig/client-core@3.33.3/src/$_StatsigGlobal.js");
+let __cjs_default__ = __cjs_cache__.get("@statsig/client-core@3.33.3::src/$_StatsigGlobal.js::env=snapshot::NODE_ENV=production");
 if (!__cjs_default__) {
   const __cjs_module__ = {
     exports: {}
   };
   const __cjs_exports__ = __cjs_module__.exports;
-  __cjs_cache__.set("@statsig/client-core@3.33.3/src/$_StatsigGlobal.js", __cjs_exports__);
-  ((module, exports, require, process) => {
+  __cjs_cache__.set("@statsig/client-core@3.33.3::src/$_StatsigGlobal.js::env=snapshot::NODE_ENV=production", __cjs_exports__);
+  ((module, exports, require, process, __filename, __dirname) => {
     "use strict";
 
     /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -64,9 +64,9 @@ if (!__cjs_default__) {
     _window[GLOBAL_KEY] = statsigGlobal;
     _global[GLOBAL_KEY] = statsigGlobal;
     _globalThis[GLOBAL_KEY] = statsigGlobal;
-  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__);
+  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__, "@statsig/client-core@3.33.3::src/$_StatsigGlobal.js", "@statsig/client-core@3.33.3::src");
   __cjs_default__ = __cjs_module__.exports;
-  __cjs_cache__.set("@statsig/client-core@3.33.3/src/$_StatsigGlobal.js", __cjs_default__);
+  __cjs_cache__.set("@statsig/client-core@3.33.3::src/$_StatsigGlobal.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
 export const _getInstance = __cjs_default__["_getInstance"];

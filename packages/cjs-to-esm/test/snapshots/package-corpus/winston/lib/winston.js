@@ -39,18 +39,18 @@ function __cjs_require__(request) {
     case "winston-transport":
       return __cjs_dep_10;
     default:
-      throw new Error("Cannot require " + request + " from winston@3.19.0/lib/winston.js");
+      throw new Error("Cannot require " + request + " from winston@3.19.0::lib/winston.js");
   }
 }
 const __cjs_cache__ = globalThis.__BUNDLER_CJS_CACHE__ ??= new Map();
-let __cjs_default__ = __cjs_cache__.get("winston@3.19.0/lib/winston.js");
+let __cjs_default__ = __cjs_cache__.get("winston@3.19.0::lib/winston.js::env=snapshot::NODE_ENV=production");
 if (!__cjs_default__) {
   const __cjs_module__ = {
     exports: {}
   };
   const __cjs_exports__ = __cjs_module__.exports;
-  __cjs_cache__.set("winston@3.19.0/lib/winston.js", __cjs_exports__);
-  ((module, exports, require, process) => {
+  __cjs_cache__.set("winston@3.19.0::lib/winston.js::env=snapshot::NODE_ENV=production", __cjs_exports__);
+  ((module, exports, require, process, __filename, __dirname) => {
     /**
      * winston.js: Top-level include defining Winston.
      *
@@ -219,9 +219,9 @@ if (!__cjs_default__) {
     warn.forProperties(exports, 'useFormat', ['padLevels', 'stripColors']);
     warn.forFunctions(exports, 'deprecated', ['addRewriter', 'addFilter', 'clone', 'extend']);
     warn.forProperties(exports, 'deprecated', ['emitErrs', 'levelLength']);
-  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__);
+  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__, "winston@3.19.0::lib/winston.js", "winston@3.19.0::lib");
   __cjs_default__ = __cjs_module__.exports;
-  __cjs_cache__.set("winston@3.19.0/lib/winston.js", __cjs_default__);
+  __cjs_cache__.set("winston@3.19.0::lib/winston.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
 export const Container = __cjs_default__["Container"];

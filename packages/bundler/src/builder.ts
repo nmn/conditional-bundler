@@ -55,6 +55,7 @@ import type { BundlerConfig, EntrySpec } from "./config.js";
 import {
   readPkgSafe,
   findPkgRoot,
+  packagePathIdentity,
   contentHash,
   contentHashShort,
   normalizePosixPath,
@@ -179,6 +180,7 @@ type ModuleCollection = {
 
 type ScheduledModule = {
   id: string;
+  moduleIdentity: string;
   filePath: string;
   pkg: { name: string; version: string; root: string };
   envId: string;
@@ -555,7 +557,6 @@ async function prepareCacheRoot(
   const normalizedConfig = normalizeConfigForCache(
     config,
     entries,
-    cacheBaseDir,
     workerProfile,
     plugins,
   );
@@ -590,7 +591,6 @@ async function prepareCacheRoot(
 function normalizeConfigForCache(
   config: BundlerConfig,
   entries: EntrySpec[],
-  cacheBaseDir: string,
   workerProfile: WorkerTransformProfile,
   plugins: BundlerPlugin[],
 ): unknown {
@@ -607,32 +607,38 @@ function normalizeConfigForCache(
         ]),
     ),
     entries: entries.map((entry) => ({
-      id: entry.id,
-      path: path.resolve(entry.path),
+      id: serializeConfigValue(entry.id),
+      path: portableCachePathIdentity(entry.path),
       envs: entry.envs ? [...entry.envs] : undefined,
     })),
     outputs: {
-      outDir: path.resolve(config.outputs.outDir),
+      outDir: portableCachePathIdentity(config.outputs.outDir),
       fileName: config.outputs.fileName,
       manifestFile: config.outputs.manifestFile,
       sourceMap: config.outputs.sourceMap,
     },
-    workerProfile,
+    workerProfile: workerProfile.fingerprint,
     plugins: serializeConfigValue(plugins),
     configIdentity: serializeConfigValue(config.configIdentity),
-    configFile: config.configFile ? path.resolve(config.configFile) : undefined,
-    resolverAliases: collectResolverAliasCacheIdentity(config, entries),
-    cacheDir: cacheBaseDir,
+    configFile: config.configFile
+      ? portableCachePathIdentity(config.configFile)
+      : undefined,
+    resolverAliases: collectResolverAliasCacheIdentity(config, entries).map(
+      (identity) => ({
+        ...identity,
+        filePath: portableCachePathIdentity(identity.filePath),
+      }),
+    ),
     mode: process.env.BUNDLER_MODE ?? process.env.NODE_ENV ?? "development",
-    cache: serializeConfigValue(config.cache),
     css: config.css,
-    maxWorkers: config.maxWorkers,
-    diagnostics: config.diagnostics,
     dev: config.dev,
   };
 }
 
 function serializeConfigValue(value: unknown): unknown {
+  if (typeof value === "string" && path.isAbsolute(value)) {
+    return portableCachePathIdentity(value);
+  }
   if (typeof value === "function") {
     const source = value.toString();
     const directive = readFunctionCacheDirective(source);
@@ -658,6 +664,15 @@ function serializeConfigValue(value: unknown): unknown {
     );
   }
   return value;
+}
+
+function portableCachePathIdentity(filePath: string): string {
+  const absolutePath = path.resolve(filePath);
+  const pkgRoot = findPkgRoot(absolutePath);
+  if (!pkgRoot) {
+    return `unpackaged::${path.basename(absolutePath) || "."}`;
+  }
+  return packagePathIdentity(readPkgSafe(pkgRoot), absolutePath);
 }
 
 function resolveSourceMapOutput(
@@ -1197,12 +1212,13 @@ async function createBundlePlan(
     }
 
     for (const dyn of node.irHeader.dynamicImports) {
-      const targetNode = dyn.moduleId
-        ? graph.nodes.get(dyn.moduleId)
-        : undefined;
+      const resolvedId = dyn.moduleId
+        ? (graph.moduleIdentities.get(dyn.moduleId) ?? dyn.moduleId)
+        : null;
+      const targetNode = resolvedId ? graph.nodes.get(resolvedId) : undefined;
       dynamicImports.push({
         hashKey: dyn.hashKey,
-        resolvedId: dyn.external ? null : (dyn.moduleId ?? null),
+        resolvedId: dyn.external ? null : resolvedId,
         externalRequest: dyn.external ? (dyn.request ?? dyn.source) : undefined,
         exports: collectDynamicImportExports(targetNode),
       });
@@ -1301,6 +1317,15 @@ async function collectTransformedModules(
     scheduled.add(key);
     resolvedMap.set(module.id, {
       id: module.id,
+      moduleIdentity: module.moduleIdentity,
+      filePath: module.filePath,
+      pkg: module.pkg,
+      external: false,
+      virtual: module.virtual,
+    });
+    resolvedMap.set(module.moduleIdentity, {
+      id: module.id,
+      moduleIdentity: module.moduleIdentity,
       filePath: module.filePath,
       pkg: module.pkg,
       external: false,
@@ -1332,12 +1357,14 @@ async function collectTransformedModules(
   for (const entry of entries) {
     const filePath = path.resolve(entry.path);
     const pkgRoot = findPkgRoot(filePath) ?? path.dirname(filePath);
+    const pkg = readPkgSafe(pkgRoot);
     for (const envId of entry.envs ?? envs) {
       schedule({
         id: filePath,
+        moduleIdentity: packagePathIdentity(pkg, filePath),
         filePath,
         envId,
-        pkg: readPkgSafe(pkgRoot),
+        pkg,
       });
     }
   }
@@ -1380,11 +1407,12 @@ async function transformModule(
   const sourceMapOutput = resolveSourceMapOutput(config.outputs.sourceMap);
   const outputDir = path.resolve(config.outputs.outDir);
   const sourceFileName = module.virtual
-    ? `bundler:///${encodeURIComponent(module.id)}`
+    ? `bundler:///${encodeURIComponent(module.moduleIdentity)}`
     : normalizePosixPath(path.relative(outputDir, module.filePath)) ||
       path.basename(module.filePath);
   const requestBase = {
     id: module.id,
+    moduleIdentity: module.moduleIdentity,
     realPath: module.filePath,
     code: loadedModule.code,
     pkg: module.pkg,
@@ -1440,8 +1468,10 @@ async function transformModule(
         continue;
       }
       resolvedMap.set(resolved.id, resolved);
+      resolvedMap.set(resolved.moduleIdentity, resolved);
       schedule({
         id: resolved.id,
+        moduleIdentity: resolved.moduleIdentity,
         filePath: resolved.filePath,
         envId,
         pkg: resolved.pkg,
@@ -1451,6 +1481,7 @@ async function transformModule(
 
     for (const dynamicEntry of discoveredDynamics) {
       resolvedMap.set(dynamicEntry.id, dynamicEntry);
+      resolvedMap.set(dynamicEntry.moduleIdentity, dynamicEntry);
       const existing = dynamicEntries.get(dynamicEntry.id);
       if (existing) {
         existing.envs = Array.from(
@@ -1472,6 +1503,7 @@ async function transformModule(
         }
         schedule({
           id: dynamicEntry.id,
+          moduleIdentity: dynamicEntry.moduleIdentity,
           filePath: dynamicEntry.filePath,
           envId: targetEnv,
           pkg: dynamicEntry.pkg,
@@ -1700,6 +1732,7 @@ async function resolveImportRequestsForEnvs(
       string,
       {
         id: string | null;
+        moduleIdentity?: string | null;
         filePath: string | null;
         external: boolean;
         virtual?: boolean;
@@ -1714,6 +1747,7 @@ async function resolveImportRequestsForEnvs(
       string,
       {
         id: string | null;
+        moduleIdentity?: string | null;
         filePath: string | null;
         external: boolean;
         virtual?: boolean;
@@ -1738,6 +1772,9 @@ async function resolveImportRequestsForEnvs(
             request.key,
             {
               id: resolved.external ? null : resolved.id,
+              moduleIdentity: resolved.external
+                ? null
+                : resolved.moduleIdentity,
               filePath: resolved.external ? null : resolved.filePath,
               external: resolved.external,
               virtual: resolved.virtual,

@@ -21,18 +21,18 @@ function __cjs_require__(request) {
     case "node:tls":
       return __cjs_dep_4;
     default:
-      throw new Error("Cannot require " + request + " from undici@8.7.0/lib/core/connect.js");
+      throw new Error("Cannot require " + request + " from undici@8.7.0::lib/core/connect.js");
   }
 }
 const __cjs_cache__ = globalThis.__BUNDLER_CJS_CACHE__ ??= new Map();
-let __cjs_default__ = __cjs_cache__.get("undici@8.7.0/lib/core/connect.js");
+let __cjs_default__ = __cjs_cache__.get("undici@8.7.0::lib/core/connect.js::env=snapshot::NODE_ENV=production");
 if (!__cjs_default__) {
   const __cjs_module__ = {
     exports: {}
   };
   const __cjs_exports__ = __cjs_module__.exports;
-  __cjs_cache__.set("undici@8.7.0/lib/core/connect.js", __cjs_exports__);
-  ((module, exports, require, process) => {
+  __cjs_cache__.set("undici@8.7.0::lib/core/connect.js::env=snapshot::NODE_ENV=production", __cjs_exports__);
+  ((module, exports, require, process, __filename, __dirname) => {
     'use strict';
 
     const net = require('node:net');
@@ -215,8 +215,8 @@ if (!__cjs_default__) {
       return err;
     }
     module.exports = buildConnector;
-  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__);
+  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__, "undici@8.7.0::lib/core/connect.js", "undici@8.7.0::lib/core");
   __cjs_default__ = __cjs_module__.exports;
-  __cjs_cache__.set("undici@8.7.0/lib/core/connect.js", __cjs_default__);
+  __cjs_cache__.set("undici@8.7.0::lib/core/connect.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;

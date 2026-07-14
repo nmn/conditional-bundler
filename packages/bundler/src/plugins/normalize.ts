@@ -2,7 +2,12 @@ import path from "node:path";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { contentHash, findPkgRoot, readPkgSafe } from "@bundler/shared";
+import {
+  contentHash,
+  findPkgRoot,
+  packagePathIdentity,
+  readPkgSafe,
+} from "@bundler/shared";
 import type {
   BabelPluginSpec,
   BundlerPlugin,
@@ -154,13 +159,13 @@ async function loadModulePlugin(
   resolved.workerFingerprint = contentHash(
     JSON.stringify({
       name: plugin.name,
-      modulePath,
+      modulePath: portablePathIdentity(modulePath),
       moduleHash: hashFileIfExists(modulePath),
       version: pkg.version,
-      options: pluginRef.options ?? null,
-      transform: serializeEnvSpecs(resolved.transform),
-      transformPre: serializeEnvSpecs(resolved.transformPre),
-      transformPost: serializeEnvSpecs(resolved.transformPost),
+      options: portableFingerprintValue(pluginRef.options ?? null),
+      transform: portableEnvSpecs(resolved.transform),
+      transformPre: portableEnvSpecs(resolved.transformPre),
+      transformPost: portableEnvSpecs(resolved.transformPost),
       transformFiles: hashTransformFiles([
         resolved.transform,
         resolved.transformPre,
@@ -186,7 +191,10 @@ function hashTransformFiles(
   return Object.fromEntries(
     Array.from(modulePaths)
       .sort()
-      .map((modulePath) => [modulePath, hashFileIfExists(modulePath)]),
+      .map((modulePath) => [
+        portablePathIdentity(modulePath),
+        hashFileIfExists(modulePath),
+      ]),
   );
 }
 
@@ -279,9 +287,13 @@ function buildWorkerTransformProfile(
   const profile = {
     fingerprint: contentHash(
       JSON.stringify({
-        transform: Object.fromEntries(transform.entries()),
-        transformPre: Object.fromEntries(transformPre.entries()),
-        transformPost: Object.fromEntries(transformPost.entries()),
+        transform: portableEnvSpecs(Object.fromEntries(transform.entries())),
+        transformPre: portableEnvSpecs(
+          Object.fromEntries(transformPre.entries()),
+        ),
+        transformPost: portableEnvSpecs(
+          Object.fromEntries(transformPost.entries()),
+        ),
         plugins: plugins
           .map((plugin) => plugin.workerFingerprint)
           .filter((value): value is string => Boolean(value)),
@@ -325,4 +337,46 @@ function serializeEnvSpecs(
   return Object.fromEntries(
     Object.entries(value).filter(([, entries]) => Array.isArray(entries)),
   ) as Record<string, NormalizedBabelPluginSpec[]>;
+}
+
+function portableEnvSpecs(
+  value: EnvValue<NormalizedBabelPluginSpec[]> | undefined,
+): Record<string, unknown> | null {
+  const specs = serializeEnvSpecs(value);
+  return specs
+    ? Object.fromEntries(
+        Object.entries(specs).map(([envId, entries]) => [
+          envId,
+          entries.map((entry) => ({
+            modulePath: portablePathIdentity(entry.modulePath),
+            options: portableFingerprintValue(entry.options),
+          })),
+        ]),
+      )
+    : null;
+}
+
+function portableFingerprintValue(value: unknown): unknown {
+  if (typeof value === "string" && path.isAbsolute(value)) {
+    return portablePathIdentity(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => portableFingerprintValue(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, portableFingerprintValue(item)]),
+    );
+  }
+  return value;
+}
+
+function portablePathIdentity(filePath: string): string {
+  const pkgRoot = findPkgRoot(filePath);
+  if (!pkgRoot) {
+    return `unpackaged::${path.basename(filePath) || "."}`;
+  }
+  return packagePathIdentity(readPkgSafe(pkgRoot), filePath);
 }

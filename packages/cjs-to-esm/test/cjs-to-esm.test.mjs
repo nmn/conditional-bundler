@@ -272,4 +272,46 @@ module.exports = load;
     expect(result.code).toContain("function __cjs_require__");
     expect(result.metadata.cjsToEsm).toEqual({ strategy: "compatibility" });
   });
+
+  test("uses package-relative identities in compatibility output", async () => {
+    const roots = await Promise.all(
+      ["first", "second"].map(async (name) => {
+        const parent = await fs.mkdtemp(
+          path.join(os.tmpdir(), `cjs-portable-${name}-`),
+        );
+        const root = path.join(parent, "portable-package");
+        const filePath = path.join(root, "lib/entry.cjs");
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(
+          path.join(root, "package.json"),
+          JSON.stringify({ name: "portable-package", version: "1.2.3" }),
+        );
+        await fs.writeFile(filePath, "module.exports = {};");
+        return { parent, root, filePath };
+      }),
+    );
+
+    try {
+      const source = "module.exports = name => require(name);";
+      const outputs = await Promise.all(
+        roots.map(({ filePath }) =>
+          transformCjs(source, { filePath, strategy: "compatibility" }),
+        ),
+      );
+
+      expect(outputs[0].code).toBe(outputs[1].code);
+      expect(outputs[0].code).toContain(
+        "portable-package@1.2.3::lib/entry.cjs::env=client::NODE_ENV=development",
+      );
+      for (const { root } of roots) {
+        expect(outputs[0].code).not.toContain(root);
+      }
+    } finally {
+      await Promise.all(
+        roots.map(({ parent }) =>
+          fs.rm(parent, { recursive: true, force: true }),
+        ),
+      );
+    }
+  });
 });

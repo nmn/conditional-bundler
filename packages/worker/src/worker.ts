@@ -40,6 +40,7 @@ type WorkerTransformProfile = {
 
 type WorkerRequest = {
   id: string;
+  moduleIdentity: string;
   realPath: string;
   code: string;
   pkg: { name: string; version: string; root: string };
@@ -89,6 +90,7 @@ type ResolvedImportsByEnv = Record<
     string,
     {
       id: string | null;
+      moduleIdentity?: string | null;
       filePath: string | null;
       external: boolean;
       virtual?: boolean;
@@ -129,7 +131,7 @@ const pendingCoordinatorRequests = new Map<
   { resolve: (value: unknown) => void; reject: (error: Error) => void }
 >();
 let nextCoordinatorRequestId = 1;
-const CELL_ARTIFACT_FORMAT = 10;
+const CELL_ARTIFACT_FORMAT = 11;
 const remapping = ((
   remappingModule as unknown as {
     default?: typeof import("@ampproject/remapping").default;
@@ -144,30 +146,39 @@ async function handleTransform(
   const fileHash = contentHash(request.code);
   const cachePaths = buildFileCachePaths(
     request.cacheDir,
-    request.realPath,
     request.envs,
-    request.id,
+    request.moduleIdentity,
   );
   const remote = createRemoteCacheAdapter(
     request.remoteCache,
     request.cacheNamespace,
   );
   const cached = await readModuleCache(cachePaths.modulePath);
+  const hydratedCached = cached
+    ? {
+        ...cached,
+        fileRecordsByEnv: hydrateCachedFileRecords(
+          cached.fileRecordsByEnv,
+          cachePaths.fileDir,
+          request,
+        ),
+      }
+    : null;
   if (
-    cached &&
-    cached.moduleKey === moduleKey &&
+    hydratedCached &&
+    hydratedCached.moduleKey === moduleKey &&
     (await hasCachedArtifacts(
-      cached.fileRecordsByEnv,
+      hydratedCached.fileRecordsByEnv,
       Boolean(request.sourceMap),
     ))
   ) {
-    const first = Object.values(cached.fileRecordsByEnv)[0];
+    const first = Object.values(hydratedCached.fileRecordsByEnv)[0];
     return {
       ok: true,
       cacheHit: true,
       contentHash: first.contentHash,
       prefix: first.prefix,
-      fileRecordsByEnv: cached.fileRecordsByEnv,
+      fileRecordsByEnv: hydratedCached.fileRecordsByEnv,
     };
   }
   const remoteCached = remote
@@ -176,6 +187,7 @@ async function handleTransform(
         cachePaths,
         moduleKey,
         Boolean(request.sourceMap),
+        request,
       )
     : null;
   if (remoteCached) {
@@ -227,9 +239,21 @@ async function handleTransform(
     }),
   ) as Record<string, FileRecord>;
 
-  await writeFileCache(cachePaths, resultsByEnv, fileRecordsByEnv, moduleKey);
+  await writeFileCache(
+    cachePaths,
+    resultsByEnv,
+    fileRecordsByEnv,
+    moduleKey,
+    request.moduleIdentity,
+  );
   if (remote) {
-    await writeRemoteFileCache(remote, cachePaths, fileRecordsByEnv, moduleKey);
+    await writeRemoteFileCache(
+      remote,
+      cachePaths,
+      fileRecordsByEnv,
+      moduleKey,
+      request.moduleIdentity,
+    );
   }
 
   return {
@@ -303,6 +327,7 @@ async function transformFile(
     const coreResult = transformWithCore(
       {
         id: request.id,
+        moduleIdentity: request.moduleIdentity,
         code: preResult.code,
         realPath: request.realPath,
         pkg: request.pkg,
@@ -620,6 +645,9 @@ function normalizeSourceName(
   const absoluteSource = path.isAbsolute(rootedSource)
     ? rootedSource
     : path.resolve(path.dirname(request.realPath), rootedSource);
+  if (path.resolve(absoluteSource) === path.resolve(request.realPath)) {
+    return request.sourceMap?.sourceFileName ?? source;
+  }
   const relative = normalizePosixPath(
     path.relative(request.sourceMap!.outputDir, absoluteSource),
   );
@@ -673,15 +701,22 @@ function buildModuleKey(request: WorkerRequest): string {
 
   return JSON.stringify({
     artifactFormat: CELL_ARTIFACT_FORMAT,
-    id: request.id,
-    realPath: normalizePosixPath(request.realPath),
-    pkg: request.pkg,
+    moduleIdentity: request.moduleIdentity,
+    pkg: {
+      name: request.pkg.name,
+      version: request.pkg.version,
+    },
     envs: [...request.envs].sort(),
     syntax: request.syntax,
     codeHash: contentHash(request.code),
     envHashes,
     mapHashes,
-    sourceMap: request.sourceMap,
+    sourceMap: request.sourceMap
+      ? {
+          sourceFileName: request.sourceMap.sourceFileName,
+          sourcesContent: request.sourceMap.sourcesContent,
+        }
+      : undefined,
     extraOutputHashes,
     workerProfile: request.workerProfile.fingerprint,
   });
@@ -689,14 +724,10 @@ function buildModuleKey(request: WorkerRequest): string {
 
 function buildFileCachePaths(
   cacheRoot: string,
-  realPath: string,
   envs: string[],
-  moduleId: string,
+  moduleIdentity: string,
 ): FileCachePaths {
-  const cacheIdentity = moduleId.startsWith("virtual:")
-    ? moduleId
-    : normalizePosixPath(realPath);
-  const fileHash = contentHash(cacheIdentity);
+  const fileHash = contentHash(moduleIdentity);
   const envHash = contentHash(JSON.stringify([...envs].sort())).slice(0, 12);
   const fileDir = path.join(cacheRoot, "files", fileHash, envHash);
   return {
@@ -747,6 +778,7 @@ async function writeFileCache(
   sourceResultsByEnv: Record<string, TransformResult>,
   fileRecordsByEnv: Record<string, FileRecord>,
   moduleKey: string,
+  moduleIdentity: string,
 ): Promise<void> {
   const existing = await readModuleCache(cachePaths.modulePath);
   await fs.rm(cachePaths.fileDir, { recursive: true, force: true });
@@ -774,7 +806,11 @@ async function writeFileCache(
   const now = new Date().toISOString();
   const moduleRecord: ModuleCacheRecord = {
     moduleKey,
-    fileRecordsByEnv,
+    fileRecordsByEnv: toCachedFileRecords(
+      fileRecordsByEnv,
+      cachePaths.fileDir,
+      moduleIdentity,
+    ),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
@@ -818,6 +854,7 @@ async function readRemoteModuleCache(
   cachePaths: FileCachePaths,
   moduleKey: string,
   sourceMapsRequired: boolean,
+  request: WorkerRequest,
 ): Promise<ModuleCacheRecord | null> {
   const raw = await remote.get(
     joinRemoteKey(cachePaths.remoteBaseKey, "module.json"),
@@ -838,9 +875,10 @@ async function readRemoteModuleCache(
 
   const hydrated: ModuleCacheRecord = {
     ...parsed,
-    fileRecordsByEnv: hydrateRemoteFileRecords(
+    fileRecordsByEnv: hydrateCachedFileRecords(
       parsed.fileRecordsByEnv,
       cachePaths.fileDir,
+      request,
     ),
   };
 
@@ -877,7 +915,14 @@ async function readRemoteModuleCache(
     }
   }
 
-  await writeJsonAtomic(cachePaths.modulePath, hydrated);
+  await writeJsonAtomic(cachePaths.modulePath, {
+    ...hydrated,
+    fileRecordsByEnv: toCachedFileRecords(
+      hydrated.fileRecordsByEnv,
+      cachePaths.fileDir,
+      request.moduleIdentity,
+    ),
+  });
   if (
     !(await hasCachedArtifacts(hydrated.fileRecordsByEnv, sourceMapsRequired))
   ) {
@@ -891,12 +936,17 @@ async function writeRemoteFileCache(
   cachePaths: FileCachePaths,
   fileRecordsByEnv: Record<string, FileRecord>,
   moduleKey: string,
+  moduleIdentity: string,
 ): Promise<void> {
   const local = await readModuleCache(cachePaths.modulePath);
   const now = new Date().toISOString();
   const remoteRecord: ModuleCacheRecord = {
     moduleKey,
-    fileRecordsByEnv: toRemoteFileRecords(fileRecordsByEnv, cachePaths.fileDir),
+    fileRecordsByEnv: toCachedFileRecords(
+      fileRecordsByEnv,
+      cachePaths.fileDir,
+      moduleIdentity,
+    ),
     createdAt: local?.createdAt ?? now,
     updatedAt: now,
   };
@@ -932,15 +982,19 @@ async function writeRemoteFileCache(
   );
 }
 
-function hydrateRemoteFileRecords(
+function hydrateCachedFileRecords(
   records: Record<string, FileRecord>,
   fileDir: string,
+  request: WorkerRequest,
 ): Record<string, FileRecord> {
   return Object.fromEntries(
     Object.entries(records).map(([envId, record]) => [
       envId,
       {
         ...record,
+        id: request.id,
+        filePath: request.realPath,
+        pkg: request.pkg,
         cells: record.cells.map((cell) => ({
           ...cell,
           artifactPath:
@@ -957,15 +1011,23 @@ function hydrateRemoteFileRecords(
   );
 }
 
-function toRemoteFileRecords(
+function toCachedFileRecords(
   records: Record<string, FileRecord>,
   fileDir: string,
+  moduleIdentity: string,
 ): Record<string, FileRecord> {
   return Object.fromEntries(
     Object.entries(records).map(([envId, record]) => [
       envId,
       {
         ...record,
+        id: moduleIdentity,
+        filePath: moduleIdentity,
+        pkg: {
+          name: record.pkg.name,
+          version: record.pkg.version,
+          root: ".",
+        },
         cells: record.cells.map((cell) => ({
           ...cell,
           artifactPath: cell.artifactPath

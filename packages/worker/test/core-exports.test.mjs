@@ -108,7 +108,7 @@ test("records export stars and reexports", async () => {
       expect.objectContaining({
         request: "./dep.js",
         source: "src/dep.js",
-        moduleId: "/fixture/src/dep.js",
+        moduleId: "fixture@0.0.0::src/dep.js",
         external: false,
         sourceOrder: 0,
       }),
@@ -119,7 +119,7 @@ test("records export stars and reexports", async () => {
         imported: "foo",
         request: "./dep.js",
         source: "src/dep.js",
-        moduleId: "/fixture/src/dep.js",
+        moduleId: "fixture@0.0.0::src/dep.js",
         external: false,
         sourceOrder: 26,
       }),

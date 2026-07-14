@@ -8,6 +8,21 @@ export type PackageInfo = {
   root: string;
 };
 
+export function packagePathIdentity(
+  pkg: Pick<PackageInfo, "name" | "version" | "root">,
+  filePath: string,
+): string {
+  const normalizedRoot = normalizePosixPath(path.resolve(pkg.root));
+  const normalizedPath = normalizePosixPath(path.resolve(filePath));
+  const relativePath = path.posix.relative(normalizedRoot, normalizedPath);
+  return `${pkg.name}@${pkg.version}::${relativePath || "."}`;
+}
+
+export function findPackagePathIdentity(filePath: string): string | null {
+  const pkgRoot = findPkgRoot(filePath);
+  return pkgRoot ? packagePathIdentity(readPkgSafe(pkgRoot), filePath) : null;
+}
+
 export function findPkgRoot(startPath: string): string | null {
   let current = path.resolve(startPath);
   while (true) {

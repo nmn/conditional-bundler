@@ -39,18 +39,18 @@ function __cjs_require__(request) {
     case "../infra":
       return __cjs_dep_10;
     default:
-      throw new Error("Cannot require " + request + " from undici@8.7.0/lib/web/fetch/response.js");
+      throw new Error("Cannot require " + request + " from undici@8.7.0::lib/web/fetch/response.js");
   }
 }
 const __cjs_cache__ = globalThis.__BUNDLER_CJS_CACHE__ ??= new Map();
-let __cjs_default__ = __cjs_cache__.get("undici@8.7.0/lib/web/fetch/response.js");
+let __cjs_default__ = __cjs_cache__.get("undici@8.7.0::lib/web/fetch/response.js::env=snapshot::NODE_ENV=production");
 if (!__cjs_default__) {
   const __cjs_module__ = {
     exports: {}
   };
   const __cjs_exports__ = __cjs_module__.exports;
-  __cjs_cache__.set("undici@8.7.0/lib/web/fetch/response.js", __cjs_exports__);
-  ((module, exports, require, process) => {
+  __cjs_cache__.set("undici@8.7.0::lib/web/fetch/response.js::env=snapshot::NODE_ENV=production", __cjs_exports__);
+  ((module, exports, require, process, __filename, __dirname) => {
     'use strict';
 
     const {
@@ -684,9 +684,9 @@ if (!__cjs_default__) {
       fromInnerResponse,
       getResponseState
     };
-  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__);
+  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__, "undici@8.7.0::lib/web/fetch/response.js", "undici@8.7.0::lib/web/fetch");
   __cjs_default__ = __cjs_module__.exports;
-  __cjs_cache__.set("undici@8.7.0/lib/web/fetch/response.js", __cjs_default__);
+  __cjs_cache__.set("undici@8.7.0::lib/web/fetch/response.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
 export const Response = __cjs_default__["Response"];

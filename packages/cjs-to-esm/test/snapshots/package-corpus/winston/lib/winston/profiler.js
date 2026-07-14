@@ -9,18 +9,18 @@ function __cjs_require__(request) {
     case "./logger":
       return __cjs_dep_0;
     default:
-      throw new Error("Cannot require " + request + " from winston@3.19.0/lib/winston/profiler.js");
+      throw new Error("Cannot require " + request + " from winston@3.19.0::lib/winston/profiler.js");
   }
 }
 const __cjs_cache__ = globalThis.__BUNDLER_CJS_CACHE__ ??= new Map();
-let __cjs_default__ = __cjs_cache__.get("winston@3.19.0/lib/winston/profiler.js");
+let __cjs_default__ = __cjs_cache__.get("winston@3.19.0::lib/winston/profiler.js::env=snapshot::NODE_ENV=production");
 if (!__cjs_default__) {
   const __cjs_module__ = {
     exports: {}
   };
   const __cjs_exports__ = __cjs_module__.exports;
-  __cjs_cache__.set("winston@3.19.0/lib/winston/profiler.js", __cjs_exports__);
-  ((module, exports, require, process) => {
+  __cjs_cache__.set("winston@3.19.0::lib/winston/profiler.js::env=snapshot::NODE_ENV=production", __cjs_exports__);
+  ((module, exports, require, process, __filename, __dirname) => {
     /**
      * profiler.js: TODO: add file header description.
      *
@@ -72,8 +72,8 @@ if (!__cjs_default__) {
       }
     }
     module.exports = Profiler;
-  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__);
+  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__, "winston@3.19.0::lib/winston/profiler.js", "winston@3.19.0::lib/winston");
   __cjs_default__ = __cjs_module__.exports;
-  __cjs_cache__.set("winston@3.19.0/lib/winston/profiler.js", __cjs_default__);
+  __cjs_cache__.set("winston@3.19.0::lib/winston/profiler.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;

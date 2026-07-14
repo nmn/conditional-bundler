@@ -25,6 +25,7 @@ import {
   readPkgSafe,
   normalizePosixPath,
   contentHash,
+  packagePathIdentity,
 } from "@bundler/shared";
 import { modulePrefixIdentity } from "../module-identity.js";
 
@@ -42,6 +43,7 @@ type ResolvedImportInfo = {
   source: string;
   request: string;
   moduleId?: string | null;
+  prefixModuleId?: string | null;
   external: boolean;
   pkg: TransformInput["pkg"];
   relPath: string;
@@ -51,7 +53,7 @@ function resolvedImportPrefix(resolved: ResolvedImportInfo): string {
   return filePrefix(
     resolved.pkg.name,
     resolved.pkg.version,
-    modulePrefixIdentity(resolved.moduleId, resolved.relPath),
+    modulePrefixIdentity(resolved.prefixModuleId, resolved.relPath),
   );
 }
 
@@ -207,6 +209,7 @@ export function transformWithCore(
 
   const normalizedPath = normalizePosixPath(input.realPath);
   const relPath = path.posix.relative(input.pkg.root, normalizedPath);
+  const moduleIdentity = transformModuleIdentity(input);
   const prefix = filePrefix(
     input.pkg.name,
     input.pkg.version,
@@ -363,7 +366,7 @@ export function transformWithCore(
             t.identifier("__BUNDLER_HMR__"),
             t.identifier("hot"),
           ),
-          [t.stringLiteral(input.id ?? input.realPath)],
+          [t.stringLiteral(moduleIdentity)],
         ),
       );
     },
@@ -594,6 +597,7 @@ export function transformWithCore(
   );
   const fileRecord: FileRecord = {
     id: input.id ?? input.realPath,
+    moduleIdentity,
     filePath: input.realPath,
     prefix,
     contentHash: contentHash(input.code),
@@ -846,6 +850,7 @@ function buildConditionalBindingCells(
   input: TransformInput,
   prefix: string,
 ): CellRecord[] {
+  const moduleIdentity = transformModuleIdentity(input);
   const cells: CellRecord[] = [];
   let sourceOrder = -1000;
 
@@ -908,8 +913,8 @@ function buildConditionalBindingCells(
         emitConditionalEnd(),
       );
       cells.push({
-        id: `${input.realPath}#cond:${sourceOrder}`,
-        fileId: input.realPath,
+        id: `${moduleIdentity}#cond:${sourceOrder}`,
+        fileId: moduleIdentity,
         sourceOrder,
         kind: "conditional",
         code: lines.join("\n"),
@@ -961,8 +966,8 @@ function buildConditionalBindingCells(
         emitConditionalEnd(),
       );
       cells.push({
-        id: `${input.realPath}#cond:${sourceOrder}`,
-        fileId: input.realPath,
+        id: `${moduleIdentity}#cond:${sourceOrder}`,
+        fileId: moduleIdentity,
         sourceOrder,
         kind: "conditional",
         code: lines.join("\n"),
@@ -1076,6 +1081,7 @@ function collectStatementCells(
   traverse: typeof import("@babel/traverse").default,
   sourceMap: CoreTransformOptions["sourceMap"],
 ): CellRecord[] {
+  const moduleIdentity = transformModuleIdentity(input);
   const programPath = getProgramPath(ast, traverse);
   if (!programPath) {
     return [];
@@ -1113,8 +1119,8 @@ function collectStatementCells(
         externalSymbolMap,
       );
       return {
-        id: `${input.realPath}#stmt:${index}`,
-        fileId: input.realPath,
+        id: `${moduleIdentity}#stmt:${index}`,
+        fileId: moduleIdentity,
         sourceOrder: index,
         endSourceOrder: index,
         kind: "worker",
@@ -1171,6 +1177,10 @@ function optionsEmbedCellSourcesContent(
   sourceMap: NonNullable<CoreTransformOptions["sourceMap"]>,
 ): boolean {
   return sourceMap.embedCellSourcesContent !== false;
+}
+
+function transformModuleIdentity(input: TransformInput): string {
+  return input.moduleIdentity ?? packagePathIdentity(input.pkg, input.realPath);
 }
 
 function lowerHmrCellStatements(
@@ -1592,6 +1602,7 @@ function resolveImportForHash(
       source,
       request: source,
       moduleId: null,
+      prefixModuleId: null,
       external: true,
       pkg: input.pkg,
       relPath: source,
@@ -1602,14 +1613,17 @@ function resolveImportForHash(
     ? normalizePosixPath(resolution.filePath)
     : (resolveImportPath(input.realPath, source) ??
       path.resolve(path.dirname(input.realPath), source));
-  const moduleId = resolution?.id ?? resolvedPath;
+  const prefixModuleId = resolution?.id ?? resolvedPath;
 
   if (source.startsWith(".")) {
     const relPath = path.posix.relative(input.pkg.root, resolvedPath);
     return {
       source: relPath,
       request: source,
-      moduleId,
+      moduleId:
+        resolution?.moduleIdentity ??
+        packagePathIdentity(input.pkg, resolvedPath),
+      prefixModuleId,
       external: false,
       pkg: input.pkg,
       relPath,
@@ -1622,7 +1636,9 @@ function resolveImportForHash(
   return {
     source: relPath,
     request: source,
-    moduleId,
+    moduleId:
+      resolution?.moduleIdentity ?? packagePathIdentity(pkg, resolvedPath),
+    prefixModuleId,
     external: false,
     pkg,
     relPath,

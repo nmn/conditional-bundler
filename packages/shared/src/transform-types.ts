@@ -13,6 +13,7 @@ import type {
 
 export type TransformResolvedImport = {
   id: string | null;
+  moduleIdentity?: string | null;
   filePath: string | null;
   external: boolean;
   virtual?: boolean;
@@ -21,6 +22,7 @@ export type TransformResolvedImport = {
 
 export type TransformInput = {
   id?: string;
+  moduleIdentity?: string;
   code: string;
   realPath: string;
   pkg: { name: string; version: string; root: string };

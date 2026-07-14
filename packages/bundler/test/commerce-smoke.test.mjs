@@ -44,16 +44,17 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     await fs.readFile(path.join(exampleDir, "dist/manifest.json"), "utf8"),
   );
   expectCjsNodeEnv(buildManifest, "production");
-  const cachedNodeModulePaths = await findCachedNodeModulePaths(
+  const cachedModuleIdentities = await findCachedModuleIdentities(
     path.join(exampleDir, ".cache/conditional-bundler"),
   );
-  expect(cachedNodeModulePaths).toEqual(
-    expect.arrayContaining([
-      expect.stringContaining(`${path.sep}node_modules${path.sep}`),
-    ]),
+  expect(cachedModuleIdentities).toEqual(
+    expect.arrayContaining([expect.stringMatching(/^react@19\.2\.5::/)]),
   );
-  expect(cachedNodeModulePaths.some((item) => item.includes("react"))).toBe(
+  expect(cachedModuleIdentities.every((item) => !path.isAbsolute(item))).toBe(
     true,
+  );
+  expect(cachedModuleIdentities.some((item) => item.includes(rootDir))).toBe(
+    false,
   );
   const clientBundles = buildManifest.bundles.filter(
     (bundle) => bundle.envId === "client",
@@ -610,7 +611,7 @@ async function getFreePort() {
   return address.port;
 }
 
-async function findCachedNodeModulePaths(cacheDir) {
+async function findCachedModuleIdentities(cacheDir) {
   const moduleFiles = await findFilesNamed(cacheDir, "module.json");
   const found = new Set();
   for (const filePath of moduleFiles) {
@@ -618,7 +619,7 @@ async function findCachedNodeModulePaths(cacheDir) {
     const parsed = JSON.parse(raw);
     const records = Object.values(parsed.fileRecordsByEnv ?? {});
     for (const record of records) {
-      if (record?.filePath?.includes(`${path.sep}node_modules${path.sep}`)) {
+      if (record?.filePath) {
         found.add(record.filePath);
       }
     }

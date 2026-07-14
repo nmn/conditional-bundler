@@ -116,6 +116,7 @@ export type FileFlags = {
 
 export type FileIR = {
   id: string;
+  moduleIdentity?: string;
   realPath: string;
   filePath: string;
   virtual?: boolean;
@@ -143,6 +144,7 @@ export type FileIR = {
 export type FileRecord = Pick<
   FileIR,
   | "id"
+  | "moduleIdentity"
   | "filePath"
   | "virtual"
   | "prefix"

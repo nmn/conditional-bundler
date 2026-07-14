@@ -46,7 +46,7 @@ test("rewrites dynamic import to constant", async () => {
         hashKey: "__IMPORT_a4tfu7r6i",
         request: "./dep.js",
         source: "src/dep.js",
-        moduleId: "/fixture/src/dep.js",
+        moduleId: "fixture@0.0.0::src/dep.js",
         external: false,
       }),
     ],

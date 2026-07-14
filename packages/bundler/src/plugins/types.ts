@@ -18,6 +18,7 @@ export type ResolveImportKind =
 
 export type ResolveImportResult = null | {
   id: string;
+  moduleIdentity?: string;
   filePath: string;
   virtual?: boolean;
   meta?: Record<string, unknown>;
@@ -212,6 +213,7 @@ export type WorkerTransformProfile = {
 
 export type ModuleResolution = {
   id: string;
+  moduleIdentity: string;
   filePath: string;
   pkg: { name: string; version: string; root: string };
   external: boolean;

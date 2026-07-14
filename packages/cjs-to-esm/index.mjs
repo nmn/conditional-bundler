@@ -5,6 +5,8 @@ import { parse } from "@babel/parser";
 
 export const CJS_VIRTUAL_PREFIX = "virtual:cjs-to-esm:";
 
+const packageIdentityCache = new Map();
+
 const builtinRequests = new Set(
   builtinModules.flatMap((name) => [name, `node:${name}`]),
 );
@@ -35,7 +37,7 @@ export default function cjsToEsmBabelPlugin(api, options = {}) {
         }
 
         const decoded = decodeCjsVirtualId(id, virtualPrefix);
-        const filePath = decoded.filePath || pluginOptions.filePath;
+        const filePath = pluginOptions.filePath ?? decoded.filePath;
         const envId = decoded.envId ?? pluginOptions.envId ?? "default";
         const nodeEnv =
           decoded.mode ??
@@ -48,6 +50,7 @@ export default function cjsToEsmBabelPlugin(api, options = {}) {
         const context = {
           t,
           filePath,
+          moduleIdentity: createCjsModuleIdentity(filePath, pluginOptions.pkg),
           envId,
           mode,
           nodeEnv,
@@ -139,6 +142,58 @@ export function decodeCjsVirtualId(id, virtualPrefix = CJS_VIRTUAL_PREFIX) {
           "base64url",
         ).toString("utf8"),
       };
+}
+
+export function createCjsModuleIdentity(filePath, suppliedPackage) {
+  const normalizedPath = toPosixPath(path.resolve(filePath));
+  const suppliedIdentity = packageIdentityFromInfo(
+    normalizedPath,
+    suppliedPackage,
+  );
+  if (suppliedIdentity) {
+    return suppliedIdentity;
+  }
+
+  let directory = path.dirname(filePath);
+  while (true) {
+    if (packageIdentityCache.has(directory)) {
+      const cached = packageIdentityCache.get(directory);
+      return cached
+        ? packageIdentityFromInfo(normalizedPath, cached)
+        : `anonymous@0.0.0::${path.posix.basename(normalizedPath)}`;
+    }
+    const manifestPath = path.join(directory, "package.json");
+    try {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+      const pkg = {
+        name: manifest.name ?? "",
+        version: manifest.version ?? "0.0.0",
+        root: directory,
+      };
+      packageIdentityCache.set(directory, pkg);
+      return packageIdentityFromInfo(normalizedPath, pkg);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) {
+      packageIdentityCache.set(directory, null);
+      return `anonymous@0.0.0::${path.posix.basename(normalizedPath)}`;
+    }
+    directory = parent;
+  }
+}
+
+function packageIdentityFromInfo(normalizedPath, pkg) {
+  if (!pkg?.root) return null;
+  const root = toPosixPath(path.resolve(pkg.root));
+  const relativePath = path.posix.relative(root, normalizedPath);
+  if (relativePath === ".." || relativePath.startsWith("../")) return null;
+  return `${pkg.name ?? ""}@${pkg.version ?? "0.0.0"}::${relativePath || "."}`;
+}
+
+function toPosixPath(filePath) {
+  return filePath.split(path.sep).join(path.posix.sep);
 }
 
 const dependencyExportCache = new Map();
@@ -1226,7 +1281,7 @@ function removeUnusedCjsHelpers(programPath) {
 }
 
 function createCompatibilityWrapper(programPath, context) {
-  const { t, filePath, nodeEnv } = context;
+  const { t, filePath, moduleIdentity, envId, nodeEnv } = context;
   const originalBody = programPath.node.body;
   const originalDirectives = programPath.node.directives;
   const requires = collectCjsRequires(programPath, t);
@@ -1280,7 +1335,7 @@ function createCompatibilityWrapper(programPath, context) {
               t.stringLiteral("Cannot require "),
               t.cloneNode(requestId),
             ),
-            t.stringLiteral(` from ${filePath}`),
+            t.stringLiteral(` from ${moduleIdentity}`),
           ),
         ]),
       ),
@@ -1293,7 +1348,11 @@ function createCompatibilityWrapper(programPath, context) {
   const defaultId = t.identifier("__cjs_default__");
   const moduleId = t.identifier("__cjs_module__");
   const exportsId = t.identifier("__cjs_exports__");
-  const fileLiteral = t.stringLiteral(filePath);
+  const cacheKeyLiteral = t.stringLiteral(
+    `${moduleIdentity}::env=${envId}::NODE_ENV=${nodeEnv}`,
+  );
+  const fileLiteral = t.stringLiteral(moduleIdentity);
+  const directoryLiteral = t.stringLiteral(path.posix.dirname(moduleIdentity));
   const moduleExports = () =>
     t.memberExpression(t.cloneNode(moduleId), t.identifier("exports"));
   const cacheCall = (method, args) =>
@@ -1310,6 +1369,8 @@ function createCompatibilityWrapper(programPath, context) {
         t.identifier("exports"),
         t.identifier("require"),
         t.identifier("process"),
+        t.identifier("__filename"),
+        t.identifier("__dirname"),
       ],
       wrapperBody,
     ),
@@ -1318,6 +1379,8 @@ function createCompatibilityWrapper(programPath, context) {
       t.cloneNode(exportsId),
       t.cloneNode(requireId),
       t.cloneNode(processId),
+      t.cloneNode(fileLiteral),
+      t.cloneNode(directoryLiteral),
     ],
   );
 
@@ -1362,7 +1425,7 @@ function createCompatibilityWrapper(programPath, context) {
     t.variableDeclaration("let", [
       t.variableDeclarator(
         defaultId,
-        cacheCall("get", [t.cloneNode(fileLiteral)]),
+        cacheCall("get", [t.cloneNode(cacheKeyLiteral)]),
       ),
     ]),
     t.ifStatement(
@@ -1380,14 +1443,20 @@ function createCompatibilityWrapper(programPath, context) {
           t.variableDeclarator(exportsId, moduleExports()),
         ]),
         t.expressionStatement(
-          cacheCall("set", [t.cloneNode(fileLiteral), t.cloneNode(exportsId)]),
+          cacheCall("set", [
+            t.cloneNode(cacheKeyLiteral),
+            t.cloneNode(exportsId),
+          ]),
         ),
         t.expressionStatement(invokeCjs),
         t.expressionStatement(
           t.assignmentExpression("=", t.cloneNode(defaultId), moduleExports()),
         ),
         t.expressionStatement(
-          cacheCall("set", [t.cloneNode(fileLiteral), t.cloneNode(defaultId)]),
+          cacheCall("set", [
+            t.cloneNode(cacheKeyLiteral),
+            t.cloneNode(defaultId),
+          ]),
         ),
       ]),
     ),

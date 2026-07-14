@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { transform as transformCss } from "lightningcss";
+import { findPkgRoot, packagePathIdentity, readPkgSafe } from "@bundler/shared";
 import type {
   BundlerPlugin,
   LoadContext,
@@ -26,6 +27,10 @@ export function createCssPlugin(): BundlerPlugin {
       return {
         id: toCssId(filePath),
         filePath,
+        moduleIdentity: packagePathIdentity(
+          readPkgSafe(findPkgRoot(filePath) ?? path.dirname(filePath)),
+          filePath,
+        ),
       };
     },
     async load(context: LoadContext) {

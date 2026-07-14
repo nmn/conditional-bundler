@@ -159,18 +159,18 @@ function __cjs_require__(request) {
     case "./lib/web/eventsource/eventsource":
       return __cjs_dep_50;
     default:
-      throw new Error("Cannot require " + request + " from undici@8.7.0/index.js");
+      throw new Error("Cannot require " + request + " from undici@8.7.0::index.js");
   }
 }
 const __cjs_cache__ = globalThis.__BUNDLER_CJS_CACHE__ ??= new Map();
-let __cjs_default__ = __cjs_cache__.get("undici@8.7.0/index.js");
+let __cjs_default__ = __cjs_cache__.get("undici@8.7.0::index.js::env=snapshot::NODE_ENV=production");
 if (!__cjs_default__) {
   const __cjs_module__ = {
     exports: {}
   };
   const __cjs_exports__ = __cjs_module__.exports;
-  __cjs_cache__.set("undici@8.7.0/index.js", __cjs_exports__);
-  ((module, exports, require, process) => {
+  __cjs_cache__.set("undici@8.7.0::index.js::env=snapshot::NODE_ENV=production", __cjs_exports__);
+  ((module, exports, require, process, __filename, __dirname) => {
     'use strict';
 
     const Client = require('./lib/dispatcher/client');
@@ -402,9 +402,9 @@ if (!__cjs_default__) {
       globalThis.EventSource = module.exports.EventSource;
     }
     module.exports.install = install;
-  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__);
+  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__, "undici@8.7.0::index.js", ".");
   __cjs_default__ = __cjs_module__.exports;
-  __cjs_cache__.set("undici@8.7.0/index.js", __cjs_default__);
+  __cjs_cache__.set("undici@8.7.0::index.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
 export const Agent = __cjs_default__["Agent"];

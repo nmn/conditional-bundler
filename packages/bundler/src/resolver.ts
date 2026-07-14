@@ -1,7 +1,12 @@
 import path from "node:path";
 import fs from "node:fs";
 import { createHash } from "node:crypto";
-import { findPkgRoot, readPkg, readPkgSafe } from "@bundler/shared";
+import {
+  findPkgRoot,
+  packagePathIdentity,
+  readPkg,
+  readPkgSafe,
+} from "@bundler/shared";
 import { runResolveImport } from "./plugins/run.js";
 import type { BundlerConfig } from "./config.js";
 import type {
@@ -110,6 +115,7 @@ export function createResolver(options: ResolverOptions): Resolver {
       const pkgRoot = findPkgRoot(fromFilePath) ?? path.dirname(fromFilePath);
       return {
         id: source,
+        moduleIdentity: `external::${source}`,
         filePath: source,
         pkg: readPkgSafe(pkgRoot),
         external: true,
@@ -121,6 +127,9 @@ export function createResolver(options: ResolverOptions): Resolver {
     const pkg = readPkg(pkgRoot);
     return {
       id: resolved.id,
+      moduleIdentity:
+        resolved.moduleIdentity ??
+        (resolved.virtual ? resolved.id : packagePathIdentity(pkg, filePath)),
       filePath,
       pkg,
       external: false,
