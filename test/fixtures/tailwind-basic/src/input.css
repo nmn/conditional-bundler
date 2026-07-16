@@ -1,0 +1,9 @@
+@theme {
+  --color-monarch: #b64b2f;
+}
+
+@layer base {
+  body {
+    margin: 0;
+  }
+}

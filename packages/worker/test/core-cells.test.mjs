@@ -280,6 +280,34 @@ test("assigns conditional bindings into bundle scope for HMR installers", async 
   expect(result.code).not.toContain(`let ${prefix}_feature`);
 });
 
+test("keeps self-reassigning function helpers mutable in HMR installers", async () => {
+  const prefix = prefixFor(defaultFilePath);
+  const result = await transform(
+    `function extend() {
+       return extend = Object.assign
+         ? Object.assign.bind()
+         : function (target) { return target; },
+         extend.apply(null, arguments);
+     }
+     export const value = extend({}, { ready: true }).ready;`,
+    { dev: { hmr: true } },
+  );
+  const helperCell = result.fileRecord.cells.find((cell) =>
+    cell.provides.includes(`${prefix}_extend`),
+  );
+
+  expect(helperCell.code).toContain(`${prefix}_extend = function ()`);
+  expect(helperCell.code).not.toContain(`function ${prefix}_extend()`);
+
+  const valueCell = result.fileRecord.cells.find((cell) =>
+    cell.provides.includes(`${prefix}_value`),
+  );
+  const evaluate = new Function(
+    `let ${prefix}_extend, ${prefix}_value;\n${helperCell.code}\n${valueCell.code}\nreturn ${prefix}_value;`,
+  );
+  expect(evaluate()).toBe(true);
+});
+
 test("keeps multi-declarator exports together in one cell", async () => {
   const prefix = prefixFor(defaultFilePath);
   const result = await transform("export const alpha = 1, beta = 2;");

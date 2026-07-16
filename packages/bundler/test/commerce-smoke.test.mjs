@@ -144,6 +144,7 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
   expect(productActionRef.fileName).toMatch(
     /^ProductActions\.client\.[a-z0-9]+\.js$/,
   );
+  expect(productActionRef.url).toBe(`/${productActionRef.fileName}`);
   expect(productActionRef.chunks).toEqual([
     productActionRef.id,
     productActionRef.fileName,
@@ -217,7 +218,9 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     await waitForHttp(`${baseUrl}/`, () => childOutput);
     const html = await fetchText(`${baseUrl}/`);
     expect(html).toContain("Monarch Goods");
-    expect(html).toContain('<main class="app-shell" data-route="home">');
+    expect(html).toMatch(
+      /<main class="app-shell [a-z][a-z0-9]{7}" data-route="home">/,
+    );
     expect(html).not.toContain('<div id="root"></div>');
     expect(html).not.toContain("Preparing aisle");
     expect(html).toContain("__BUNDLER_RSC_CHUNKS__");
@@ -455,6 +458,7 @@ async function expectShowcaseAssets(manifest) {
   expect(css).not.toContain("/assets/assets/");
   expect(css).toContain("@layer example-import");
   expect(css).toContain("@supports (display: grid)");
+  expect(css).toContain("outline-offset: 6px");
   expect(css.indexOf("isolation: isolate")).toBeLessThan(
     css.indexOf("position: relative"),
   );

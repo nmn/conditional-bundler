@@ -35,7 +35,10 @@ export default function cjsToEsmBabelPlugin(api, options = {}) {
         const filePath = pluginOptions.filePath;
         const envId =
           pluginOptions.reactCjsEnv ?? pluginOptions.envId ?? "default";
-        const nodeEnv = pluginOptions.nodeEnv ?? pluginOptions.mode;
+        const nodeEnv =
+          pluginOptions.nodeEnv ??
+          pluginOptions.mode ??
+          pluginOptions.buildMode;
         if (typeof nodeEnv !== "string" || nodeEnv.length === 0) {
           throw new Error(
             "cjs-to-esm requires an explicit build mode from the bundler coordinator.",

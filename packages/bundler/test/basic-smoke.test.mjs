@@ -55,6 +55,7 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
   expect(clientManifest["src/Counter.jsx#Counter"]).toMatchObject({
     id: expect.stringMatching(/src\/Counter\.jsx$/),
     fileName: expect.stringMatching(/^Counter\.client\.[a-z0-9]+\.js$/),
+    url: expect.stringMatching(/^\/Counter\.client\.[a-z0-9]+\.js$/),
     chunks: expect.any(Array),
   });
   expect(clientBundleFiles).toHaveLength(5);
@@ -122,7 +123,7 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
     expect(html).toContain(
       "Server components with a conditional client branch.",
     );
-    expect(html).toContain('<main class="shell">');
+    expect(html).toMatch(/<main class="shell [a-z][a-z0-9]{7}">/);
     expect(html).toContain("__BUNDLER_RSC_CHUNKS__");
     expect(html).toContain("__BUNDLER_RSC_DATA__");
     expect(html).not.toContain("importmap");
@@ -397,6 +398,7 @@ async function expectShowcaseAssets(manifest) {
   expect(css).toContain(`url("/${texture.fileName}")`);
   expect(css).not.toContain("/assets/assets/");
   expect(css).toContain("@layer example-import");
+  expect(css).toContain("outline-offset: 6px");
   expect(css.indexOf("isolation: isolate")).toBeLessThan(
     css.indexOf("position: relative"),
   );

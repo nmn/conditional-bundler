@@ -1,0 +1,13 @@
+{
+  "name": "@bundler/react-jsx-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./bundler.mjs",
+  "exports": {
+    ".": "./bundler.mjs"
+  },
+  "dependencies": {
+    "@babel/plugin-transform-react-jsx": "7.27.1"
+  }
+}

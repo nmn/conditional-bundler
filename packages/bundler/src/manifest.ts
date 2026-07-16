@@ -3,6 +3,7 @@ export type BundleManifest = {
     envId: string;
     entryId: string;
     fileName: string;
+    exportMode?: "entry" | "dynamic";
     modules: string[];
     type?: "script";
     contentType?: string;
@@ -18,6 +19,7 @@ export type BundleManifest = {
     contentType?: string;
     bundleKey?: string;
     contentHash?: string;
+    global?: boolean;
   }>;
   assets?: Array<{
     fileName: string;
@@ -26,6 +28,7 @@ export type BundleManifest = {
     envId?: string;
     entryId?: string;
     bundleKey?: string;
+    global?: boolean;
     modules?: string[];
     conditionNames?: string[];
   }>;

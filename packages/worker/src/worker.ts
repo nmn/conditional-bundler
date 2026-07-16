@@ -146,7 +146,7 @@ const pendingCoordinatorRequests = new Map<
   { resolve: (value: unknown) => void; reject: (error: Error) => void }
 >();
 let nextCoordinatorRequestId = 1;
-const CELL_ARTIFACT_FORMAT = 18;
+const CELL_ARTIFACT_FORMAT = 19;
 const remapping = ((
   remappingModule as unknown as {
     default?: typeof import("@ampproject/remapping").default;
@@ -308,34 +308,79 @@ async function transformFile(
     ReturnType<typeof prepareCoreTransform>
   > = {};
   const requestsByEnv: Record<string, WorkerImportRequest[]> = {};
+  const preResultCache = new Map<
+    string,
+    Awaited<ReturnType<typeof applyBabelStage>>
+  >();
+  const preparedCache = new Map<
+    string,
+    ReturnType<typeof prepareCoreTransform>
+  >();
+  const preparedKeysByEnv: Record<string, string> = {};
+  const transformSpecsByEnv = Object.fromEntries(
+    request.envs.map((envId) => [
+      envId,
+      [
+        ...(request.workerProfile.transformPre[envId] ??
+          request.workerProfile.transformPre.default ??
+          []),
+        ...(request.workerProfile.transform[envId] ??
+          request.workerProfile.transform.default ??
+          []),
+      ],
+    ]),
+  ) as Record<string, WorkerBabelPluginSpec[]>;
+  const transformSpecKeysByEnv = Object.fromEntries(
+    Object.entries(transformSpecsByEnv).map(([envId, specs]) => [
+      envId,
+      JSON.stringify(specs),
+    ]),
+  ) as Record<string, string>;
 
   for (const envId of request.envs) {
     const initialCode = request.codeByEnv?.[envId] ?? request.code;
     const initialMap = request.mapByEnv?.[envId];
-    const transformSpecs = [
-      ...(request.workerProfile.transformPre[envId] ??
-        request.workerProfile.transformPre.default ??
-        []),
-      ...(request.workerProfile.transform[envId] ??
-        request.workerProfile.transform.default ??
-        []),
-    ];
-    const preResult = await applyBabelStage(
-      initialCode,
-      initialMap,
-      request,
-      envId,
-      transformSpecs,
+    const transformSpecs = transformSpecsByEnv[envId];
+    const canReusePreTransform = transformSpecs.every((spec) =>
+      isEnvironmentIndependentSpec(spec, request, initialCode),
     );
+    const preCacheKey = canReusePreTransform
+      ? JSON.stringify({
+          codeHash: contentHash(initialCode),
+          mapHash: initialMap ? contentHash(initialMap) : null,
+          specs: transformSpecKeysByEnv[envId],
+        })
+      : `env:${envId}`;
+    let preResult = preResultCache.get(preCacheKey);
+    if (!preResult) {
+      preResult = await applyBabelStage(
+        initialCode,
+        initialMap,
+        request,
+        envId,
+        transformSpecs,
+      );
+      preResultCache.set(preCacheKey, preResult);
+    }
     preResults[envId] = preResult;
-    const prepared = prepareCoreTransform(
-      {
-        code: preResult.code,
-        realPath: request.realPath,
-        syntax: request.syntax,
-      },
-      request.sourceMap?.sourceFileName,
-    );
+    const preparedKey = JSON.stringify({
+      codeHash: contentHash(preResult.code),
+      sourceFileName: request.sourceMap?.sourceFileName,
+      syntax: request.syntax,
+    });
+    let prepared = preparedCache.get(preparedKey);
+    if (!prepared) {
+      prepared = prepareCoreTransform(
+        {
+          code: preResult.code,
+          realPath: request.realPath,
+          syntax: request.syntax,
+        },
+        request.sourceMap?.sourceFileName,
+      );
+      preparedCache.set(preparedKey, prepared);
+    }
+    preparedKeysByEnv[envId] = preparedKey;
     preparedByEnv[envId] = prepared;
     requestsByEnv[envId] = prepared.importRequests;
   }
@@ -350,35 +395,44 @@ async function transformFile(
       })
     : {};
 
+  const coreResultCache = new Map<string, TransformResult>();
   for (const envId of request.envs) {
     const preResult = preResults[envId];
-    const coreResult = transformWithCore(
-      {
-        id: request.id,
-        moduleIdentity: request.moduleIdentity,
-        canonicalPath: request.canonicalPath ?? request.moduleIdentity,
-        code: preResult.code,
-        realPath: request.realPath,
-        pkg: request.pkg,
-        syntax: request.syntax,
-        envs: request.envs,
-        envId,
-        resolvedImports: resolvedImportsByEnv[envId],
-        dev: request.dev,
-      },
-      {
-        importAttrAllow: ["json", "url", "raw", "base64", "assetPath"],
-        generateModuleOutput: false,
-        sourceMap: request.sourceMap
-          ? {
-              sourceFileName: request.sourceMap.sourceFileName,
-              sourcesContent: request.sourceMap.sourcesContent,
-              embedCellSourcesContent: false,
-            }
-          : undefined,
-      },
-      preparedByEnv[envId],
-    );
+    const coreCacheKey = JSON.stringify({
+      preparedKey: preparedKeysByEnv[envId],
+      resolvedImports: resolvedImportsByEnv[envId] ?? {},
+    });
+    let coreResult = coreResultCache.get(coreCacheKey);
+    if (!coreResult) {
+      coreResult = transformWithCore(
+        {
+          id: request.id,
+          moduleIdentity: request.moduleIdentity,
+          canonicalPath: request.canonicalPath ?? request.moduleIdentity,
+          code: preResult.code,
+          realPath: request.realPath,
+          pkg: request.pkg,
+          syntax: request.syntax,
+          envs: request.envs,
+          envId,
+          resolvedImports: resolvedImportsByEnv[envId],
+          dev: request.dev,
+        },
+        {
+          importAttrAllow: ["json", "url", "raw", "base64", "assetPath"],
+          generateModuleOutput: false,
+          sourceMap: request.sourceMap
+            ? {
+                sourceFileName: request.sourceMap.sourceFileName,
+                sourcesContent: request.sourceMap.sourcesContent,
+                embedCellSourcesContent: false,
+              }
+            : undefined,
+        },
+        structuredClone(preparedByEnv[envId]),
+      );
+      coreResultCache.set(coreCacheKey, coreResult);
+    }
     const parsedPreMap = preResult.map
       ? (JSON.parse(preResult.map) as Record<string, unknown>)
       : undefined;
@@ -676,15 +730,20 @@ async function applyBabelStage(
       const loaded = await loadBabelPlugin(spec.modulePath);
       const pluginOptions = { ...(spec.options ?? {}) };
       delete pluginOptions.__bundlerExcludeNodeModules;
+      delete pluginOptions.__bundlerEnvironmentIndependent;
+      delete pluginOptions.__bundlerEnvironmentIndependentUnlessCommonJs;
+      delete pluginOptions.__bundlerEnvironmentIndependentUnlessModulePaths;
       return [
         loaded,
         {
           ...pluginOptions,
           envId,
+          envs: request.envs,
           filePath: request.realPath,
           id: request.id,
           moduleIdentity: request.moduleIdentity,
           target: request.targets[envId] ?? "browser",
+          buildMode: request.buildMode ?? "development",
           pkg: request.pkg,
           format: request.resolutionMeta?.format,
           reactCjsEnv: request.resolutionMeta?.reactCjsEnv,
@@ -714,6 +773,22 @@ async function applyBabelStage(
       : undefined,
     metadata: result?.metadata,
   };
+}
+
+function isEnvironmentIndependentSpec(
+  spec: WorkerBabelPluginSpec,
+  request: WorkerRequest,
+  code: string,
+): boolean {
+  if (spec.options?.__bundlerEnvironmentIndependent === true) {
+    return true;
+  }
+  return (
+    (spec.options?.__bundlerEnvironmentIndependentUnlessCommonJs === true &&
+      request.resolutionMeta?.format !== "commonjs") ||
+    (spec.options?.__bundlerEnvironmentIndependentUnlessModulePaths === true &&
+      !/\b(?:__dirname|__filename)\b|import\.meta/.test(code))
+  );
 }
 
 function isNodeModulesPath(filePath: string): boolean {

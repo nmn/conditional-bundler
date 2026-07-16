@@ -120,6 +120,8 @@ export type ResourceTemplate = {
 };
 
 export type ExtraTransformOutput = {
+  /** Portable semantic type understood by link-time plugins. */
+  type?: string;
   contents?: string | Uint8Array;
   artifactPath?: string;
   map?: string;

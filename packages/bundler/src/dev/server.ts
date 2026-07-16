@@ -39,7 +39,7 @@ export type HmrMessage =
       styles?: string[];
       rscChunks?: Record<string, string>;
     }
-  | { type: "rsc-refresh" }
+  | { type: "rsc-refresh"; styles?: string[] }
   | { type: "reload" }
   | { type: "error"; message: string };
 
@@ -141,7 +141,11 @@ export async function startDevServer(
   const watcher = watchProject(devConfig, async () => {
     try {
       const next = await buildProject(devConfig, []);
-      const patch = createPatch(current, next);
+      const patch = filterPatchForBrowser(
+        createPatch(current, next),
+        next,
+        devConfig,
+      );
       current = next;
       broadcast(
         clients,
@@ -170,6 +174,27 @@ export async function startDevServer(
         server.close((error) => (error ? reject(error) : resolve()));
       });
     },
+  };
+}
+
+function filterPatchForBrowser(
+  patch: HmrPatchPlan | null,
+  build: BuildResult,
+  config: BundlerConfig,
+): HmrPatchPlan | null {
+  if (!patch) {
+    return null;
+  }
+  const isBrowserBundle = (bundleKey: string) => {
+    const envId = build.hmr?.bundles[bundleKey]?.envId;
+    return envId != null && config.envs[envId]?.target === "browser";
+  };
+  return {
+    ...patch,
+    updates: patch.updates.filter((update) =>
+      isBrowserBundle(update.bundleKey),
+    ),
+    changedBundles: patch.changedBundles.filter(isBrowserBundle),
   };
 }
 
@@ -205,7 +230,7 @@ async function handleRequest(
       }
     }
     response.setHeader("content-type", "text/html; charset=utf-8");
-    response.end(renderIndex(build));
+    response.end(renderIndex(config, build));
     return;
   }
 
@@ -220,6 +245,11 @@ async function handleRequest(
       requestedFileName.slice("assets/".length),
     );
   }
+  if (!served && request.headers.accept?.includes("text/html")) {
+    response.setHeader("content-type", "text/html; charset=utf-8");
+    response.end(renderIndex(config, build));
+    return;
+  }
   if (!served) {
     response.statusCode = 404;
     response.end("Not found");
@@ -229,7 +259,7 @@ async function handleRequest(
   response.end(served.body);
 }
 
-function renderIndex(build: BuildResult): string {
+function renderIndex(config: BundlerConfig, build: BuildResult): string {
   const styles = (build.manifest.assets ?? [])
     .filter((asset) => asset.type === "style")
     .map(
@@ -238,7 +268,12 @@ function renderIndex(build: BuildResult): string {
     )
     .join("\n");
   const scripts = build.bundles
-    .filter((bundle) => bundle.envId && bundle.entryId)
+    .filter(
+      (bundle) =>
+        config.envs[bundle.envId]?.target === "browser" &&
+        bundle.exportMode === "entry" &&
+        !bundle.entryId.startsWith("bundler:"),
+    )
     .map(
       (bundle) =>
         `<script type="module" src="/${escapeHtml(bundle.fileName)}"></script>`,
@@ -247,7 +282,7 @@ function renderIndex(build: BuildResult): string {
   return `<!doctype html>
 <html>
   <head><meta charset="utf-8"><title>conditional-bundler dev</title>${styles}</head>
-  <body>${scripts}</body>
+  <body><div id="root"></div>${scripts}</body>
 </html>`;
 }
 
@@ -266,9 +301,23 @@ export function watchProject(
   if (!root) {
     return null;
   }
+  const ignoredRoots = [
+    config.outputs.outDir,
+    config.cache?.local?.dir ?? config.cacheDir,
+    path.join(root, "node_modules"),
+    path.join(root, ".git"),
+  ]
+    .filter((item): item is string => Boolean(item))
+    .map((item) => path.resolve(item));
 
   let timer: NodeJS.Timeout | undefined;
-  return fs.watch(root, { recursive: true }, () => {
+  return fs.watch(root, { recursive: true }, (_eventType, fileName) => {
+    if (fileName) {
+      const changedPath = path.resolve(root, fileName.toString());
+      if (ignoredRoots.some((ignored) => isPathInside(changedPath, ignored))) {
+        return;
+      }
+    }
     if (timer) {
       clearTimeout(timer);
     }
@@ -475,6 +524,14 @@ function collectStyleAssets(build: BuildResult): Map<string, string> {
     (build.manifest.assets ?? [])
       .filter((asset) => asset.type === "style")
       .map((asset) => [asset.bundleKey ?? asset.fileName, asset.fileName]),
+  );
+}
+
+function isPathInside(candidate: string, parent: string): boolean {
+  const relative = path.relative(parent, candidate);
+  return (
+    relative === "" ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
   );
 }
 

@@ -1227,7 +1227,15 @@ function lowerHmrCellStatements(
       statement.id
     ) {
       const declaration = t.cloneNode(statement, true);
-      const expression = t.toExpression(declaration);
+      const expression = t.isFunctionDeclaration(declaration)
+        ? t.functionExpression(
+            null,
+            declaration.params,
+            declaration.body,
+            declaration.generator,
+            declaration.async,
+          )
+        : t.toExpression(declaration);
       const assignment = t.assignmentExpression(
         "=",
         t.cloneNode(statement.id, true),

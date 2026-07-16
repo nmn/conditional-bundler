@@ -1,5 +1,6 @@
 import React from "react";
 import monarchMark from "./assets/monarch-mark.svg";
+import moduleStyles from "./App.module.css";
 import "./showcase.css";
 import "./lib/commerceTelemetry.dev.js" with {
   condition: "__DEV__",
@@ -14,7 +15,10 @@ export default async function App({ path, searchParams }) {
   return (
     <CartProvider>
       <CommerceChrome path={path}>
-        <main className="app-shell" data-route={id}>
+        <main
+          className={`app-shell ${moduleStyles.moduleProof}`}
+          data-route={id}
+        >
           <header className="store-header">
             <a className="brand" href="/">
               <span className="brand-mark">M</span>
@@ -24,7 +28,7 @@ export default async function App({ path, searchParams }) {
               </span>
             </a>
             <img
-              className="asset-proof-mark"
+              className={`asset-proof-mark ${moduleStyles.mark}`}
               src={monarchMark.src}
               width={monarchMark.width}
               height={monarchMark.height}

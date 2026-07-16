@@ -4,7 +4,9 @@ import { parse } from "@babel/parser";
 const WEBPACK_RSC_SHIM = `const __bundler_rsc_module_cache__ = globalThis.__BUNDLER_RSC_MODULE_CACHE__ ??= new Map();
 const __bundler_rsc_load_chunk__ = (chunkId) => {
   const fileName = globalThis.__webpack_require__.u(chunkId);
-  const href = fileName.startsWith("/") ? fileName : "/assets/" + fileName;
+  const href = fileName.startsWith("/") || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(fileName)
+    ? fileName
+    : "/" + fileName;
   const loading = import(href).then((module) => {
     __bundler_rsc_module_cache__.set(chunkId, module);
     __bundler_rsc_module_cache__.set(fileName, module);

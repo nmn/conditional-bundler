@@ -125,7 +125,7 @@ export function createReactRscPlugin(options) {
       ],
       ["./webpack-shim-transform.mjs", { clientEnv }],
     ],
-    buildEnd({ manifest, modules, emitFile }) {
+    buildEnd({ manifest, modules, outputs, emitFile }) {
       const records = {};
       for (const moduleRecord of modules) {
         if (moduleRecord.envs[0] !== rscEnv) {
@@ -154,6 +154,10 @@ export function createReactRscPlugin(options) {
           records[`${metadata.clientId}#${exportName}`] = {
             id: stableModuleId,
             fileName: bundle.fileName,
+            url: joinRootURL(
+              outputs.rootURL ?? outputs.publicPath ?? "/",
+              bundle.fileName,
+            ),
             name: symbolName,
             chunks: [stableModuleId, bundle.fileName],
             async: false,
@@ -167,6 +171,12 @@ export function createReactRscPlugin(options) {
       });
     },
   };
+}
+
+function joinRootURL(rootURL, fileName) {
+  const root = rootURL.replace(/\/+$/, "");
+  const relativePath = fileName.replaceAll("\\", "/").replace(/^\/+/, "");
+  return root ? `${root}/${relativePath}` : `/${relativePath}`;
 }
 
 function resolveReactImplementation(

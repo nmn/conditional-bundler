@@ -157,7 +157,7 @@ async function renderHtml(url, context, dist) {
   </head>
   <body>
     <div id="root">${initialRoute.markup}</div>
-    <script id="__BUNDLER_RSC_CHUNKS__" type="application/json">${serializeJsonForScript(createRscChunkMap(context.clientManifest))}</script>
+    <script id="__BUNDLER_RSC_CHUNKS__" type="application/json">${serializeJsonForScript(createRscChunkMap(context.clientManifest, true))}</script>
     <script id="__BUNDLER_RSC_DATA__" type="application/json" data-path="${escapeAttribute(`${url.pathname}${url.search}`)}">${serializeJsonForScript(initialRoute.flight)}</script>
     <script type="module" src="/${context.clientBundle.fileName}"></script>
   </body>
@@ -169,7 +169,7 @@ function renderStyleLinks(manifest) {
     .filter((asset) => asset.type === "style")
     .map(
       (asset) =>
-        `<link rel="stylesheet" href="/${escapeAttribute(asset.fileName)}">`,
+        `<link rel="stylesheet" href="/${escapeAttribute(asset.fileName)}" data-bundler-style="${escapeAttribute(asset.bundleKey ?? asset.fileName)}">`,
     )
     .join("\n    ");
 }
@@ -315,11 +315,13 @@ function installNodeChunkLoader(dist, clientManifest) {
   };
 }
 
-function createRscChunkMap(clientManifest) {
+function createRscChunkMap(clientManifest, browser = false) {
   const chunks = {};
   for (const record of Object.values(clientManifest)) {
     if (record?.id && record?.fileName) {
-      chunks[record.id] = record.fileName;
+      chunks[record.id] = browser
+        ? (record.url ?? record.fileName)
+        : record.fileName;
     }
   }
   return chunks;

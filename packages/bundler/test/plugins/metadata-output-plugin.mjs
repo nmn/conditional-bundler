@@ -8,6 +8,7 @@ export default function metadataOutputPlugin() {
           Object.entries(moduleRecord.extraOutputs ?? {}).map(
             ([name, output]) => ({
               name,
+              type: output.type,
               file: moduleRecord.filePath,
               contents: output.contents,
             }),

@@ -1,5 +1,6 @@
 import React from "react";
 import basicMark from "./assets/basic-mark.svg";
+import moduleStyles from "./App.module.css";
 import "./showcase.css";
 import { Counter } from "./Counter.jsx";
 import { DraftPad } from "./DraftPad.jsx";
@@ -7,10 +8,10 @@ import { PreferenceSwitch } from "./PreferenceSwitch.jsx";
 
 export default function App() {
   return (
-    <main className="shell">
+    <main className={`shell ${moduleStyles.moduleProof}`}>
       <section className="hero">
         <img
-          className="asset-proof-mark"
+          className={`asset-proof-mark ${moduleStyles.mark}`}
           src={basicMark.src}
           width={basicMark.width}
           height={basicMark.height}

@@ -833,6 +833,35 @@ test("loads a dynamic chunk's CSS before importing its JavaScript", async () => 
   expect(css).not.toContain("/assets/assets/");
 });
 
+test("does not inject the browser CSS loader into node dynamic imports", async () => {
+  const name = "dynamic-css-node";
+  const result = await buildFixture(name, {
+    envs: {
+      server: { conditions: ["node"], target: "node" },
+    },
+    entries: [
+      {
+        id: name,
+        path: path.join(fixturesDir, "dynamic-css", "src/index.js"),
+      },
+    ],
+    outputs: {
+      outDir: path.join(outRoot, name),
+      fileName: "[entry].[env].[hash].js",
+    },
+  });
+  const entry = result.bundles.find((bundle) =>
+    bundle.entryId.endsWith("/src/index.js"),
+  );
+  const code = await fs.readFile(
+    path.join(outRoot, name, entry.fileName),
+    "utf8",
+  );
+  expect(code).not.toContain("__bundler_load_css__");
+  expect(code).not.toContain('document.createElement("link")');
+  expect(code).toContain("import(");
+});
+
 test("joins CSS asset and stylesheet paths after a configured root URL", async () => {
   const name = "dynamic-css-root-url";
   const outDir = path.join(outRoot, name);
@@ -1642,6 +1671,52 @@ export function Unused() {
   expect(usedCell.artifactPath ?? usedCell.code).toBeDefined();
 });
 
+test("dev react refresh records default component exports in HMR patches", async () => {
+  const projectDir = path.join(outRoot, "react-refresh-default-patch");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({ dependencies: { react: "19.0.0" } }),
+  );
+  await fs.writeFile(
+    path.join(srcDir, "index.js"),
+    `export default function Dashboard() { return null; }`,
+  );
+
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: { browser: { conditions: ["default"], target: "browser" } },
+      entries: [
+        { id: "react-refresh-default", path: path.join(srcDir, "index.js") },
+      ],
+      outputs: { outDir, fileName: "react-refresh-default.[env].[hash].js" },
+      cacheDir: path.join(projectDir, ".cache"),
+      maxWorkers: 1,
+      diagnostics: "human",
+      dev: { hmr: true, reactRefresh: true },
+    },
+    [],
+  );
+  const applicationBundle = result.bundles.find(
+    (bundle) => !bundle.entryId.startsWith("bundler:"),
+  );
+  const hmrBundle =
+    result.hmr.bundles[
+      `${applicationBundle.envId}:${applicationBundle.entryId}`
+    ];
+  const componentCell = hmrBundle.cells.find(
+    (cell) => cell.refreshSymbols?.length > 0,
+  );
+  const patch = await materializeHmrPatch(componentCell);
+
+  expect(componentCell.refreshSymbols).toEqual(componentCell.symbols);
+  expect(patch).toContain(`reactRefreshRegister(${componentCell.symbols[0]}`);
+});
+
 test("cli loads async config files", async () => {
   const projectDir = path.join(outRoot, "cli-config");
   const outDir = path.join(projectDir, "dist");
@@ -1758,6 +1833,50 @@ test("supports env-specific externalized imports via resolveImport", async () =>
   expect(clientCode).not.toContain('import { foo } from "./foo.js";');
   expect(ssrCode).toContain('import { foo as a33jpi1jb_foo } from "./foo.js";');
   expect(ssrCode).toContain("globalThis.__SIDE_EFFECT__ = true;");
+});
+
+test("uses client and server file suffixes to prune bundles by target", async () => {
+  const projectDir = path.join(outRoot, "target-suffix-entries");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  const clientEntry = path.join(srcDir, "dashboard.client.js");
+  const serverEntry = path.join(srcDir, "dashboard.server.js");
+  await fs.writeFile(clientEntry, `export const runtime = "browser";`);
+  await fs.writeFile(serverEntry, `export const runtime = "node";`);
+
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: {
+        client: { conditions: ["browser"], target: "browser" },
+        server: { conditions: ["node"], target: "node" },
+      },
+      entries: [
+        { id: "dashboard-client", path: clientEntry },
+        { id: "dashboard-server", path: serverEntry },
+      ],
+      outputs: {
+        outDir,
+        fileName: "[entry].[env].[hash].js",
+      },
+      cacheDir: path.join(projectDir, ".cache"),
+      maxWorkers: 2,
+      diagnostics: "human",
+    },
+    [],
+  );
+
+  expect(
+    result.bundles.map((bundle) => ({
+      envId: bundle.envId,
+      entryId: path.basename(bundle.entryId),
+    })),
+  ).toEqual([
+    { envId: "client", entryId: "dashboard.client.js" },
+    { envId: "server", entryId: "dashboard.server.js" },
+  ]);
 });
 
 test("default resolver honors package exports and tsconfig paths aliases", async () => {
@@ -2119,6 +2238,62 @@ test("runs module-backed worker transforms per environment", async () => {
   expect(ssrCode).toContain('"server"');
 });
 
+test("runs declared environment-independent Babel stages once", async () => {
+  const projectDir = path.join(outRoot, "environment-independent-transform");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  const sharedPath = path.join(srcDir, "shared.js");
+  const clientPath = path.join(srcDir, "app.client.js");
+  const serverPath = path.join(srcDir, "app.server.js");
+  await fs.writeFile(sharedPath, `export const shared = "once";`);
+  await fs.writeFile(
+    clientPath,
+    `import { shared } from "./shared.js"; export const client = shared;`,
+  );
+  await fs.writeFile(
+    serverPath,
+    `import { shared } from "./shared.js"; export const server = shared;`,
+  );
+  const pluginModule = path.join(
+    rootDir,
+    "packages/bundler/test/plugins/environment-independent-plugin.mjs",
+  );
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: {
+        server: { conditions: ["node"], target: "node" },
+        client: { conditions: ["browser"], target: "browser" },
+      },
+      entries: [
+        { id: "client", path: clientPath },
+        { id: "server", path: serverPath },
+      ],
+      outputs: {
+        outDir,
+        fileName: "environment-independent.[entry].[env].[hash].js",
+      },
+      cacheDir: path.join(projectDir, ".cache"),
+      maxWorkers: 2,
+      diagnostics: "human",
+      plugins: [
+        {
+          __bundlerPluginRef: true,
+          module: pluginModule,
+        },
+      ],
+    },
+    [],
+  );
+
+  expect(result.bundles.map((bundle) => bundle.envId).sort()).toEqual([
+    "client",
+    "server",
+  ]);
+});
+
 test("resolves imports introduced by transform plugins", async () => {
   const projectDir = path.join(outRoot, "introduced-transform-import");
   const srcDir = path.join(projectDir, "src");
@@ -2199,10 +2374,90 @@ test("caches extra transform outputs and exposes them to build plugins", async (
     expect.arrayContaining([
       expect.objectContaining({
         name: "test-metadata",
+        type: "test-json",
         file: path.join(fixturesDir, "simple", "src/index.js"),
       }),
     ]),
   );
+});
+
+test("collects typed StyleX metadata and generates bundle CSS", async () => {
+  const outDir = path.join(outRoot, "stylex-basic");
+  const result = await buildFixture("stylex-basic", {
+    outputs: {
+      outDir,
+      fileName: "stylex-basic.[env].[hash].js",
+      sourceMap: "external",
+    },
+    configPlugins: [
+      {
+        __bundlerPluginRef: true,
+        module: path.join(rootDir, "packages/stylex-plugin/bundler.mjs"),
+        options: { dev: false, rootDir },
+      },
+    ],
+  });
+
+  const style = result.manifest.assets.find((asset) => asset.type === "style");
+  expect(style).toBeDefined();
+  expect(style).toMatchObject({
+    bundleKey: "stylex:global",
+    global: true,
+  });
+  const css = await fs.readFile(path.join(outDir, style.fileName), "utf8");
+  expect(css).toContain("rgb(190,40,60)");
+  expect(css).toContain("padding:12px");
+  expect(css).toContain(
+    `sourceMappingURL=${path.basename(style.fileName)}.map`,
+  );
+  await expect(
+    fs.stat(path.join(outDir, `${style.fileName}.map`)),
+  ).resolves.toBeDefined();
+
+  const bundle = result.bundles[0];
+  const bundleUrl = pathToFileURL(path.join(outDir, bundle.fileName)).href;
+  const { stdout } = await execFileAsync(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    `const mod = await import(${JSON.stringify(bundleUrl)}); console.log(mod.className);`,
+  ]);
+  expect(stdout.trim()).toMatch(/^x[0-9a-z]+(?: x[0-9a-z]+)*$/);
+});
+
+test("collects Tailwind candidates and generates bundle CSS", async () => {
+  const outDir = path.join(outRoot, "tailwind-basic");
+  const result = await buildFixture("tailwind-basic", {
+    outputs: {
+      outDir,
+      fileName: "tailwind-basic.[env].[hash].js",
+      sourceMap: "external",
+    },
+    configPlugins: [
+      {
+        __bundlerPluginRef: true,
+        module: path.join(rootDir, "packages/tailwind-plugin/bundler.mjs"),
+        options: {
+          rootDir,
+          cssFile: path.join(fixturesDir, "tailwind-basic/src/input.css"),
+        },
+      },
+    ],
+  });
+
+  const style = result.manifest.assets.find((asset) => asset.type === "style");
+  expect(style).toBeDefined();
+  const css = await fs.readFile(path.join(outDir, style.fileName), "utf8");
+  expect(css).toContain(".flex");
+  expect(css).toContain(".items-center");
+  expect(css).toContain(".bg-red-500");
+  expect(css).toContain("body");
+  expect(css).toContain("margin: 0");
+  expect(css).toContain(
+    `sourceMappingURL=${path.basename(style.fileName)}.map`,
+  );
+  await expect(
+    fs.stat(path.join(outDir, `${style.fileName}.map`)),
+  ).resolves.toBeDefined();
 });
 
 test("runs build lifecycle hooks and emits sidecar files", async () => {

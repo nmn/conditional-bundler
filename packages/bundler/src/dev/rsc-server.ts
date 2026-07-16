@@ -146,7 +146,10 @@ export async function startRscDevServer(
         );
         broadcast(clients, await hmrUpdates.publish(patchWithImports));
       } else if (action.type === "reload") {
-        broadcast(clients, { type: "rsc-refresh" });
+        broadcast(clients, {
+          type: "rsc-refresh",
+          styles: patch?.styles,
+        });
       }
     } catch (error) {
       console.error("[bundler] RSC dev rebuild failed", error);
@@ -271,6 +274,9 @@ export function classifyRscDevChange({
         type: "reload",
         reason: "bundle-output-changed-without-patch",
       };
+    }
+    if ((patch.styles?.length ?? 0) > 0) {
+      return { type: "patch", patch };
     }
     return { type: "noop" };
   }

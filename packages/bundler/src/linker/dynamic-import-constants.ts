@@ -18,6 +18,7 @@ export function emitDynamicImportConstants(
   envId?: string,
   stylesByBundle: Map<string, string[]> = new Map(),
   rootURL = "/",
+  loadStyles = true,
 ): string {
   const lines: string[] = [];
   const emitted = new Set<string>();
@@ -48,7 +49,7 @@ export function emitDynamicImportConstants(
 
     const specifier = normalizeChunkSpecifier(target.fileName);
     const styleKey = `${envId ?? "default"}:${dynamicImport.resolvedId}`;
-    const styles = stylesByBundle.get(styleKey) ?? [];
+    const styles = loadStyles ? (stylesByBundle.get(styleKey) ?? []) : [];
     if (styles.length > 0 && !emittedCssRuntime) {
       emittedCssRuntime = true;
       lines.push(

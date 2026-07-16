@@ -7,9 +7,6 @@ const transformPath = fileURLToPath(new URL("./index.mjs", import.meta.url));
 const packageTypeCache = new Map();
 
 export default function cjsToEsmBundlerPlugin(options = {}) {
-  const nodeEnv = resolveNodeEnv(options);
-  const mode = nodeEnv === "production" ? "production" : "development";
-
   return {
     name: options.name ?? "cjs-to-esm",
     async resolveImport(context) {
@@ -40,26 +37,17 @@ export default function cjsToEsmBundlerPlugin(options = {}) {
         transformPath,
         {
           strategy: options.strategy ?? "auto",
-          mode,
-          nodeEnv,
+          ...(options.nodeEnv
+            ? { nodeEnv: options.nodeEnv }
+            : options.mode
+              ? { mode: options.mode }
+              : {}),
           linkModulePaths: true,
+          __bundlerEnvironmentIndependentUnlessCommonJs: true,
         },
       ],
     ],
   };
-}
-
-function resolveNodeEnv(options) {
-  const nodeEnv =
-    options.nodeEnv ??
-    options.mode ??
-    process.env.BUNDLER_MODE ??
-    process.env.NODE_ENV ??
-    "development";
-  if (typeof nodeEnv !== "string" || nodeEnv.length === 0) {
-    throw new Error("cjs-to-esm requires NODE_ENV to be a non-empty string.");
-  }
-  return nodeEnv;
 }
 
 function isCommonJsFile(filePath) {

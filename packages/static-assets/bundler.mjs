@@ -35,6 +35,14 @@ export default function staticAssetsBundlerPlugin(options = {}) {
         meta: { assetId, request: context.request, intent },
       };
     },
-    transform: [[transformPath, options]],
+    transform: [
+      [
+        transformPath,
+        {
+          ...options,
+          __bundlerEnvironmentIndependent: true,
+        },
+      ],
+    ],
   };
 }

@@ -1,0 +1,22 @@
+@theme {
+  --color-night: #17131f;
+  --color-panel: #241d30;
+  --color-line: #514260;
+  --color-copy: #f2eafa;
+  --color-pop: #ffbf47;
+  --color-muted: #b9a8c7;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+  }
+
+  button {
+    font: inherit;
+  }
+}

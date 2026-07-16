@@ -1,0 +1,25 @@
+{
+  "name": "react-spa-tailwind",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build": "node scripts/clean.mjs && NODE_ENV=production BUNDLER_MODE=production bundler build --config bundler.config.mjs",
+    "start": "NODE_ENV=production node --import @bundler/assets/register --require @bundler/react-rsc-plugin/register-source-maps scripts/start.mjs",
+    "prod": "node scripts/clean.mjs && NODE_ENV=production BUNDLER_MODE=production bundler build --config bundler.config.mjs && NODE_ENV=production node --import @bundler/assets/register --require @bundler/react-rsc-plugin/register-source-maps scripts/start.mjs",
+    "dev": "node scripts/clean.mjs && NODE_ENV=development BUNDLER_MODE=development bundler dev --config bundler.config.mjs"
+  },
+  "dependencies": {
+    "@bundler/assets": "workspace:*",
+    "@bundler/bundler": "workspace:*",
+    "@bundler/cjs-to-esm": "workspace:*",
+    "@bundler/react-jsx-plugin": "workspace:*",
+    "@bundler/react-rsc-plugin": "workspace:*",
+    "@bundler/spa-example-server": "workspace:*",
+    "@bundler/tailwind-plugin": "workspace:*",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "scheduler": "0.27.0"
+  }
+}

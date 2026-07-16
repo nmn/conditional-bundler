@@ -33,6 +33,7 @@ import {
   type StaticBundleImport,
 } from "./linker/static-bundle-imports.js";
 import {
+  collectReactRefreshSymbols,
   emitHmrBundleRegistration,
   emitHmrCell,
   emitHmrPrelude,
@@ -98,6 +99,7 @@ export type BuildResult = {
     envId: string;
     entryId: string;
     fileName: string;
+    exportMode: "entry" | "dynamic";
     mapFileName?: string;
   }>;
   manifest: BundleManifest;
@@ -344,13 +346,19 @@ export async function buildProject(
 
     const bundlePlans: BundlePlan[] = [];
     for (const graph of graphs) {
-      const entries = pickEntriesForEnv(explicitEntries, graph.envId);
+      const entries = pickEntriesForEnv(
+        explicitEntries,
+        graph.envId,
+        config.envs[graph.envId]?.target,
+      );
       const bundleEntries: BundleEntry[] = entries.map((entry) => ({
         entryId: entry.path,
         exportMode: "entry",
       }));
-      const dynamicForEnv = dynamicEntries.filter(
-        (entry) => entry.envs?.includes(graph.envId) || !entry.envs,
+      const dynamicForEnv = pickEntriesForEnv(
+        dynamicEntries,
+        graph.envId,
+        config.envs[graph.envId]?.target,
       );
       for (const entry of dynamicForEnv) {
         if (entries.some((explicit) => explicit.path === entry.path)) {
@@ -367,7 +375,7 @@ export async function buildProject(
           createBundlePlan(graph, partition, devOptions),
         ),
       );
-      if (devOptions.hmr) {
+      if (devOptions.hmr && drafts.length > 0) {
         const runtimeEntryId = `bundler:hmr-runtime:${graph.envId}`;
         drafts = drafts.map((draft) => ({
           ...draft,
@@ -453,11 +461,13 @@ export async function buildProject(
         .map((reference) => staticAssetFileNames.get(reference.assetId))
         .filter((fileName): fileName is string => Boolean(fileName))
         .sort();
-      const linksDynamicCss = plan.dynamicImports.some(
-        (dependency) =>
-          dependency.resolvedId != null &&
-          bundleKeysWithCss.has(`${plan.envId}:${dependency.resolvedId}`),
-      );
+      const linksDynamicCss =
+        config.envs[plan.envId]?.target === "browser" &&
+        plan.dynamicImports.some(
+          (dependency) =>
+            dependency.resolvedId != null &&
+            bundleKeysWithCss.has(`${plan.envId}:${dependency.resolvedId}`),
+        );
       const linksRootURL = linkedAssetFileNames.length > 0 || linksDynamicCss;
       const hash = contentHashShort(
         linksRootURL
@@ -517,6 +527,7 @@ export async function buildProject(
       envId: string;
       entryId: string;
       fileName: string;
+      exportMode: "entry" | "dynamic";
       mapFileName?: string;
     }> = [];
     for (const plan of bundlePlans) {
@@ -534,6 +545,7 @@ export async function buildProject(
           plan.envId,
           stylesByBundle,
           config.outputs.rootURL,
+          config.envs[plan.envId]?.target === "browser",
         ),
         emitAssetReferencePrelude(
           dedupeBundleReferences(plan.parts),
@@ -569,6 +581,7 @@ export async function buildProject(
         envId: plan.envId,
         entryId: plan.entryId,
         fileName: bundleOutput.fileName,
+        exportMode: plan.exportMode,
         mapFileName,
       });
     }
@@ -1212,7 +1225,7 @@ function collectStylesByBundle(
 ): Map<string, string[]> {
   const direct = new Map<string, string[]>();
   for (const file of files) {
-    if (file.type !== "style" || !file.bundleKey) {
+    if (file.type !== "style" || file.global || !file.bundleKey) {
       continue;
     }
     const names = direct.get(file.bundleKey) ?? [];
@@ -1613,8 +1626,33 @@ function resolveBuildMode(): string {
   return process.env.BUNDLER_MODE ?? process.env.NODE_ENV ?? "development";
 }
 
-function pickEntriesForEnv(entries: EntrySpec[], envId: string): EntrySpec[] {
-  return entries.filter((entry) => !entry.envs || entry.envs.includes(envId));
+function pickEntriesForEnv(
+  entries: EntrySpec[],
+  envId: string,
+  target: "node" | "browser" | undefined,
+): EntrySpec[] {
+  return entries.filter(
+    (entry) =>
+      (!entry.envs || entry.envs.includes(envId)) &&
+      entryPathSupportsTarget(entry.path, target),
+  );
+}
+
+function entryPathSupportsTarget(
+  filePath: string,
+  target: "node" | "browser" | undefined,
+): boolean {
+  if (!target) {
+    return true;
+  }
+  const portablePath = filePath.replaceAll("\\", "/");
+  if (/\.(?:client|browser)\.[^./]+$/i.test(portablePath)) {
+    return target === "browser";
+  }
+  if (/\.(?:server|node)\.[^./]+$/i.test(portablePath)) {
+    return target === "node";
+  }
+  return true;
 }
 
 function createBuiltinPlugins(config: BundlerConfig): BundlerPlugin[] {
@@ -2047,6 +2085,9 @@ async function createBundlePlan(
             const hmrCell = await emitHmrCell(
               cell,
               collectExternalIdentifierDeps(graph, node, cell),
+              useReactRefresh
+                ? collectReactRefreshSymbols(node, new Set([cell.id]))
+                : [],
             );
             hmrCells.push(hmrCell.record);
             return {
@@ -2193,7 +2234,10 @@ async function collectTransformedModules(
   const scheduled = new Set<string>();
   const dynamicEntries = new Map<string, EntrySpec>();
   const fileRecords: FileRecord[] = [];
-  const inFlight = new Set<Promise<void>>();
+  const pending = new Map<
+    string,
+    { module: ScheduledModule; envs: Set<string> }
+  >();
 
   const schedule = (module: ScheduledModule) => {
     const key = `${module.envId}:${module.id}`;
@@ -2229,29 +2273,27 @@ async function collectTransformedModules(
       intent: module.intent,
       meta: module.meta,
     });
-    const task = transformModule(
-      module,
-      [module.envId],
-      envs,
-      cacheDir,
-      cacheNamespace,
-      remoteCache,
-      plugins,
-      workerProfile,
-      config,
-      buildMode,
-      pool,
-      resolver,
-      debugOutputDir,
-      headersByEnv,
-      resolvedMap,
-      dynamicEntries,
-      fileRecords,
-      schedule,
-    ).finally(() => {
-      inFlight.delete(task);
+    const batchKey = JSON.stringify({
+      id: module.id,
+      moduleIdentity: module.moduleIdentity,
+      filePath: module.filePath,
+      canonicalPath: module.canonicalPath,
+      type: module.type,
+      intent: module.intent,
+      meta: module.meta,
+      source: module.source,
+      sourceMap: module.sourceMap,
+      resolveFrom: module.resolveFrom,
     });
-    inFlight.add(task);
+    const batch = pending.get(batchKey);
+    if (batch) {
+      batch.envs.add(module.envId);
+    } else {
+      pending.set(batchKey, {
+        module,
+        envs: new Set([module.envId]),
+      });
+    }
   };
 
   for (const entry of entries) {
@@ -2277,8 +2319,34 @@ async function collectTransformedModules(
     }
   }
 
-  while (inFlight.size > 0) {
-    await Promise.race(inFlight);
+  while (pending.size > 0) {
+    const wave = Array.from(pending.values());
+    pending.clear();
+    await Promise.all(
+      wave.map((batch) => {
+        const batchEnvs = envs.filter((envId) => batch.envs.has(envId));
+        return transformModule(
+          { ...batch.module, envId: batchEnvs[0] },
+          batchEnvs,
+          envs,
+          cacheDir,
+          cacheNamespace,
+          remoteCache,
+          plugins,
+          workerProfile,
+          config,
+          buildMode,
+          pool,
+          resolver,
+          debugOutputDir,
+          headersByEnv,
+          resolvedMap,
+          dynamicEntries,
+          fileRecords,
+          schedule,
+        );
+      }),
+    );
   }
 
   return {
@@ -3619,6 +3687,7 @@ async function flushPendingFiles(
       contentType: file.contentType,
       bundleKey: file.bundleKey,
       contentHash: contentHash(file.contents),
+      global: file.global,
     });
     manifest.assets?.push({
       fileName: finalName,
@@ -3635,6 +3704,7 @@ async function flushPendingFiles(
       contentType: file.contentType ?? guessContentType(finalName),
       envId: file.envId,
       bundleKey: file.bundleKey,
+      global: file.global,
     });
   }
 }

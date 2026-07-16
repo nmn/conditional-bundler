@@ -29,7 +29,13 @@ export default {
     // }),
   },
   debug: true,
-  css: true,
+  transforms: {
+    css: "lightningcss",
+    jsLike: {
+      ".jsx": { jsx: true },
+      ".tsx": { jsx: true, typescript: true },
+    },
+  },
   maxWorkers: 4,
   diagnostics: "human",
 } as const;
@@ -56,3 +62,18 @@ the map without the comment. Use an object such as
 `/assets/logo.svg`. Set it to a path such as `"/static/"` or an absolute CDN URL
 to prefix every linked output path. `outputs.publicPath` remains available as a
 deprecated compatibility alias.
+
+CSS defaults to the constrained Lightning CSS transform. Set
+`transforms.css: false` to disable it; `css: false` remains a compatibility
+alias. Arbitrary Lightning CSS options are intentionally rejected because
+minification, syntax lowering, and other whole-stylesheet work belongs after
+linking.
+
+The built-in JS-like extensions are `.js`, `.mjs`, `.cjs`, `.jsx`, `.ts`, and
+`.tsx`. Add custom extensions through `transforms.jsLike`, declaring only
+whether JSX and TypeScript syntax are enabled.
+
+Entries and dynamically discovered entry points named `*.client.*` or
+`*.browser.*` are emitted only for browser environments. Files named
+`*.server.*` or `*.node.*` are emitted only for Node environments. Unsuffixed
+files remain available to both targets.

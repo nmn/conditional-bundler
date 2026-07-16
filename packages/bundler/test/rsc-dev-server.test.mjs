@@ -322,7 +322,8 @@ test("creates style-only HMR patches for changed CSS assets", () => {
     styleAsset("client:/app/src/client.jsx", "client.new.css"),
   ];
 
-  expect(createPatch(previous, next)).toEqual({
+  const patch = createPatch(previous, next);
+  expect(patch).toEqual({
     type: "patch",
     updates: [],
     changedBundles: [],
@@ -330,6 +331,15 @@ test("creates style-only HMR patches for changed CSS assets", () => {
       "/assets/client.new.css?hmr=client.new.css&key=client%3A%2Fapp%2Fsrc%2Fclient.jsx",
     ],
   });
+  expect(
+    classifyRscDevChange({
+      previous,
+      next,
+      patch,
+      clientEntryId: "client",
+      serverEntryId: "server",
+    }),
+  ).toEqual({ type: "patch", patch });
 });
 
 function fakeBuild(bundles) {

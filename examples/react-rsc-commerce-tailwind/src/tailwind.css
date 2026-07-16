@@ -1,0 +1,22 @@
+@theme {
+  --color-ink: #1b1915;
+  --color-paper: #f5eee1;
+  --color-porcelain: #fffaf0;
+  --color-acid: #d7ff45;
+  --color-oxide: #b64b2f;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+  }
+
+  button {
+    font: inherit;
+  }
+}

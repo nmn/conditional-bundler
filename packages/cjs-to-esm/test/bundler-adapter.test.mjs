@@ -59,14 +59,17 @@ test("ordinary CJS dependencies retain explicit format metadata", async () => {
   expect(resolved.meta).toEqual({ format: "commonjs" });
 });
 
-test("captures NODE_ENV in transform options for cache fingerprinting", () => {
+test("does not read NODE_ENV while configuring transform options", () => {
   const previous = process.env.NODE_ENV;
   process.env.NODE_ENV = "production";
   try {
     const plugin = cjsToEsmBundlerPlugin();
-    expect(plugin.transform[0][1]).toMatchObject({
+    expect(plugin.transform[0][1]).not.toHaveProperty("mode");
+    expect(plugin.transform[0][1]).not.toHaveProperty("nodeEnv");
+    expect(
+      cjsToEsmBundlerPlugin({ mode: "production" }).transform[0][1],
+    ).toMatchObject({
       mode: "production",
-      nodeEnv: "production",
     });
   } finally {
     if (previous === undefined) delete process.env.NODE_ENV;

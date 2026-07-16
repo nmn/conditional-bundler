@@ -9,6 +9,7 @@ export type HmrCellRecord = {
   id: string;
   fileId: string;
   symbols: string[];
+  refreshSymbols?: string[];
   deps: string[];
   hash: string;
   code?: string;
@@ -171,7 +172,10 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
       socket.addEventListener("message", (event) => {
         const message = JSON.parse(event.data);
         if (message.type === "patch") runtime.applyPatch(message.updates || [], message.imports || [], message.styles || [], message.rscChunks);
-        if (message.type === "rsc-refresh") runtime.refreshRsc();
+        if (message.type === "rsc-refresh") {
+          runtime.updateStyles(message.styles || []);
+          runtime.refreshRsc();
+        }
         if (message.type === "reload") location.reload();
         if (message.type === "error") console.error("[bundler] rebuild failed", message.message);
       });
@@ -185,6 +189,7 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
 export async function emitHmrCell(
   cell: CellRecord,
   extraDeps: string[] = [],
+  refreshSymbols: string[] = [],
 ): Promise<EmittedHmrCell> {
   const source = await readCellCode(cell);
   const sourceMap = await readCellMap(cell);
@@ -197,6 +202,7 @@ export async function emitHmrCell(
       id,
       fileId: cell.fileId,
       symbols,
+      refreshSymbols,
       deps,
       hash: contentHashShort(source),
       code: cell.code,
@@ -220,6 +226,7 @@ export async function materializeHmrPatch(
     sourceMap,
     record.symbols,
     record.deps,
+    record.refreshSymbols,
   );
   return emitPatchCode(installer.code, installer.map, record.id);
 }
@@ -250,10 +257,22 @@ export function emitReactRefreshRegistrations(
   node: ModuleNode,
   selectedCells?: Set<string>,
 ): string {
+  return collectReactRefreshSymbols(node, selectedCells)
+    .map(
+      (symbol) =>
+        `__BUNDLER_HMR__.reactRefreshRegister(${symbol}, ${JSON.stringify(symbol)});`,
+    )
+    .join("\n");
+}
+
+export function collectReactRefreshSymbols(
+  node: ModuleNode,
+  selectedCells?: Set<string>,
+): string[] {
   if (!node.exportTable || node.exportTable.size === 0) {
-    return "";
+    return [];
   }
-  const lines: string[] = [];
+  const symbols = new Set<string>();
   for (const [exported, provider] of node.exportTable.entries()) {
     if (selectedCells && !selectedCells.has(provider.cellId)) {
       continue;
@@ -261,11 +280,9 @@ export function emitReactRefreshRegistrations(
     if (!isPotentialComponentExport(exported, provider.symbol)) {
       continue;
     }
-    lines.push(
-      `__BUNDLER_HMR__.reactRefreshRegister(${provider.symbol}, ${JSON.stringify(provider.symbol)});`,
-    );
+    symbols.add(provider.symbol);
   }
-  return lines.join("\n");
+  return Array.from(symbols);
 }
 
 export function emitHmrBundleRegistration(bundleKey: string): string {
@@ -352,16 +369,20 @@ function wrapHmrInstaller(
   sourceMap: string | undefined,
   symbols: string[],
   deps: string[],
+  explicitRefreshSymbols: string[] = [],
 ): { code: string; map?: string } {
   if (isTopLevelModuleSyntax(source)) {
     return { code: source, map: sourceMap };
   }
-  const refreshRegistrations = symbols
-    .filter(isPotentialComponentSymbol)
-    .map(
-      (symbol) =>
-        `__BUNDLER_HMR__.reactRefreshRegister(${symbol}, ${JSON.stringify(symbol)});`,
-    );
+  const refreshRegistrations = Array.from(
+    new Set([
+      ...symbols.filter(isPotentialComponentSymbol),
+      ...explicitRefreshSymbols,
+    ]),
+  ).map(
+    (symbol) =>
+      `__BUNDLER_HMR__.reactRefreshRegister(${symbol}, ${JSON.stringify(symbol)});`,
+  );
   const opening = `__BUNDLER_HMR__.register({
   id: ${JSON.stringify(id)},
   symbols: ${JSON.stringify(symbols)},

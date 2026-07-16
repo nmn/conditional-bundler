@@ -1,0 +1,8 @@
+.moduleProof {
+  outline: 1px solid color-mix(in srgb, #bf8b5c 38%, transparent);
+  outline-offset: 6px;
+}
+
+.mark {
+  filter: drop-shadow(0 6px 14px rgb(41 30 22 / 18%));
+}

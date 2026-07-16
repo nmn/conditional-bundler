@@ -1,0 +1,14 @@
+{
+  "name": "@bundler/tailwind-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./bundler.mjs",
+  "exports": {
+    ".": "./bundler.mjs"
+  },
+  "dependencies": {
+    "@bundler/shared": "workspace:*",
+    "tailwindcss": "4.3.2"
+  }
+}

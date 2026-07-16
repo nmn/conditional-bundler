@@ -65,6 +65,8 @@ export type EmitFileInput = {
   type?: "asset" | "document" | "manifest" | "style" | "source-map";
   contentType?: string;
   bundleKey?: string;
+  /** Expose a generated stylesheet as one build-wide document/HMR resource. */
+  global?: boolean;
 };
 
 export type EmitFile = (file: EmitFileInput) => void;
