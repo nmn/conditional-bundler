@@ -1,7 +1,7 @@
-import { EventBatch as _EventBatch } from "./EventBatch";
-import { EventRetryConstants as _EventRetryConstants } from "./EventRetryConstants";
+import EventBatch_1 from "./EventBatch";
+import EventRetryConstants_1 from "./EventRetryConstants";
 export class BatchQueue {
-  constructor(batchSize = _EventRetryConstants.DEFAULT_BATCH_SIZE) {
+  constructor(batchSize = EventRetryConstants_1.EventRetryConstants.DEFAULT_BATCH_SIZE) {
     this._batches = [];
     this._batchSize = batchSize;
   }
@@ -27,7 +27,7 @@ export class BatchQueue {
     let droppedCount = 0;
     while (i < events.length) {
       const chunk = events.slice(i, i + this._batchSize);
-      droppedCount += this._enqueueBatch(new _EventBatch(chunk));
+      droppedCount += this._enqueueBatch(new EventBatch_1.EventBatch(chunk));
       i += this._batchSize;
     }
     return droppedCount;
@@ -35,7 +35,7 @@ export class BatchQueue {
   _enqueueBatch(batch) {
     this._batches.push(batch);
     let droppedEventCount = 0;
-    while (this._batches.length > _EventRetryConstants.MAX_PENDING_BATCHES) {
+    while (this._batches.length > EventRetryConstants_1.EventRetryConstants.MAX_PENDING_BATCHES) {
       const dropped = this._batches.shift();
       if (dropped) {
         droppedEventCount += dropped.events.length;

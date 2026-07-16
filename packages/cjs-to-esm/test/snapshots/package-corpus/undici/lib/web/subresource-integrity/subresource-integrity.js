@@ -328,9 +328,3 @@ if (!__cjs_default__) {
   __cjs_cache__.set("undici@8.7.0::lib/web/subresource-integrity/subresource-integrity.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
-export const applyAlgorithmToBytes = __cjs_default__["applyAlgorithmToBytes"];
-export const bytesMatch = __cjs_default__["bytesMatch"];
-export const caseSensitiveMatch = __cjs_default__["caseSensitiveMatch"];
-export const getStrongestMetadata = __cjs_default__["getStrongestMetadata"];
-export const isValidSRIHashAlgorithm = __cjs_default__["isValidSRIHashAlgorithm"];
-export const parseMetadata = __cjs_default__["parseMetadata"];

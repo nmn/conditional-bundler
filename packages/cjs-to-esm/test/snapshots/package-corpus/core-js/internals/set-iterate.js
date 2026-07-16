@@ -1,8 +1,8 @@
 import uncurryThis from "../internals/function-uncurry-this";
 import iterateSimple from "../internals/iterate-simple";
-import { Set as _Set, proto as _proto } from "../internals/set-helpers";
-var Set = _Set;
-var SetPrototype = _proto;
+import SetHelpers from "../internals/set-helpers";
+var Set = SetHelpers.Set;
+var SetPrototype = SetHelpers.proto;
 var forEach = uncurryThis(SetPrototype.forEach);
 var keys = uncurryThis(SetPrototype.keys);
 var next = keys(new Set()).next;

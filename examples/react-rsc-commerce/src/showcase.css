@@ -1,0 +1,13 @@
+.asset-proof-start {
+  isolation: isolate;
+}
+
+@import "./showcase-theme.css" layer(example-import) supports(display: grid);
+
+.asset-proof-mark {
+  background: url("./assets/monarch-texture.svg") center / cover;
+  border: 1px solid var(--line);
+  height: 48px;
+  padding: 6px;
+  width: 48px;
+}

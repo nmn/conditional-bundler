@@ -1,4 +1,4 @@
-import { _addWindowEventListenerSafe, _addDocumentEventListenerSafe, _getUnloadEvent } from "./SafeJs";
+import SafeJs_1 from "./SafeJs";
 const FOREGROUND = 'foreground';
 const BACKGROUND = 'background';
 const LISTENERS = [];
@@ -22,15 +22,15 @@ const _notifyVisibilityChanged = visibility => {
   LISTENERS.forEach(l => l(visibility));
 };
 export { _notifyVisibilityChanged };
-(0, _addWindowEventListenerSafe)('focus', () => {
+(0, SafeJs_1._addWindowEventListenerSafe)('focus', () => {
   isUnloading = false;
   (0, _notifyVisibilityChanged)(FOREGROUND);
 });
-(0, _addWindowEventListenerSafe)('blur', () => (0, _notifyVisibilityChanged)(BACKGROUND));
-(0, _addDocumentEventListenerSafe)('visibilitychange', () => {
+(0, SafeJs_1._addWindowEventListenerSafe)('blur', () => (0, _notifyVisibilityChanged)(BACKGROUND));
+(0, SafeJs_1._addDocumentEventListenerSafe)('visibilitychange', () => {
   (0, _notifyVisibilityChanged)(document.visibilityState === 'visible' ? FOREGROUND : BACKGROUND);
 });
-(0, _addWindowEventListenerSafe)((0, _getUnloadEvent)(), () => {
+(0, SafeJs_1._addWindowEventListenerSafe)((0, SafeJs_1._getUnloadEvent)(), () => {
   isUnloading = true;
   (0, _notifyVisibilityChanged)(BACKGROUND);
 });

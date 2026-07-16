@@ -1,4 +1,4 @@
-import { set as _set, getterFor as _getterFor } from "../internals/internal-state";
+import InternalStateModule from "../internals/internal-state";
 import createIteratorConstructor from "../internals/iterator-create-constructor";
 import createIterResultObject from "../internals/create-iter-result-object";
 import isNullOrUndefined from "../internals/is-null-or-undefined";
@@ -9,8 +9,8 @@ import DESCRIPTORS from "../internals/descriptors";
 
 var INCORRECT_RANGE = 'Incorrect Iterator.range arguments';
 var NUMERIC_RANGE_ITERATOR = 'NumericRangeIterator';
-var setInternalState = _set;
-var getInternalState = _getterFor(NUMERIC_RANGE_ITERATOR);
+var setInternalState = InternalStateModule.set;
+var getInternalState = InternalStateModule.getterFor(NUMERIC_RANGE_ITERATOR);
 var $RangeError = RangeError;
 var $TypeError = TypeError;
 var $RangeIterator = createIteratorConstructor(function NumericRangeIterator(start, end, option, type, zero, one) {

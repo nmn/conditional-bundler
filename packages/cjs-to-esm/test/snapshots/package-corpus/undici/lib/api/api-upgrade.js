@@ -1,19 +1,30 @@
-import { InvalidArgumentError as _InvalidArgumentError, SocketError as _SocketError } from "../core/errors";
-import * as _cjs_import from "node:async_hooks";
+import _cjs_import from "../core/errors";
+import * as _cjs_import2 from "node:async_hooks";
 import * as assert from "node:assert";
-import { getSocketInfo as _getSocketInfo, parseRawHeaders as _parseRawHeaders } from "../core/util";
-import { kHTTP2Stream as _kHTTP2Stream } from "../core/symbols";
-import { addSignal as _addSignal, removeSignal as _removeSignal } from "./abort-signal";
+import util from "../core/util";
+import _cjs_import3 from "../core/symbols";
+import _cjs_import4 from "./abort-signal";
+const {
+  InvalidArgumentError,
+  SocketError
+} = _cjs_import;
 const {
   AsyncResource
-} = _cjs_import;
+} = _cjs_import2;
+const {
+  kHTTP2Stream
+} = _cjs_import3;
+const {
+  addSignal,
+  removeSignal
+} = _cjs_import4;
 class UpgradeHandler extends AsyncResource {
   constructor(opts, callback) {
     if (!opts || typeof opts !== 'object') {
-      throw new _InvalidArgumentError('invalid opts');
+      throw new InvalidArgumentError('invalid opts');
     }
     if (typeof callback !== 'function') {
-      throw new _InvalidArgumentError('invalid callback');
+      throw new InvalidArgumentError('invalid callback');
     }
     const {
       signal,
@@ -21,7 +32,7 @@ class UpgradeHandler extends AsyncResource {
       responseHeaders
     } = opts;
     if (signal && typeof signal.on !== 'function' && typeof signal.addEventListener !== 'function') {
-      throw new _InvalidArgumentError('signal must be an EventEmitter or EventTarget');
+      throw new InvalidArgumentError('signal must be an EventEmitter or EventTarget');
     }
     super('UNDICI_UPGRADE');
     this.responseHeaders = responseHeaders || null;
@@ -29,7 +40,7 @@ class UpgradeHandler extends AsyncResource {
     this.callback = callback;
     this.abort = null;
     this.context = null;
-    _addSignal(this, signal);
+    addSignal(this, signal);
   }
   onRequestStart(controller, context) {
     if (this.reason) {
@@ -41,13 +52,13 @@ class UpgradeHandler extends AsyncResource {
     this.context = context;
   }
   onResponseStart() {
-    throw new _SocketError('bad upgrade', null);
+    throw new SocketError('bad upgrade', null);
   }
   onRequestUpgrade(controller, statusCode, headers, socket) {
-    const expectedStatusCode = socket[_kHTTP2Stream] === true ? 200 : 101;
+    const expectedStatusCode = socket[kHTTP2Stream] === true ? 200 : 101;
     if (statusCode !== expectedStatusCode) {
-      const socketInfo = socket[_kHTTP2Stream] === true ? null : _getSocketInfo(socket);
-      controller.abort(new _SocketError('bad upgrade', socketInfo));
+      const socketInfo = socket[kHTTP2Stream] === true ? null : util.getSocketInfo(socket);
+      controller.abort(new SocketError('bad upgrade', socketInfo));
       return;
     }
     const {
@@ -55,10 +66,10 @@ class UpgradeHandler extends AsyncResource {
       opaque,
       context
     } = this;
-    _removeSignal(this);
+    removeSignal(this);
     this.callback = null;
     const rawHeaders = controller?.rawHeaders;
-    const responseHeaders = this.responseHeaders === 'raw' ? _parseRawHeaders(rawHeaders) : headers;
+    const responseHeaders = this.responseHeaders === 'raw' ? util.parseRawHeaders(rawHeaders) : headers;
     this.runInAsyncScope(callback, null, null, {
       headers: responseHeaders,
       socket,
@@ -71,7 +82,7 @@ class UpgradeHandler extends AsyncResource {
       callback,
       opaque
     } = this;
-    _removeSignal(this);
+    removeSignal(this);
     if (callback) {
       this.callback = null;
       queueMicrotask(() => {

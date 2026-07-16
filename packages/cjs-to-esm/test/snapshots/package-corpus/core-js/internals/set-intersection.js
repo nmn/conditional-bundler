@@ -1,12 +1,12 @@
 import aSet from "../internals/a-set";
-import { Set as _Set, add as _add, has as _has } from "../internals/set-helpers";
+import SetHelpers from "../internals/set-helpers";
 import size from "../internals/set-size";
 import getSetRecord from "../internals/get-set-record";
 import iterateSet from "../internals/set-iterate";
 import iterateSimple from "../internals/iterate-simple";
-var Set = _Set;
-var add = _add;
-var has = _has;
+var Set = SetHelpers.Set;
+var add = SetHelpers.add;
+var has = SetHelpers.has;
 
 // `Set.prototype.intersection` method
 // https://tc39.es/ecma262/#sec-set.prototype.intersection

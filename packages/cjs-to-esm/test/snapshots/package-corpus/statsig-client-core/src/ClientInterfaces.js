@@ -1,7 +1,7 @@
-import { Log as _Log } from "./Log";
-import { _cloneObject } from "./SafeJs";
-import { StatsigSession as _StatsigSession } from "./SessionID";
-import { StableID as _StableID } from "./StableID";
+import Log_1 from "./Log";
+import SafeJs_1 from "./SafeJs";
+import SessionID_1 from "./SessionID";
+import StableID_1 from "./StableID";
 /**
  * A handle to the PrecomputedEvaluationsContext that computes fields lazily on access.
  * This avoids unnecessary computation (e.g., cloning the user) when only certain fields are needed.
@@ -29,9 +29,9 @@ export class PrecomputedEvaluationsContextHandle {
     return this._getValues();
   }
   get user() {
-    let user = (0, _cloneObject)('StatsigUser', this._getUser());
+    let user = (0, SafeJs_1._cloneObject)('StatsigUser', this._getUser());
     if (user == null) {
-      _Log.error('Failed to clone user');
+      Log_1.Log.error('Failed to clone user');
       user = {};
     }
     return user;
@@ -41,10 +41,10 @@ export class PrecomputedEvaluationsContextHandle {
    * @param {boolean} [bumpSession=true] - Whether to bump/update the session timing. Set to false to read without affecting session state.
    */
   getSession(bumpSession = true) {
-    return _StatsigSession.get(this._sdkKey, bumpSession);
+    return SessionID_1.StatsigSession.get(this._sdkKey, bumpSession);
   }
   get stableID() {
-    return _StableID.get(this._sdkKey);
+    return StableID_1.StableID.get(this._sdkKey);
   }
   get sdkInstanceID() {
     return this._getSdkInstanceID();

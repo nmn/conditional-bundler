@@ -1,14 +1,23 @@
 import * as assert from "node:assert";
 import * as _cjs_import from "node:events";
 import * as _cjs_import2 from "node:stream";
-import { RequestAbortedError as _RequestAbortedError, NotSupportedError as _NotSupportedError, InvalidArgumentError as _InvalidArgumentError, AbortError as _AbortError } from "../core/errors";
-import { isDisturbed as _isDisturbed, ReadableStreamFrom as _ReadableStreamFrom } from "../core/util";
+import _cjs_import3 from "../core/errors";
+import util from "../core/util";
 const {
   addAbortListener
 } = _cjs_import;
 const {
   Readable
 } = _cjs_import2;
+const {
+  RequestAbortedError,
+  NotSupportedError,
+  InvalidArgumentError,
+  AbortError
+} = _cjs_import3;
+const {
+  ReadableStreamFrom
+} = util;
 const kConsume = Symbol('kConsume');
 const kReading = Symbol('kReading');
 const kBody = Symbol('kBody');
@@ -85,7 +94,7 @@ class BodyReadable extends Readable {
    */
   _destroy(err, callback) {
     if (!err && !this._readableState.endEmitted) {
-      err = new _RequestAbortedError();
+      err = new RequestAbortedError();
     }
     if (err) {
       this[kAbort]();
@@ -219,7 +228,7 @@ class BodyReadable extends Readable {
    */
   async formData() {
     // TODO: Implement.
-    throw new _NotSupportedError();
+    throw new NotSupportedError();
   }
 
   /**
@@ -231,7 +240,7 @@ class BodyReadable extends Readable {
    * @returns {boolean}
    */
   get bodyUsed() {
-    return _isDisturbed(this);
+    return util.isDisturbed(this);
   }
 
   /**
@@ -241,7 +250,7 @@ class BodyReadable extends Readable {
    */
   get body() {
     if (!this[kBody]) {
-      this[kBody] = _ReadableStreamFrom(this);
+      this[kBody] = ReadableStreamFrom(this);
       if (this[kConsume]) {
         // TODO: Is this the best way to force a lock?
         this[kBody].getReader(); // Ensure stream is locked.
@@ -261,28 +270,28 @@ class BodyReadable extends Readable {
   dump(opts) {
     const signal = opts?.signal;
     if (signal != null && (typeof signal !== 'object' || !('aborted' in signal))) {
-      return Promise.reject(new _InvalidArgumentError('signal must be an AbortSignal'));
+      return Promise.reject(new InvalidArgumentError('signal must be an AbortSignal'));
     }
     const limit = opts?.limit && Number.isFinite(opts.limit) ? opts.limit : 128 * 1024;
     if (signal?.aborted) {
-      return Promise.reject(signal.reason ?? new _AbortError());
+      return Promise.reject(signal.reason ?? new AbortError());
     }
     if (this._readableState.closeEmitted) {
       return Promise.resolve(null);
     }
     return new Promise((resolve, reject) => {
       if (this[kContentLength] && this[kContentLength] > limit || this[kBytesRead] > limit) {
-        this.destroy(new _AbortError());
+        this.destroy(new AbortError());
       }
       if (signal) {
         const onAbort = () => {
-          this.destroy(signal.reason ?? new _AbortError());
+          this.destroy(signal.reason ?? new AbortError());
         };
         const abortListener = addAbortListener(signal, onAbort);
         this.on('close', function () {
           abortListener[Symbol.dispose]();
           if (signal.aborted) {
-            reject(signal.reason ?? new _AbortError());
+            reject(signal.reason ?? new AbortError());
           } else {
             resolve(null);
           }
@@ -354,7 +363,7 @@ function isLocked(bodyReadable) {
  * @returns {boolean}
  */
 function isUnusable(bodyReadable) {
-  return _isDisturbed(bodyReadable) || isLocked(bodyReadable);
+  return util.isDisturbed(bodyReadable) || isLocked(bodyReadable);
 }
 
 /**
@@ -413,7 +422,7 @@ function consume(stream, type) {
           consumeFinish(this[kConsume], err);
         }).on('close', function () {
           if (this[kConsume].body !== null) {
-            consumeFinish(this[kConsume], new _RequestAbortedError());
+            consumeFinish(this[kConsume], new RequestAbortedError());
           }
         });
         consumeStart(stream[kConsume]);

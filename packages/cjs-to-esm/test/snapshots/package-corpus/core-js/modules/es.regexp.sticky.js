@@ -1,10 +1,10 @@
 import DESCRIPTORS from "../internals/descriptors";
-import { MISSED_STICKY as _MISSED_STICKY } from "../internals/regexp-sticky-helpers";
+import _cjs_import from "../internals/regexp-sticky-helpers";
 import classof from "../internals/classof-raw";
 import defineBuiltInAccessor from "../internals/define-built-in-accessor";
-import { get as _get } from "../internals/internal-state";
-var MISSED_STICKY = _MISSED_STICKY;
-var getInternalState = _get;
+import _cjs_import2 from "../internals/internal-state";
+var MISSED_STICKY = _cjs_import.MISSED_STICKY;
+var getInternalState = _cjs_import2.get;
 var RegExpPrototype = RegExp.prototype;
 var $TypeError = TypeError;
 

@@ -1,7 +1,7 @@
 import $ from "../internals/export";
 import aMap from "../internals/a-map";
-import { remove as _remove } from "../internals/map-helpers";
-var remove = _remove;
+import _cjs_import from "../internals/map-helpers";
+var remove = _cjs_import.remove;
 
 // `Map.prototype.deleteAll` method
 // https://github.com/tc39/proposal-collection-methods

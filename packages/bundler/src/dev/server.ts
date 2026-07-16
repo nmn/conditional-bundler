@@ -5,27 +5,39 @@ import { createHash } from "node:crypto";
 import type { Socket } from "node:net";
 import { buildProject, type BuildResult } from "../builder.js";
 import type { BundlerConfig } from "../config.js";
-import type { HmrBundleRecord } from "./hmr-linker.js";
+import { materializeHmrPatch, type HmrCellRecord } from "./hmr-linker.js";
 import { resolveDevOptions } from "./options.js";
-import { readDevAsset, resolveConditionalPatch } from "./conditional-assets.js";
+import { readDevAsset, resolveConditionalCode } from "./conditional-assets.js";
 
 export type DevServer = {
   url: string;
   close: () => Promise<void>;
 };
 
-type HmrMetadata = {
-  bundles?: Record<string, HmrBundleRecord>;
+export const hmrUpdatePrefix = "/__bundler_hmr_updates/";
+const hmrUpdateLifetimeMs = 60_000;
+
+export type HmrPatchPlan = {
+  type: "patch";
+  updates: Array<{ bundleKey: string; cell: HmrCellRecord }>;
+  changedBundles: string[];
+  imports?: string[];
+  styles?: string[];
+  rscChunks?: Record<string, string>;
+};
+
+export type HmrPatchOptions = {
+  ignoreManifestResources?: boolean;
 };
 
 export type HmrMessage =
   | {
       type: "patch";
-      records: string[];
-      recordBundles?: string[];
+      updates: Array<{ bundleKey: string; url: string }>;
       changedBundles: string[];
       imports?: string[];
       styles?: string[];
+      rscChunks?: Record<string, string>;
     }
   | { type: "rsc-refresh" }
   | { type: "reload" }
@@ -34,6 +46,66 @@ export type HmrMessage =
 export type Client = {
   socket: Socket;
 };
+
+type HmrUpdateResource = {
+  body: string;
+  expiresAt: number;
+};
+
+export class HmrUpdateStore {
+  private generation = 0;
+  private readonly resources = new Map<string, HmrUpdateResource>();
+
+  async publish(
+    patch: HmrPatchPlan,
+  ): Promise<Extract<HmrMessage, { type: "patch" }>> {
+    this.prune();
+    const generation = ++this.generation;
+    const updates = await Promise.all(
+      patch.updates.map(async ({ bundleKey, cell }, index) => {
+        const body = await resolveConditionalCode(
+          await materializeHmrPatch(cell),
+        );
+        const token = createHash("sha256")
+          .update(`${generation}:${index}:${bundleKey}:${cell.id}:${cell.hash}`)
+          .digest("hex")
+          .slice(0, 24);
+        const url = `${hmrUpdatePrefix}${generation}/${token}.js`;
+        this.resources.set(url, {
+          body,
+          expiresAt: Date.now() + hmrUpdateLifetimeMs,
+        });
+        return { bundleKey, url };
+      }),
+    );
+    return {
+      type: "patch",
+      updates,
+      changedBundles: patch.changedBundles,
+      imports: patch.imports,
+      styles: patch.styles,
+      rscChunks: patch.rscChunks,
+    };
+  }
+
+  read(pathname: string): string | null {
+    this.prune();
+    return this.resources.get(pathname)?.body ?? null;
+  }
+
+  clear(): void {
+    this.resources.clear();
+  }
+
+  private prune(): void {
+    const now = Date.now();
+    for (const [url, resource] of this.resources) {
+      if (resource.expiresAt <= now) {
+        this.resources.delete(url);
+      }
+    }
+  }
+}
 
 export async function startDevServer(
   config: BundlerConfig,
@@ -50,8 +122,9 @@ export async function startDevServer(
   const devOptions = await resolveDevOptions(devConfig, devConfig.entries);
   let current = await buildProject(devConfig, []);
   const clients = new Set<Client>();
+  const hmrUpdates = new HmrUpdateStore();
   const server = http.createServer((request, response) => {
-    void handleRequest(devConfig, current, request, response);
+    void handleRequest(devConfig, current, hmrUpdates, request, response);
   });
   server.on("upgrade", (request, socket) => {
     if (request.url !== "/__bundler_hmr") {
@@ -72,7 +145,7 @@ export async function startDevServer(
       current = next;
       broadcast(
         clients,
-        patch ? await resolveConditionalPatch(patch) : { type: "reload" },
+        patch ? await hmrUpdates.publish(patch) : { type: "reload" },
       );
     } catch (error) {
       console.error("[bundler] rebuild failed", error);
@@ -89,6 +162,7 @@ export async function startDevServer(
     url: `http://${devOptions.host}:${port}`,
     close: async () => {
       watcher?.close();
+      hmrUpdates.clear();
       for (const client of clients) {
         client.socket.destroy();
       }
@@ -102,17 +176,50 @@ export async function startDevServer(
 async function handleRequest(
   config: BundlerConfig,
   build: BuildResult,
+  hmrUpdates: HmrUpdateStore,
   request: http.IncomingMessage,
   response: http.ServerResponse,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
+  if (url.pathname.startsWith(hmrUpdatePrefix)) {
+    const body = hmrUpdates.read(url.pathname);
+    if (body == null) {
+      response.statusCode = 404;
+      response.end("HMR update not found");
+      return;
+    }
+    response.setHeader("cache-control", "no-store");
+    response.setHeader("content-type", "text/javascript; charset=utf-8");
+    response.setHeader("x-content-type-options", "nosniff");
+    response.end(body);
+    return;
+  }
   if (url.pathname === "/") {
+    const document = build.manifest.documents?.[0];
+    if (document) {
+      const served = await readDevAsset(config, build, document.fileName);
+      if (served) {
+        response.setHeader("content-type", served.contentType);
+        response.end(served.body);
+        return;
+      }
+    }
     response.setHeader("content-type", "text/html; charset=utf-8");
     response.end(renderIndex(build));
     return;
   }
 
-  const served = await readDevAsset(config, build, path.basename(url.pathname));
+  const requestedFileName = decodeURIComponent(
+    url.pathname.replace(/^\/+/, ""),
+  );
+  let served = await readDevAsset(config, build, requestedFileName);
+  if (!served && requestedFileName.startsWith("assets/")) {
+    served = await readDevAsset(
+      config,
+      build,
+      requestedFileName.slice("assets/".length),
+    );
+  }
   if (!served) {
     response.statusCode = 404;
     response.end("Not found");
@@ -172,10 +279,14 @@ export function watchProject(
 export function createPatch(
   previous: BuildResult,
   next: BuildResult,
-): Extract<HmrMessage, { type: "patch" }> | null {
-  const previousHmr = previous.manifest.metadata.hmr as HmrMetadata | undefined;
-  const nextHmr = next.manifest.metadata.hmr as HmrMetadata | undefined;
-  if (!previousHmr?.bundles || !nextHmr?.bundles) {
+  options: HmrPatchOptions = {},
+): HmrPatchPlan | null {
+  if (hasReloadOnlyResourceChanges(previous, next, options)) {
+    return null;
+  }
+  const previousHmr = previous.hmr;
+  const nextHmr = next.hmr;
+  if (!previousHmr || !nextHmr) {
     return null;
   }
   if (
@@ -192,8 +303,7 @@ export function createPatch(
     return null;
   }
 
-  const records: string[] = [];
-  const recordBundles: string[] = [];
+  const updates: HmrPatchPlan["updates"] = [];
   const changedBundles: string[] = [];
   for (const [key, nextBundle] of Object.entries(nextHmr.bundles)) {
     const previousBundle = previousHmr.bundles[key];
@@ -201,6 +311,14 @@ export function createPatch(
       return null;
     }
     if (!sameStrings(previousBundle.symbols, nextBundle.symbols)) {
+      return null;
+    }
+    if (
+      !sameStrings(
+        previousBundle.cells.map((cell) => cell.id).sort(),
+        nextBundle.cells.map((cell) => cell.id).sort(),
+      )
+    ) {
       return null;
     }
     const previousCells = new Map(
@@ -215,27 +333,56 @@ export function createPatch(
         if (!changedBundles.includes(key)) {
           changedBundles.push(key);
         }
-        records.push(cell.patchCode ?? cell.code);
-        recordBundles.push(key);
+        updates.push({ bundleKey: key, cell });
       }
     }
   }
 
-  if (records.length === 0) {
+  if (updates.length === 0) {
     return {
       type: "patch",
-      records: [],
+      updates: [],
       changedBundles: [],
       styles: stylePatch,
     };
   }
   return {
     type: "patch",
-    records,
-    recordBundles,
+    updates,
     changedBundles,
     styles: stylePatch,
   };
+}
+
+function hasReloadOnlyResourceChanges(
+  previous: BuildResult,
+  next: BuildResult,
+  options: HmrPatchOptions,
+): boolean {
+  const collect = (build: BuildResult) =>
+    new Map(
+      build.manifest.emittedFiles
+        .filter(
+          (file) =>
+            file.type !== "style" &&
+            file.type !== "source-map" &&
+            !(options.ignoreManifestResources && file.type === "manifest"),
+        )
+        .map((file) => [file.fileName, file.contentHash]),
+    );
+  const left = collect(previous);
+  const right = collect(next);
+  if (
+    !sameStrings(
+      Array.from(left.keys()).sort(),
+      Array.from(right.keys()).sort(),
+    )
+  ) {
+    return true;
+  }
+  return Array.from(right).some(
+    ([fileName, hash]) => left.get(fileName) !== hash,
+  );
 }
 
 export function acceptWebSocket(

@@ -1,20 +1,75 @@
 import * as _cjs_import from "node:util/types";
-import { webidl as _webidl } from "../webidl";
-import { URLSerializer as _URLSerializer } from "../fetch/data-url";
-import { environmentSettingsObject as _environmentSettingsObject } from "../fetch/util";
-import { staticPropertyDescriptors as _staticPropertyDescriptors, states as _states, sentCloseFrameState as _sentCloseFrameState, sendHints as _sendHints, opcodes as _opcodes } from "./constants";
-import { isConnecting as _isConnecting, isEstablished as _isEstablished, isClosing as _isClosing, isClosed as _isClosed, isValidSubprotocol as _isValidSubprotocol, fireEvent as _fireEvent, utf8Decode as _utf8Decode, toArrayBuffer as _toArrayBuffer, getURLRecord as _getURLRecord } from "./util";
-import { establishWebSocketConnection as _establishWebSocketConnection, closeWebSocketConnection as _closeWebSocketConnection, failWebsocketConnection as _failWebsocketConnection } from "./connection";
-import { ByteParser as _ByteParser } from "./receiver";
-import { kEnumerableProperty as _kEnumerableProperty } from "../../core/util";
-import { getGlobalDispatcher as _getGlobalDispatcher } from "../../global";
-import { ErrorEvent as _ErrorEvent, CloseEvent as _CloseEvent, createFastMessageEvent as _createFastMessageEvent } from "./events";
-import { SendQueue as _SendQueue } from "./sender";
-import { WebsocketFrameSend as _WebsocketFrameSend } from "./frame";
-import { channels as _channels } from "../../core/diagnostics";
+import _cjs_import2 from "../webidl";
+import _cjs_import3 from "../fetch/data-url";
+import _cjs_import4 from "../fetch/util";
+import _cjs_import5 from "./constants";
+import _cjs_import6 from "./util";
+import _cjs_import7 from "./connection";
+import _cjs_import8 from "./receiver";
+import _cjs_import9 from "../../core/util";
+import _cjs_import0 from "../../global";
+import _cjs_import1 from "./events";
+import _cjs_import10 from "./sender";
+import _cjs_import11 from "./frame";
+import _cjs_import12 from "../../core/diagnostics";
 const {
   isArrayBuffer
 } = _cjs_import;
+const {
+  webidl
+} = _cjs_import2;
+const {
+  URLSerializer
+} = _cjs_import3;
+const {
+  environmentSettingsObject
+} = _cjs_import4;
+const {
+  staticPropertyDescriptors,
+  states,
+  sentCloseFrameState,
+  sendHints,
+  opcodes
+} = _cjs_import5;
+const {
+  isConnecting,
+  isEstablished,
+  isClosing,
+  isClosed,
+  isValidSubprotocol,
+  fireEvent,
+  utf8Decode,
+  toArrayBuffer,
+  getURLRecord
+} = _cjs_import6;
+const {
+  establishWebSocketConnection,
+  closeWebSocketConnection,
+  failWebsocketConnection
+} = _cjs_import7;
+const {
+  ByteParser
+} = _cjs_import8;
+const {
+  kEnumerableProperty
+} = _cjs_import9;
+const {
+  getGlobalDispatcher
+} = _cjs_import0;
+const {
+  ErrorEvent,
+  CloseEvent,
+  createFastMessageEvent
+} = _cjs_import1;
+const {
+  SendQueue
+} = _cjs_import10;
+const {
+  WebsocketFrameSend
+} = _cjs_import11;
+const {
+  channels
+} = _cjs_import12;
 function getSocketAddress(socket) {
   if (typeof socket?.address === 'function') {
     return socket.address();
@@ -63,7 +118,7 @@ class WebSocket extends EventTarget {
   #handler = {
     onConnectionEstablished: (response, extensions) => this.#onConnectionEstablished(response, extensions),
     onMessage: (opcode, data) => this.#onMessage(opcode, data),
-    onParserError: err => _failWebsocketConnection(this.#handler, null, err.message),
+    onParserError: err => failWebsocketConnection(this.#handler, null, err.message),
     onParserDrain: () => this.#onParserDrain(),
     onSocketData: chunk => {
       if (!this.#parser.write(chunk)) {
@@ -71,30 +126,30 @@ class WebSocket extends EventTarget {
       }
     },
     onSocketError: err => {
-      this.#handler.readyState = _states.CLOSING;
-      if (_channels.socketError.hasSubscribers) {
-        _channels.socketError.publish(err);
+      this.#handler.readyState = states.CLOSING;
+      if (channels.socketError.hasSubscribers) {
+        channels.socketError.publish(err);
       }
       this.#handler.socket.destroy();
     },
     onSocketClose: () => this.#onSocketClose(),
     onPing: body => {
-      if (_channels.ping.hasSubscribers) {
-        _channels.ping.publish({
+      if (channels.ping.hasSubscribers) {
+        channels.ping.publish({
           payload: body,
           websocket: this
         });
       }
     },
     onPong: body => {
-      if (_channels.pong.hasSubscribers) {
-        _channels.pong.publish({
+      if (channels.pong.hasSubscribers) {
+        channels.pong.publish({
           payload: body,
           websocket: this
         });
       }
     },
-    readyState: _states.CONNECTING,
+    readyState: states.CONNECTING,
     socket: null,
     closeState: new Set(),
     controller: null,
@@ -111,18 +166,18 @@ class WebSocket extends EventTarget {
    */
   constructor(url, protocols = []) {
     super();
-    _webidl.util.markAsUncloneable(this);
+    webidl.util.markAsUncloneable(this);
     const prefix = 'WebSocket constructor';
-    _webidl.argumentLengthCheck(arguments, 1, prefix);
-    const options = _webidl.converters['DOMString or sequence<DOMString> or WebSocketInit'](protocols, prefix, 'options');
-    url = _webidl.converters.USVString(url);
+    webidl.argumentLengthCheck(arguments, 1, prefix);
+    const options = webidl.converters['DOMString or sequence<DOMString> or WebSocketInit'](protocols, prefix, 'options');
+    url = webidl.converters.USVString(url);
     protocols = options.protocols;
 
     // 1. Let baseURL be this's relevant settings object's API base URL.
-    const baseURL = _environmentSettingsObject.settingsObject.baseUrl;
+    const baseURL = environmentSettingsObject.settingsObject.baseUrl;
 
     // 2. Let urlRecord be the result of getting a URL record given url and baseURL.
-    const urlRecord = _getURLRecord(url, baseURL);
+    const urlRecord = getURLRecord(url, baseURL);
 
     // 3. If protocols is a string, set protocols to a sequence consisting
     //    of just that string.
@@ -137,7 +192,7 @@ class WebSocket extends EventTarget {
     if (protocols.length !== new Set(protocols.map(p => p.toLowerCase())).size) {
       throw new DOMException('Invalid Sec-WebSocket-Protocol value', 'SyntaxError');
     }
-    if (protocols.length > 0 && !protocols.every(p => _isValidSubprotocol(p))) {
+    if (protocols.length > 0 && !protocols.every(p => isValidSubprotocol(p))) {
       throw new DOMException('Invalid Sec-WebSocket-Protocol value', 'SyntaxError');
     }
 
@@ -145,12 +200,12 @@ class WebSocket extends EventTarget {
     this.#url = new URL(urlRecord.href);
 
     // 6. Let client be this's relevant settings object.
-    const client = _environmentSettingsObject.settingsObject;
+    const client = environmentSettingsObject.settingsObject;
 
     // 7. Run this step in parallel:
     // 7.1. Establish a WebSocket connection given urlRecord, protocols,
     //      and client.
-    this.#handler.controller = _establishWebSocketConnection(urlRecord, protocols, client, this.#handler, options);
+    this.#handler.controller = establishWebSocketConnection(urlRecord, protocols, client, this.#handler, options);
 
     // Each WebSocket object has an associated ready state, which is a
     // number representing the state of the connection. Initially it must
@@ -172,13 +227,13 @@ class WebSocket extends EventTarget {
    * @param {string|undefined} reason
    */
   close(code = undefined, reason = undefined) {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     const prefix = 'WebSocket.close';
     if (code !== undefined) {
-      code = _webidl.converters['unsigned short'](code, prefix, 'code', _webidl.attributes.Clamp);
+      code = webidl.converters['unsigned short'](code, prefix, 'code', webidl.attributes.Clamp);
     }
     if (reason !== undefined) {
-      reason = _webidl.converters.USVString(reason);
+      reason = webidl.converters.USVString(reason);
     }
 
     // 1. If code is the special value "missing", then set code to null.
@@ -188,7 +243,7 @@ class WebSocket extends EventTarget {
     reason ??= '';
 
     // 3. Close the WebSocket with this, code, and reason.
-    _closeWebSocketConnection(this.#handler, code, reason, true);
+    closeWebSocketConnection(this.#handler, code, reason, true);
   }
 
   /**
@@ -196,14 +251,14 @@ class WebSocket extends EventTarget {
    * @param {NodeJS.TypedArray|ArrayBuffer|Blob|string} data
    */
   send(data) {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     const prefix = 'WebSocket.send';
-    _webidl.argumentLengthCheck(arguments, 1, prefix);
-    data = _webidl.converters.WebSocketSendData(data, prefix, 'data');
+    webidl.argumentLengthCheck(arguments, 1, prefix);
+    data = webidl.converters.WebSocketSendData(data, prefix, 'data');
 
     // 1. If this's ready state is CONNECTING, then throw an
     //    "InvalidStateError" DOMException.
-    if (_isConnecting(this.#handler.readyState)) {
+    if (isConnecting(this.#handler.readyState)) {
       throw new DOMException('Sent before connected.', 'InvalidStateError');
     }
 
@@ -211,7 +266,7 @@ class WebSocket extends EventTarget {
     // https://datatracker.ietf.org/doc/html/rfc6455#section-6.1
     // https://datatracker.ietf.org/doc/html/rfc6455#section-5.2
 
-    if (!_isEstablished(this.#handler.readyState) || _isClosing(this.#handler.readyState)) {
+    if (!isEstablished(this.#handler.readyState) || isClosing(this.#handler.readyState)) {
       return;
     }
 
@@ -232,7 +287,7 @@ class WebSocket extends EventTarget {
       this.#bufferedAmount += buffer.byteLength;
       this.#sendQueue.add(buffer, () => {
         this.#bufferedAmount -= buffer.byteLength;
-      }, _sendHints.text);
+      }, sendHints.text);
     } else if (isArrayBuffer(data)) {
       // If the WebSocket connection is established, and the WebSocket
       // closing handshake has not yet started, then the user agent must
@@ -249,7 +304,7 @@ class WebSocket extends EventTarget {
       this.#bufferedAmount += data.byteLength;
       this.#sendQueue.add(data, () => {
         this.#bufferedAmount -= data.byteLength;
-      }, _sendHints.arrayBuffer);
+      }, sendHints.arrayBuffer);
     } else if (ArrayBuffer.isView(data)) {
       // If the WebSocket connection is established, and the WebSocket
       // closing handshake has not yet started, then the user agent must
@@ -266,8 +321,8 @@ class WebSocket extends EventTarget {
       this.#bufferedAmount += data.byteLength;
       this.#sendQueue.add(data, () => {
         this.#bufferedAmount -= data.byteLength;
-      }, _sendHints.typedArray);
-    } else if (_webidl.is.Blob(data)) {
+      }, sendHints.typedArray);
+    } else if (webidl.is.Blob(data)) {
       // If the WebSocket connection is established, and the WebSocket
       // closing handshake has not yet started, then the user agent must
       // send a WebSocket Message comprised of data using a binary frame
@@ -282,43 +337,43 @@ class WebSocket extends EventTarget {
       this.#bufferedAmount += data.size;
       this.#sendQueue.add(data, () => {
         this.#bufferedAmount -= data.size;
-      }, _sendHints.blob);
+      }, sendHints.blob);
     }
   }
   get readyState() {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
 
     // The readyState getter steps are to return this's ready state.
     return this.#handler.readyState;
   }
   get bufferedAmount() {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     return this.#bufferedAmount;
   }
   get url() {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
 
     // The url getter steps are to return this's url, serialized.
-    return _URLSerializer(this.#url);
+    return URLSerializer(this.#url);
   }
   get extensions() {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     return this.#extensions;
   }
   get protocol() {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     return this.#protocol;
   }
   get onopen() {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     return this.#events.open;
   }
   set onopen(fn) {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     if (this.#events.open) {
       this.removeEventListener('open', this.#events.open);
     }
-    const listener = _webidl.converters.EventHandlerNonNull(fn);
+    const listener = webidl.converters.EventHandlerNonNull(fn);
     if (listener !== null) {
       this.addEventListener('open', listener);
       this.#events.open = fn;
@@ -327,15 +382,15 @@ class WebSocket extends EventTarget {
     }
   }
   get onerror() {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     return this.#events.error;
   }
   set onerror(fn) {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     if (this.#events.error) {
       this.removeEventListener('error', this.#events.error);
     }
-    const listener = _webidl.converters.EventHandlerNonNull(fn);
+    const listener = webidl.converters.EventHandlerNonNull(fn);
     if (listener !== null) {
       this.addEventListener('error', listener);
       this.#events.error = fn;
@@ -344,15 +399,15 @@ class WebSocket extends EventTarget {
     }
   }
   get onclose() {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     return this.#events.close;
   }
   set onclose(fn) {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     if (this.#events.close) {
       this.removeEventListener('close', this.#events.close);
     }
-    const listener = _webidl.converters.EventHandlerNonNull(fn);
+    const listener = webidl.converters.EventHandlerNonNull(fn);
     if (listener !== null) {
       this.addEventListener('close', listener);
       this.#events.close = fn;
@@ -361,15 +416,15 @@ class WebSocket extends EventTarget {
     }
   }
   get onmessage() {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     return this.#events.message;
   }
   set onmessage(fn) {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     if (this.#events.message) {
       this.removeEventListener('message', this.#events.message);
     }
-    const listener = _webidl.converters.EventHandlerNonNull(fn);
+    const listener = webidl.converters.EventHandlerNonNull(fn);
     if (listener !== null) {
       this.addEventListener('message', listener);
       this.#events.message = fn;
@@ -378,11 +433,11 @@ class WebSocket extends EventTarget {
     }
   }
   get binaryType() {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     return this.#binaryType;
   }
   set binaryType(type) {
-    _webidl.brandCheck(this, WebSocket);
+    webidl.brandCheck(this, WebSocket);
     if (type !== 'blob' && type !== 'arraybuffer') {
       this.#binaryType = 'blob';
     } else {
@@ -401,17 +456,17 @@ class WebSocket extends EventTarget {
     // Get options from dispatcher options
     const maxFragments = this.#handler.controller.dispatcher?.webSocketOptions?.maxFragments;
     const maxPayloadSize = this.#handler.controller.dispatcher?.webSocketOptions?.maxPayloadSize;
-    const parser = new _ByteParser(this.#handler, parsedExtensions, {
+    const parser = new ByteParser(this.#handler, parsedExtensions, {
       maxFragments,
       maxPayloadSize
     });
     parser.on('drain', () => this.#handler.onParserDrain());
     parser.on('error', err => this.#handler.onParserError(err));
     this.#parser = parser;
-    this.#sendQueue = new _SendQueue(response.socket);
+    this.#sendQueue = new SendQueue(response.socket);
 
     // 1. Change the ready state to OPEN (1).
-    this.#handler.readyState = _states.OPEN;
+    this.#handler.readyState = states.OPEN;
 
     // 2. Change the extensions attribute’s value to the extensions in use, if
     //    it is not the null value.
@@ -430,11 +485,11 @@ class WebSocket extends EventTarget {
     }
 
     // 4. Fire an event named open at the WebSocket object.
-    _fireEvent('open', this);
-    if (_channels.open.hasSubscribers) {
+    fireEvent('open', this);
+    if (channels.open.hasSubscribers) {
       // Convert headers to a plain object for the event
       const headers = response.headersList.entries;
-      _channels.open.publish({
+      channels.open.publish({
         address: getSocketAddress(response.socket),
         protocol: this.#protocol,
         extensions: this.#extensions,
@@ -449,22 +504,22 @@ class WebSocket extends EventTarget {
   }
   #onMessage(type, data) {
     // 1. If ready state is not OPEN (1), then return.
-    if (this.#handler.readyState !== _states.OPEN) {
+    if (this.#handler.readyState !== states.OPEN) {
       return;
     }
 
     // 2. Let dataForEvent be determined by switching on type and binary type:
     let dataForEvent;
-    if (type === _opcodes.TEXT) {
+    if (type === opcodes.TEXT) {
       // -> type indicates that the data is Text
       //      a new DOMString containing data
       try {
-        dataForEvent = _utf8Decode(data);
+        dataForEvent = utf8Decode(data);
       } catch {
-        _failWebsocketConnection(this.#handler, 1007, 'Received invalid UTF-8 in text frame.');
+        failWebsocketConnection(this.#handler, 1007, 'Received invalid UTF-8 in text frame.');
         return;
       }
-    } else if (type === _opcodes.BINARY) {
+    } else if (type === opcodes.BINARY) {
       if (this.#binaryType === 'blob') {
         // -> type indicates that the data is Binary and binary type is "blob"
         //      a new Blob object, created in the relevant Realm of the WebSocket
@@ -474,14 +529,14 @@ class WebSocket extends EventTarget {
         // -> type indicates that the data is Binary and binary type is "arraybuffer"
         //      a new ArrayBuffer object, created in the relevant Realm of the
         //      WebSocket object, whose contents are data
-        dataForEvent = _toArrayBuffer(data);
+        dataForEvent = toArrayBuffer(data);
       }
     }
 
     // 3. Fire an event named message at the WebSocket object, using MessageEvent,
     //    with the origin attribute initialized to the serialization of the WebSocket
     //    object’s url's origin, and the data attribute initialized to dataForEvent.
-    _fireEvent('message', this, _createFastMessageEvent, {
+    fireEvent('message', this, createFastMessageEvent, {
       origin: this.#url.origin,
       data: dataForEvent
     });
@@ -498,7 +553,7 @@ class WebSocket extends EventTarget {
     // If the TCP connection was closed after the
     // WebSocket closing handshake was completed, the WebSocket connection
     // is said to have been closed _cleanly_.
-    const wasClean = this.#handler.closeState.has(_sentCloseFrameState.SENT) && this.#handler.closeState.has(_sentCloseFrameState.RECEIVED);
+    const wasClean = this.#handler.closeState.has(sentCloseFrameState.SENT) && this.#handler.closeState.has(sentCloseFrameState.RECEIVED);
     let code = 1005;
     let reason = '';
     const result = this.#parser?.closingInfo;
@@ -508,20 +563,20 @@ class WebSocket extends EventTarget {
     }
 
     // 1. Change the ready state to CLOSED (3).
-    this.#handler.readyState = _states.CLOSED;
+    this.#handler.readyState = states.CLOSED;
 
     // 2. If the user agent was required to fail the WebSocket
     //    connection, or if the WebSocket connection was closed
     //    after being flagged as full, fire an event named error
     //    at the WebSocket object.
-    if (!this.#handler.closeState.has(_sentCloseFrameState.RECEIVED)) {
+    if (!this.#handler.closeState.has(sentCloseFrameState.RECEIVED)) {
       // If _The WebSocket
       // Connection is Closed_ and no Close control frame was received by the
       // endpoint (such as could occur if the underlying transport connection
       // is lost), _The WebSocket Connection Close Code_ is considered to be
       // 1006.
       code = 1006;
-      _fireEvent('error', this, (type, init) => new _ErrorEvent(type, init), {
+      fireEvent('error', this, (type, init) => new ErrorEvent(type, init), {
         error: new TypeError(reason)
       });
     }
@@ -535,13 +590,13 @@ class WebSocket extends EventTarget {
     //    decode without BOM to the WebSocket connection close
     //    reason.
     // TODO: process.nextTick
-    _fireEvent('close', this, (type, init) => new _CloseEvent(type, init), {
+    fireEvent('close', this, (type, init) => new CloseEvent(type, init), {
       wasClean,
       code,
       reason
     });
-    if (_channels.close.hasSubscribers) {
-      _channels.close.publish({
+    if (channels.close.hasSubscribers) {
+      channels.close.publish({
         websocket: this,
         code,
         reason
@@ -565,9 +620,9 @@ class WebSocket extends EventTarget {
     // An endpoint MAY send a Ping frame any time after the connection is
     // established and before the connection is closed.
     const readyState = ws.#handler.readyState;
-    if (_isEstablished(readyState) && !_isClosing(readyState) && !_isClosed(readyState)) {
-      const frame = new _WebsocketFrameSend(buffer);
-      ws.#handler.socket.write(frame.createFrame(_opcodes.PING));
+    if (isEstablished(readyState) && !isClosing(readyState) && !isClosed(readyState)) {
+      const frame = new WebsocketFrameSend(buffer);
+      ws.#handler.socket.write(frame.createFrame(opcodes.PING));
     }
   }
 }
@@ -577,30 +632,30 @@ const {
 Reflect.deleteProperty(WebSocket, 'ping');
 
 // https://websockets.spec.whatwg.org/#dom-websocket-connecting
-WebSocket.CONNECTING = WebSocket.prototype.CONNECTING = _states.CONNECTING;
+WebSocket.CONNECTING = WebSocket.prototype.CONNECTING = states.CONNECTING;
 // https://websockets.spec.whatwg.org/#dom-websocket-open
-WebSocket.OPEN = WebSocket.prototype.OPEN = _states.OPEN;
+WebSocket.OPEN = WebSocket.prototype.OPEN = states.OPEN;
 // https://websockets.spec.whatwg.org/#dom-websocket-closing
-WebSocket.CLOSING = WebSocket.prototype.CLOSING = _states.CLOSING;
+WebSocket.CLOSING = WebSocket.prototype.CLOSING = states.CLOSING;
 // https://websockets.spec.whatwg.org/#dom-websocket-closed
-WebSocket.CLOSED = WebSocket.prototype.CLOSED = _states.CLOSED;
+WebSocket.CLOSED = WebSocket.prototype.CLOSED = states.CLOSED;
 Object.defineProperties(WebSocket.prototype, {
-  CONNECTING: _staticPropertyDescriptors,
-  OPEN: _staticPropertyDescriptors,
-  CLOSING: _staticPropertyDescriptors,
-  CLOSED: _staticPropertyDescriptors,
-  url: _kEnumerableProperty,
-  readyState: _kEnumerableProperty,
-  bufferedAmount: _kEnumerableProperty,
-  onopen: _kEnumerableProperty,
-  onerror: _kEnumerableProperty,
-  onclose: _kEnumerableProperty,
-  close: _kEnumerableProperty,
-  onmessage: _kEnumerableProperty,
-  binaryType: _kEnumerableProperty,
-  send: _kEnumerableProperty,
-  extensions: _kEnumerableProperty,
-  protocol: _kEnumerableProperty,
+  CONNECTING: staticPropertyDescriptors,
+  OPEN: staticPropertyDescriptors,
+  CLOSING: staticPropertyDescriptors,
+  CLOSED: staticPropertyDescriptors,
+  url: kEnumerableProperty,
+  readyState: kEnumerableProperty,
+  bufferedAmount: kEnumerableProperty,
+  onopen: kEnumerableProperty,
+  onerror: kEnumerableProperty,
+  onclose: kEnumerableProperty,
+  close: kEnumerableProperty,
+  onmessage: kEnumerableProperty,
+  binaryType: kEnumerableProperty,
+  send: kEnumerableProperty,
+  extensions: kEnumerableProperty,
+  protocol: kEnumerableProperty,
   [Symbol.toStringTag]: {
     value: 'WebSocket',
     writable: false,
@@ -609,50 +664,50 @@ Object.defineProperties(WebSocket.prototype, {
   }
 });
 Object.defineProperties(WebSocket, {
-  CONNECTING: _staticPropertyDescriptors,
-  OPEN: _staticPropertyDescriptors,
-  CLOSING: _staticPropertyDescriptors,
-  CLOSED: _staticPropertyDescriptors
+  CONNECTING: staticPropertyDescriptors,
+  OPEN: staticPropertyDescriptors,
+  CLOSING: staticPropertyDescriptors,
+  CLOSED: staticPropertyDescriptors
 });
-_webidl.converters['sequence<DOMString>'] = _webidl.sequenceConverter(_webidl.converters.DOMString);
-_webidl.converters['DOMString or sequence<DOMString>'] = function (V, prefix, argument) {
-  if (_webidl.util.Type(V) === _webidl.util.Types.OBJECT && Symbol.iterator in V) {
-    return _webidl.converters['sequence<DOMString>'](V);
+webidl.converters['sequence<DOMString>'] = webidl.sequenceConverter(webidl.converters.DOMString);
+webidl.converters['DOMString or sequence<DOMString>'] = function (V, prefix, argument) {
+  if (webidl.util.Type(V) === webidl.util.Types.OBJECT && Symbol.iterator in V) {
+    return webidl.converters['sequence<DOMString>'](V);
   }
-  return _webidl.converters.DOMString(V, prefix, argument);
+  return webidl.converters.DOMString(V, prefix, argument);
 };
 
 // This implements the proposal made in https://github.com/whatwg/websockets/issues/42
-_webidl.converters.WebSocketInit = _webidl.dictionaryConverter([{
+webidl.converters.WebSocketInit = webidl.dictionaryConverter([{
   key: 'protocols',
-  converter: _webidl.converters['DOMString or sequence<DOMString>'],
+  converter: webidl.converters['DOMString or sequence<DOMString>'],
   defaultValue: () => []
 }, {
   key: 'dispatcher',
-  converter: _webidl.converters.any,
-  defaultValue: () => _getGlobalDispatcher()
+  converter: webidl.converters.any,
+  defaultValue: () => getGlobalDispatcher()
 }, {
   key: 'headers',
-  converter: _webidl.nullableConverter(_webidl.converters.HeadersInit)
+  converter: webidl.nullableConverter(webidl.converters.HeadersInit)
 }]);
-_webidl.converters['DOMString or sequence<DOMString> or WebSocketInit'] = function (V) {
-  if (_webidl.util.Type(V) === _webidl.util.Types.OBJECT && !(Symbol.iterator in V)) {
-    return _webidl.converters.WebSocketInit(V);
+webidl.converters['DOMString or sequence<DOMString> or WebSocketInit'] = function (V) {
+  if (webidl.util.Type(V) === webidl.util.Types.OBJECT && !(Symbol.iterator in V)) {
+    return webidl.converters.WebSocketInit(V);
   }
   return {
-    protocols: _webidl.converters['DOMString or sequence<DOMString>'](V)
+    protocols: webidl.converters['DOMString or sequence<DOMString>'](V)
   };
 };
-_webidl.converters.WebSocketSendData = function (V) {
-  if (_webidl.util.Type(V) === _webidl.util.Types.OBJECT) {
-    if (_webidl.is.Blob(V)) {
+webidl.converters.WebSocketSendData = function (V) {
+  if (webidl.util.Type(V) === webidl.util.Types.OBJECT) {
+    if (webidl.is.Blob(V)) {
       return V;
     }
-    if (_webidl.is.BufferSource(V)) {
+    if (webidl.is.BufferSource(V)) {
       return V;
     }
   }
-  return _webidl.converters.USVString(V);
+  return webidl.converters.USVString(V);
 };
 const _cjs_default = {
   WebSocket,

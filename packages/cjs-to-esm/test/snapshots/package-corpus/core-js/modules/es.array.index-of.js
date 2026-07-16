@@ -1,10 +1,10 @@
 import $ from "../internals/export";
 import uncurryThis from "../internals/function-uncurry-this-clause";
-import { indexOf as _indexOf } from "../internals/array-includes";
+import _cjs_import from "../internals/array-includes";
 import arrayMethodIsStrict from "../internals/array-method-is-strict";
 /* eslint-disable es/no-array-prototype-indexof -- required for testing */
 
-var $indexOf = _indexOf;
+var $indexOf = _cjs_import.indexOf;
 var nativeIndexOf = uncurryThis([].indexOf);
 var NEGATIVE_ZERO = !!nativeIndexOf && 1 / nativeIndexOf([1], 1, -0) < 0;
 var FORCED = NEGATIVE_ZERO || !arrayMethodIsStrict('indexOf');

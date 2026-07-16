@@ -3,8 +3,8 @@ import call from "../internals/function-call";
 import iterate from "../internals/iterate";
 import isCallable from "../internals/is-callable";
 import aCallable from "../internals/a-callable";
-import { Map as _Map } from "../internals/map-helpers";
-var Map = _Map;
+import _cjs_import from "../internals/map-helpers";
+var Map = _cjs_import.Map;
 
 // `Map.keyBy` method
 // https://github.com/tc39/proposal-collection-methods

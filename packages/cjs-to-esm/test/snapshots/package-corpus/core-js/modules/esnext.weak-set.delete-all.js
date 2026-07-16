@@ -1,7 +1,7 @@
 import $ from "../internals/export";
 import aWeakSet from "../internals/a-weak-set";
-import { remove as _remove } from "../internals/weak-set-helpers";
-var remove = _remove;
+import _cjs_import from "../internals/weak-set-helpers";
+var remove = _cjs_import.remove;
 
 // `WeakSet.prototype.deleteAll` method
 // https://github.com/tc39/proposal-collection-methods

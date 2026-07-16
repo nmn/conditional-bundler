@@ -1,0 +1,14 @@
+{
+  "name": "@bundler/css-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./bundler.mjs",
+  "exports": {
+    ".": "./bundler.mjs"
+  },
+  "dependencies": {
+    "@bundler/shared": "workspace:*",
+    "lightningcss": "^1.29.1"
+  }
+}

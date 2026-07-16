@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { transformAsync } from "@babel/core";
-import cjsToEsmBabelPlugin, { encodeCjsVirtualId } from "../../index.mjs";
+import cjsToEsmBabelPlugin, { createCjsModuleIdentity } from "../../index.mjs";
 
 const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -53,7 +53,10 @@ export async function transformCorpusPackage(corpus) {
         [
           cjsToEsmBabelPlugin,
           {
-            id: encodeCjsVirtualId("snapshot", filePath),
+            filePath,
+            moduleIdentity: createCjsModuleIdentity(filePath),
+            format: "commonjs",
+            envId: "snapshot",
             mode: "production",
           },
         ],

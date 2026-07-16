@@ -1,12 +1,12 @@
-import { charAt as _charAt } from "../internals/string-multibyte";
+import _cjs_import from "../internals/string-multibyte";
 import toString from "../internals/to-string";
-import { set as _set, getterFor as _getterFor } from "../internals/internal-state";
+import InternalStateModule from "../internals/internal-state";
 import defineIterator from "../internals/iterator-define";
 import createIterResultObject from "../internals/create-iter-result-object";
-var charAt = _charAt;
+var charAt = _cjs_import.charAt;
 var STRING_ITERATOR = 'String Iterator';
-var setInternalState = _set;
-var getInternalState = _getterFor(STRING_ITERATOR);
+var setInternalState = InternalStateModule.set;
+var getInternalState = InternalStateModule.getterFor(STRING_ITERATOR);
 
 // `String.prototype[@@iterator]` method
 // https://tc39.es/ecma262/#sec-string.prototype-@@iterator

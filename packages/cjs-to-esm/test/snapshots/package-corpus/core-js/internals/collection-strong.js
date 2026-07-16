@@ -9,11 +9,11 @@ import defineIterator from "../internals/iterator-define";
 import createIterResultObject from "../internals/create-iter-result-object";
 import setSpecies from "../internals/set-species";
 import DESCRIPTORS from "../internals/descriptors";
-import { fastKey as _fastKey } from "../internals/internal-metadata";
-import { set as _set, getterFor as _getterFor } from "../internals/internal-state";
-var fastKey = _fastKey;
-var setInternalState = _set;
-var internalStateGetterFor = _getterFor;
+import _cjs_import from "../internals/internal-metadata";
+import InternalStateModule from "../internals/internal-state";
+var fastKey = _cjs_import.fastKey;
+var setInternalState = InternalStateModule.set;
+var internalStateGetterFor = InternalStateModule.getterFor;
 const _cjs_default = {
   getConstructor: function (wrapper, CONSTRUCTOR_NAME, IS_MAP, ADDER) {
     var Constructor = wrapper(function (that, iterable) {

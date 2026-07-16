@@ -1,9 +1,13 @@
 import * as _cjs_import from "node:buffer";
 import * as net from "node:net";
-import { InvalidArgumentError as _InvalidArgumentError } from "./errors";
+import _cjs_import2 from "./errors";
 const {
   Buffer
 } = _cjs_import;
+const {
+  InvalidArgumentError
+} = _cjs_import2;
+
 /**
  * Parse an address and determine its type
  * @param {string} address - The address to parse
@@ -32,7 +36,7 @@ function parseAddress(address) {
   // Otherwise, treat as domain name
   const domainBuffer = Buffer.from(address, 'utf8');
   if (domainBuffer.length > 255) {
-    throw new _InvalidArgumentError('Domain name too long (max 255 bytes)');
+    throw new InvalidArgumentError('Domain name too long (max 255 bytes)');
   }
   return {
     type: 0x03,
@@ -109,7 +113,7 @@ function buildAddressBuffer(type, addressBuffer, port) {
  */
 function parseResponseAddress(buffer, offset = 0) {
   if (buffer.length < offset + 1) {
-    throw new _InvalidArgumentError('Buffer too small to contain address type');
+    throw new InvalidArgumentError('Buffer too small to contain address type');
   }
   const addressType = buffer[offset];
   let address;
@@ -119,7 +123,7 @@ function parseResponseAddress(buffer, offset = 0) {
       {
         // IPv4
         if (buffer.length < currentOffset + 6) {
-          throw new _InvalidArgumentError('Buffer too small for IPv4 address');
+          throw new InvalidArgumentError('Buffer too small for IPv4 address');
         }
         address = Array.from(buffer.subarray(currentOffset, currentOffset + 4)).join('.');
         currentOffset += 4;
@@ -129,12 +133,12 @@ function parseResponseAddress(buffer, offset = 0) {
       {
         // Domain
         if (buffer.length < currentOffset + 1) {
-          throw new _InvalidArgumentError('Buffer too small for domain length');
+          throw new InvalidArgumentError('Buffer too small for domain length');
         }
         const domainLength = buffer[currentOffset];
         currentOffset += 1;
         if (buffer.length < currentOffset + domainLength + 2) {
-          throw new _InvalidArgumentError('Buffer too small for domain address');
+          throw new InvalidArgumentError('Buffer too small for domain address');
         }
         address = buffer.subarray(currentOffset, currentOffset + domainLength).toString('utf8');
         currentOffset += domainLength;
@@ -144,7 +148,7 @@ function parseResponseAddress(buffer, offset = 0) {
       {
         // IPv6
         if (buffer.length < currentOffset + 18) {
-          throw new _InvalidArgumentError('Buffer too small for IPv6 address');
+          throw new InvalidArgumentError('Buffer too small for IPv6 address');
         }
         // Convert buffer to IPv6 string
         const parts = [];
@@ -157,12 +161,12 @@ function parseResponseAddress(buffer, offset = 0) {
         break;
       }
     default:
-      throw new _InvalidArgumentError(`Invalid address type: ${addressType}`);
+      throw new InvalidArgumentError(`Invalid address type: ${addressType}`);
   }
 
   // Parse port
   if (buffer.length < currentOffset + 2) {
-    throw new _InvalidArgumentError('Buffer too small for port');
+    throw new InvalidArgumentError('Buffer too small for port');
   }
   const port = buffer.readUInt16BE(currentOffset);
   currentOffset += 2;

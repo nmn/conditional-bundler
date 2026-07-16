@@ -1,8 +1,8 @@
 import lengthOfArrayLike from "../internals/length-of-array-like";
-import { aTypedArray as _aTypedArray, exportTypedArrayMethod as _exportTypedArrayMethod, getTypedArrayConstructor as _getTypedArrayConstructor } from "../internals/array-buffer-view-core";
-var aTypedArray = _aTypedArray;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
-var getTypedArrayConstructor = _getTypedArrayConstructor;
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
+var getTypedArrayConstructor = ArrayBufferViewCore.getTypedArrayConstructor;
 
 // `%TypedArray%.prototype.toReversed` method
 // https://tc39.es/ecma262/#sec-%typedarray%.prototype.toreversed

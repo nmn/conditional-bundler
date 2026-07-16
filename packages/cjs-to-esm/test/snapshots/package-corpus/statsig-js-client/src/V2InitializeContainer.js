@@ -1,4 +1,4 @@
-import { _DJB2 as _DJB } from "@statsig/client-core";
+import client_core_1 from "@statsig/client-core";
 export class V2InitializeContainer {
   constructor(_values) {
     this._values = _values;
@@ -73,7 +73,7 @@ export class V2InitializeContainer {
     if (!lookup) {
       return null;
     }
-    return (_b = (_a = lookup[name]) !== null && _a !== void 0 ? _a : lookup[(0, _DJB)(name)]) !== null && _b !== void 0 ? _b : null;
+    return (_b = (_a = lookup[name]) !== null && _a !== void 0 ? _a : lookup[(0, client_core_1._DJB2)(name)]) !== null && _b !== void 0 ? _b : null;
   }
 }
 const _cjs_default = {

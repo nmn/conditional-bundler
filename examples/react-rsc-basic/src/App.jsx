@@ -1,4 +1,6 @@
 import React from "react";
+import basicMark from "./assets/basic-mark.svg";
+import "./showcase.css";
 import { Counter } from "./Counter.jsx";
 import { DraftPad } from "./DraftPad.jsx";
 import { PreferenceSwitch } from "./PreferenceSwitch.jsx";
@@ -7,6 +9,13 @@ export default function App() {
   return (
     <main className="shell">
       <section className="hero">
+        <img
+          className="asset-proof-mark"
+          src={basicMark.src}
+          width={basicMark.width}
+          height={basicMark.height}
+          alt=""
+        />
         <p className="eyebrow">conditional-bundler / RSC</p>
         <h1>Server components with a conditional client branch.</h1>
         <p className="lede">

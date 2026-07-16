@@ -1,11 +1,11 @@
 import $ from "../internals/export";
-import { charAt as _charAt } from "../internals/string-multibyte";
+import _cjs_import from "../internals/string-multibyte";
 import requireObjectCoercible from "../internals/require-object-coercible";
 import toIntegerOrInfinity from "../internals/to-integer-or-infinity";
 import toString from "../internals/to-string";
 // TODO: Remove from `core-js@4`
 
-var charAt = _charAt;
+var charAt = _cjs_import.charAt;
 // `String.prototype.at` method
 // https://github.com/mathiasbynens/String.prototype.at
 $({

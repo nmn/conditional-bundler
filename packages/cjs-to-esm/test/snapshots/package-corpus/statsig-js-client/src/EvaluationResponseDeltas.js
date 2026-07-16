@@ -1,7 +1,7 @@
-import { _typedJsonParse, _DJB2Object } from "@statsig/client-core";
+import client_core_1 from "@statsig/client-core";
 const MAX_DELTAS_SORT_DEPTH = 2;
 export function _resolveDeltasResponse(cache, deltasString) {
-  const deltas = (0, _typedJsonParse)(deltasString, 'checksum', 'DeltasEvaluationResponse');
+  const deltas = (0, client_core_1._typedJsonParse)(deltasString, 'checksum', 'DeltasEvaluationResponse');
   if (!deltas) {
     return {
       hadBadDeltaChecksum: true
@@ -9,7 +9,7 @@ export function _resolveDeltasResponse(cache, deltasString) {
   }
   const merged = _mergeDeltasIntoCache(cache, deltas);
   const resolved = _handleDeletedEntries(merged);
-  const actualChecksum = (0, _DJB2Object)({
+  const actualChecksum = (0, client_core_1._DJB2Object)({
     feature_gates: resolved.feature_gates,
     dynamic_configs: resolved.dynamic_configs,
     layer_configs: resolved.layer_configs

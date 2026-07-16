@@ -8,9 +8,9 @@ import getIterator from "../internals/get-iterator";
 import getIteratorMethod from "../internals/get-iterator-method";
 import isArrayIteratorMethod from "../internals/is-array-iterator-method";
 import isBigIntArray from "../internals/is-big-int-array";
-import { aTypedArrayConstructor as _aTypedArrayConstructor } from "../internals/array-buffer-view-core";
+import _cjs_import from "../internals/array-buffer-view-core";
 import toBigInt from "../internals/to-big-int";
-var aTypedArrayConstructor = _aTypedArrayConstructor;
+var aTypedArrayConstructor = _cjs_import.aTypedArrayConstructor;
 const _cjs_default = function from(source /* , mapfn, thisArg */) {
   var C = aConstructor(this);
   var argumentsLength = arguments.length;

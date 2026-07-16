@@ -1,10 +1,10 @@
 import $ from "../internals/export";
-import { keys as _keys, toKey as _toKey } from "../internals/reflect-metadata";
+import ReflectMetadataModule from "../internals/reflect-metadata";
 import anObject from "../internals/an-object";
 // TODO: Remove from `core-js@4`
 
-var ordinaryOwnMetadataKeys = _keys;
-var toMetadataKey = _toKey;
+var ordinaryOwnMetadataKeys = ReflectMetadataModule.keys;
+var toMetadataKey = ReflectMetadataModule.toKey;
 
 // `Reflect.getOwnMetadataKeys` method
 // https://github.com/rbuckton/reflect-metadata

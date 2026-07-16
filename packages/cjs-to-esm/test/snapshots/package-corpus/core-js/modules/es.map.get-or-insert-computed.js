@@ -1,10 +1,10 @@
 import $ from "../internals/export";
 import aCallable from "../internals/a-callable";
-import { get as _get, has as _has, set as _set } from "../internals/map-helpers";
+import MapHelpers from "../internals/map-helpers";
 import IS_PURE from "../internals/is-pure";
-var get = _get;
-var has = _has;
-var set = _set;
+var get = MapHelpers.get;
+var has = MapHelpers.has;
+var set = MapHelpers.set;
 
 // `Map.prototype.getOrInsertComputed` method
 // https://tc39.es/ecma262/#sec-map.prototype.getorinsertcomputed

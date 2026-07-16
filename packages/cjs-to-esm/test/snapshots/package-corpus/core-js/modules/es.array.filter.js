@@ -1,7 +1,7 @@
 import $ from "../internals/export";
-import { filter as _filter } from "../internals/array-iteration";
+import _cjs_import from "../internals/array-iteration";
 import arrayMethodHasSpeciesSupport from "../internals/array-method-has-species-support";
-var $filter = _filter;
+var $filter = _cjs_import.filter;
 var HAS_SPECIES_SUPPORT = arrayMethodHasSpeciesSupport('filter');
 
 // `Array.prototype.filter` method

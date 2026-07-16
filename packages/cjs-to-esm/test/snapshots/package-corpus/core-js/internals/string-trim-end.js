@@ -1,6 +1,6 @@
-import { end as _end } from "../internals/string-trim";
+import _cjs_import from "../internals/string-trim";
 import forcedStringTrimMethod from "../internals/string-trim-forced";
-var $trimEnd = _end;
+var $trimEnd = _cjs_import.end;
 // `String.prototype.{ trimEnd, trimRight }` method
 // https://tc39.es/ecma262/#sec-string.prototype.trimend
 // https://tc39.es/ecma262/#String.prototype.trimright

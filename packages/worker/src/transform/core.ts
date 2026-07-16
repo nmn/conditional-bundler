@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import { parse, type ParserPlugin } from "@babel/parser";
 import traverseModule, { type NodePath, type Binding } from "@babel/traverse";
 import generateModule from "@babel/generator";
@@ -17,16 +15,9 @@ import type {
   CellRecord,
   FileRecord,
   CellExternalDep,
+  DependencyTarget,
 } from "@bundler/shared";
-import {
-  importConstKey,
-  filePrefix,
-  findPkgRoot,
-  readPkgSafe,
-  normalizePosixPath,
-  contentHash,
-  packagePathIdentity,
-} from "@bundler/shared";
+import { importConstKey, filePrefix, contentHash } from "@bundler/shared";
 import { modulePrefixIdentity } from "../module-identity.js";
 
 export type CoreTransformOptions = {
@@ -42,9 +33,8 @@ export type CoreTransformOptions = {
 type ResolvedImportInfo = {
   source: string;
   request: string;
-  moduleId?: string | null;
   prefixModuleId?: string | null;
-  external: boolean;
+  target: DependencyTarget;
   pkg: TransformInput["pkg"];
   relPath: string;
 };
@@ -121,7 +111,7 @@ function scanImportRequestsFromAst(ast: t.File): CoreImportRequest[] {
     request: string,
     importAttributes?: Record<string, string>,
   ) => {
-    const key = toImportResolutionKey(kind, request);
+    const key = toImportResolutionKey(kind, request, importAttributes);
     requests.set(key, { key, kind, request, importAttributes });
   };
 
@@ -135,7 +125,11 @@ function scanImportRequestsFromAst(ast: t.File): CoreImportRequest[] {
         Object.keys(attributes).length > 0 ? attributes : undefined,
       );
       if (attributes.else) {
-        add("conditional-else", attributes.else);
+        add(
+          "conditional-else",
+          attributes.else,
+          attributes.type ? { type: attributes.type } : undefined,
+        );
       }
     },
     ExportNamedDeclaration(path: NodePath<t.ExportNamedDeclaration>) {
@@ -181,8 +175,8 @@ export function transformWithCore(
     {
       source: string;
       request: string;
-      moduleId?: string | null;
-      external: boolean;
+      hashKey: string;
+      target: DependencyTarget;
     }
   >();
 
@@ -207,13 +201,14 @@ export function transformWithCore(
   ).default ??
     (generateModule as unknown as typeof import("@babel/generator").default)) as typeof import("@babel/generator").default;
 
-  const normalizedPath = normalizePosixPath(input.realPath);
-  const relPath = path.posix.relative(input.pkg.root, normalizedPath);
   const moduleIdentity = transformModuleIdentity(input);
+  const canonical = parseCanonicalPath(
+    input.symbolIdentity ?? input.canonicalPath ?? moduleIdentity,
+  );
   const prefix = filePrefix(
-    input.pkg.name,
-    input.pkg.version,
-    modulePrefixIdentity(input.id, relPath),
+    canonical.pkg.name,
+    canonical.pkg.version,
+    canonical.relativePath,
   );
 
   let hasTopLevelAwait = false;
@@ -258,7 +253,7 @@ export function transformWithCore(
   const exportsLocal: ExportLocal[] = [];
   const externalImportLocals = new Set<string>();
   for (const entry of importMeta.imports) {
-    if (!entry.external || entry.kind !== "value") {
+    if (entry.target.kind !== "runtime" || entry.kind !== "value") {
       continue;
     }
     for (const spec of entry.specifiers) {
@@ -306,12 +301,12 @@ export function transformWithCore(
             arg.value,
             "dynamic-import",
           );
-          if (resolved.external) {
+          if (resolved.target.kind === "runtime") {
             dynamicImportMap.set(arg.value, {
               source: arg.value,
               request: arg.value,
-              moduleId: null,
-              external: true,
+              hashKey: arg.value,
+              target: resolved.target,
             });
             return;
           }
@@ -323,8 +318,8 @@ export function transformWithCore(
           dynamicImportMap.set(key, {
             source: resolved.relPath,
             request: arg.value,
-            moduleId: resolved.moduleId,
-            external: false,
+            hashKey: `__IMPORT_${key}`,
+            target: resolved.target,
           });
           parentPath.replaceWith(
             t.callExpression(t.identifier(`__IMPORT_${key}`), []),
@@ -381,8 +376,7 @@ export function transformWithCore(
             reexportsNamed.push({
               source: resolved.relPath,
               request,
-              moduleId: resolved.moduleId,
-              external: resolved.external,
+              target: resolved.target,
               imported: "*",
               exported,
               isNamespace: true,
@@ -396,15 +390,14 @@ export function transformWithCore(
             reexportsNamed.push({
               source: resolved.relPath,
               request,
-              moduleId: resolved.moduleId,
-              external: resolved.external,
+              target: resolved.target,
               imported,
               exported,
               sourceOrder,
             });
           }
         }
-        if (!resolved.external) {
+        if (resolved.target.kind === "file") {
           path.remove();
         }
         return;
@@ -511,14 +504,13 @@ export function transformWithCore(
         reexportsNamed.push({
           source: resolved.relPath,
           request,
-          moduleId: resolved.moduleId,
-          external: resolved.external,
+          target: resolved.target,
           imported: "*",
           exported: exported.name,
           isNamespace: true,
           sourceOrder,
         });
-        if (!resolved.external) {
+        if (resolved.target.kind === "file") {
           path.remove();
         }
         return;
@@ -526,11 +518,10 @@ export function transformWithCore(
       exportStars.push({
         source: resolved.relPath,
         request,
-        moduleId: resolved.moduleId,
-        external: resolved.external,
+        target: resolved.target,
         sourceOrder,
       });
-      if (!resolved.external) {
+      if (resolved.target.kind === "file") {
         path.remove();
       }
     },
@@ -558,13 +549,12 @@ export function transformWithCore(
           input.code,
         );
   const dynamicImports: DynamicImport[] = Array.from(
-    dynamicImportMap.entries(),
-  ).map(([hashKey, entry]) => ({
-    hashKey: entry.external ? hashKey : `__IMPORT_${hashKey}`,
+    dynamicImportMap.values(),
+  ).map((entry) => ({
+    hashKey: entry.hashKey,
     source: entry.source,
     request: entry.request,
-    moduleId: entry.moduleId,
-    external: entry.external,
+    target: entry.target,
   }));
 
   let transformedCode = output?.code ?? "";
@@ -596,15 +586,19 @@ export function transformWithCore(
     (left, right) => left.sourceOrder - right.sourceOrder,
   );
   const fileRecord: FileRecord = {
-    id: input.id ?? input.realPath,
+    id: moduleIdentity,
     moduleIdentity,
-    filePath: input.realPath,
+    filePath: input.canonicalPath ?? moduleIdentity,
     prefix,
     contentHash: contentHash(input.code),
     envs: ["default"],
     codeByEnv: {},
     mapByEnv: {},
-    pkg: input.pkg,
+    pkg: {
+      name: input.pkg.name,
+      version: input.pkg.version,
+      root: ".",
+    },
     imports,
     reexportsNamed,
     exportStars,
@@ -664,14 +658,9 @@ function collectImports(
       const request = path.node.source.value;
       const attributes = readImportAttributes(path.node);
       const typeAttr = attributes.type;
-      if (typeAttr && typeAttr !== "json") {
+      if (typeAttr && !options.importAttrAllow.includes(typeAttr)) {
         throw new Error(
-          `E_IMPORT_ATTRS: Only { type: "json" } import attributes are supported (v1) at ${input.realPath}`,
-        );
-      }
-      if (typeAttr === "json" && !options.importAttrAllow.includes("json")) {
-        throw new Error(
-          `E_IMPORT_ATTRS: Only { type: "json" } import attributes are supported (v1) at ${input.realPath}`,
+          `E_IMPORT_ATTRS: Unsupported import attribute type '${typeAttr}' at ${input.realPath}`,
         );
       }
 
@@ -681,23 +670,27 @@ function collectImports(
         input,
         request,
         conditionAttr ? "conditional-import" : "import",
+        attributes,
       );
       let condition: ConditionalImport | undefined;
       if (conditionAttr) {
         const conditionExpr = parseCondition(conditionAttr);
         const elseResolved = elseAttr
-          ? resolveImportForHash(input, elseAttr, "conditional-else")
+          ? resolveImportForHash(
+              input,
+              elseAttr,
+              "conditional-else",
+              typeAttr ? { type: typeAttr } : undefined,
+            )
           : undefined;
         condition = {
           source: resolved.relPath,
           request,
-          moduleId: resolved.moduleId,
-          external: resolved.external,
+          target: resolved.target,
           condition: conditionExpr,
           elseSource: elseResolved?.relPath,
           elseRequest: elseAttr,
-          elseModuleId: elseResolved?.moduleId,
-          elseExternal: elseResolved?.external,
+          elseTarget: elseResolved?.target,
         };
         conditionalImports.push(condition);
         delete attributes.condition;
@@ -745,8 +738,7 @@ function collectImports(
       imports.push({
         source: resolved.relPath,
         request,
-        moduleId: resolved.moduleId,
-        external: resolved.external,
+        target: resolved.target,
         kind,
         isNamespace,
         isDefault,
@@ -855,13 +847,14 @@ function buildConditionalBindingCells(
   let sourceOrder = -1000;
 
   for (const entry of imports) {
-    if (!entry.condition || entry.external) {
+    if (!entry.condition || entry.target.kind === "runtime") {
       continue;
     }
     const resolved = resolveImportForHash(
       input,
       entry.request ?? entry.source,
       "conditional-import",
+      entry.attributes ?? undefined,
     );
     const depPrefix = resolvedImportPrefix(resolved);
     const conditionalImport = conditionalImports.find(
@@ -889,14 +882,19 @@ function buildConditionalBindingCells(
           kind: "import",
           source: entry.source,
           request: entry.request,
+          target: entry.target,
           imported: "*",
         },
       ];
-      if (conditionalImport?.elseSource && !conditionalImport.elseExternal) {
+      if (
+        conditionalImport?.elseSource &&
+        conditionalImport.elseTarget?.kind === "file"
+      ) {
         const elseResolved = resolveImportForHash(
           input,
           conditionalImport.elseRequest ?? conditionalImport.elseSource,
           "conditional-else",
+          entry.attributes ?? undefined,
         );
         const elsePrefix = resolvedImportPrefix(elseResolved);
         fallback = `__NS__${elsePrefix}`;
@@ -904,6 +902,7 @@ function buildConditionalBindingCells(
           kind: "import",
           source: conditionalImport.elseSource,
           request: conditionalImport.elseRequest,
+          target: conditionalImport.elseTarget,
           imported: "*",
         });
       }
@@ -942,14 +941,19 @@ function buildConditionalBindingCells(
           kind: "import",
           source: entry.source,
           request: entry.request,
+          target: entry.target,
           imported: spec.imported,
         },
       ];
-      if (conditionalImport?.elseSource && !conditionalImport.elseExternal) {
+      if (
+        conditionalImport?.elseSource &&
+        conditionalImport.elseTarget?.kind === "file"
+      ) {
         const elseResolved = resolveImportForHash(
           input,
           conditionalImport.elseRequest ?? conditionalImport.elseSource,
           "conditional-else",
+          entry.attributes ?? undefined,
         );
         const elsePrefix = resolvedImportPrefix(elseResolved);
         fallback = conditionalImportTarget(entry, spec, elsePrefix);
@@ -957,6 +961,7 @@ function buildConditionalBindingCells(
           kind: "import",
           source: conditionalImport.elseSource,
           request: conditionalImport.elseRequest,
+          target: conditionalImport.elseTarget,
           imported: spec.imported,
         });
       }
@@ -995,7 +1000,7 @@ function rewriteImportsInAst(
   }
 
   for (const entry of imports) {
-    if (entry.kind !== "value" || entry.external) {
+    if (entry.kind !== "value" || entry.target.kind === "runtime") {
       continue;
     }
 
@@ -1003,6 +1008,7 @@ function rewriteImportsInAst(
       input,
       entry.request ?? entry.source,
       entry.condition ? "conditional-import" : "import",
+      entry.attributes ?? undefined,
     );
     const depPrefix = resolvedImportPrefix(resolved);
 
@@ -1180,7 +1186,12 @@ function optionsEmbedCellSourcesContent(
 }
 
 function transformModuleIdentity(input: TransformInput): string {
-  return input.moduleIdentity ?? packagePathIdentity(input.pkg, input.realPath);
+  if (!input.moduleIdentity) {
+    throw new Error(
+      "A portable module identity is required for transformation.",
+    );
+  }
+  return input.moduleIdentity;
 }
 
 function lowerHmrCellStatements(
@@ -1299,13 +1310,18 @@ function createExternalSymbolMap(
   const externalSymbols = new Map<string, CellExternalDep>();
 
   for (const entry of imports) {
-    if (entry.kind !== "value" || entry.condition || entry.external) {
+    if (
+      entry.kind !== "value" ||
+      entry.condition ||
+      entry.target.kind === "runtime"
+    ) {
       continue;
     }
     const resolved = resolveImportForHash(
       input,
       entry.request ?? entry.source,
       "import",
+      entry.attributes ?? undefined,
     );
     const depPrefix = resolvedImportPrefix(resolved);
 
@@ -1315,6 +1331,7 @@ function createExternalSymbolMap(
           kind: "import",
           source: entry.source,
           request: entry.request,
+          target: entry.target,
           imported: "*",
         });
         continue;
@@ -1325,6 +1342,7 @@ function createExternalSymbolMap(
           kind: "import",
           source: entry.source,
           request: entry.request,
+          target: entry.target,
           imported: spec.imported,
         });
       }
@@ -1338,17 +1356,23 @@ function createExternalSymbolMap(
         kind: "import",
         source: entry.source,
         request: entry.request,
+        target: entry.target,
         imported: importName,
       });
     }
   }
 
   for (const entry of imports) {
-    if (entry.kind === "side-effect" && !entry.condition && !entry.external) {
+    if (
+      entry.kind === "side-effect" &&
+      !entry.condition &&
+      entry.target.kind === "file"
+    ) {
       externalSymbols.set(`${prefix}#side-effect:${entry.source}`, {
         kind: "side-effect",
         source: entry.source,
         request: entry.request,
+        target: entry.target,
       });
     }
   }
@@ -1577,8 +1601,9 @@ function removeImportDeclarations(
         input,
         path.node.source.value,
         attributes.condition ? "conditional-import" : "import",
+        attributes,
       );
-      if (!resolved.external) {
+      if (resolved.target.kind === "file") {
         path.remove();
       }
     },
@@ -1594,54 +1619,56 @@ function resolveImportForHash(
     | "reexport"
     | "conditional-import"
     | "conditional-else",
+  importAttributes?: Record<string, string>,
 ): ResolvedImportInfo {
   const resolution =
-    input.resolvedImports?.[toImportResolutionKey(kind, source)];
-  if (resolution?.external) {
+    input.resolvedImports?.[
+      toImportResolutionKey(kind, source, importAttributes)
+    ];
+  if (!resolution) {
+    throw new Error(
+      `Missing resolved dependency '${source}' for '${input.moduleIdentity ?? input.canonicalPath ?? "module"}'.`,
+    );
+  }
+  if (resolution.target.kind === "runtime") {
     return {
       source,
       request: source,
-      moduleId: null,
       prefixModuleId: null,
-      external: true,
+      target: resolution.target,
       pkg: input.pkg,
       relPath: source,
     };
   }
-
-  const resolvedPath = resolution?.filePath
-    ? normalizePosixPath(resolution.filePath)
-    : (resolveImportPath(input.realPath, source) ??
-      path.resolve(path.dirname(input.realPath), source));
-  const prefixModuleId = resolution?.id ?? resolvedPath;
-
-  if (source.startsWith(".")) {
-    const relPath = path.posix.relative(input.pkg.root, resolvedPath);
-    return {
-      source: relPath,
-      request: source,
-      moduleId:
-        resolution?.moduleIdentity ??
-        packagePathIdentity(input.pkg, resolvedPath),
-      prefixModuleId,
-      external: false,
-      pkg: input.pkg,
-      relPath,
-    };
-  }
-
-  const pkgRoot = findPkgRoot(resolvedPath) ?? path.dirname(resolvedPath);
-  const pkg = readPkgSafe(pkgRoot);
-  const relPath = path.posix.relative(pkg.root, resolvedPath);
+  const parsed = parseCanonicalPath(resolution.target.canonicalPath);
   return {
-    source: relPath,
+    source: parsed.relativePath,
     request: source,
-    moduleId:
-      resolution?.moduleIdentity ?? packagePathIdentity(pkg, resolvedPath),
-    prefixModuleId,
-    external: false,
-    pkg,
-    relPath,
+    prefixModuleId: resolution.target.moduleId,
+    target: resolution.target,
+    pkg: { ...parsed.pkg, root: "." },
+    relPath: parsed.relativePath,
+  };
+}
+
+function parseCanonicalPath(canonicalPath: string): {
+  pkg: { name: string; version: string };
+  relativePath: string;
+} {
+  const separator = canonicalPath.indexOf("::");
+  const packagePart = separator === -1 ? "" : canonicalPath.slice(0, separator);
+  const versionSeparator = packagePart.lastIndexOf("@");
+  if (separator === -1 || versionSeparator < 0) {
+    throw new Error(
+      `Invalid canonical dependency identity '${canonicalPath}'.`,
+    );
+  }
+  return {
+    pkg: {
+      name: packagePart.slice(0, versionSeparator),
+      version: packagePart.slice(versionSeparator + 1),
+    },
+    relativePath: canonicalPath.slice(separator + 2),
   };
 }
 
@@ -1653,38 +1680,10 @@ function toImportResolutionKey(
     | "conditional-import"
     | "conditional-else",
   request: string,
+  importAttributes?: Record<string, string>,
 ): string {
-  return `${kind}:${request}`;
-}
-
-function resolveImportPath(fromPath: string, source: string): string | null {
-  if (source.startsWith(".")) {
-    const base = path.resolve(path.dirname(fromPath), source);
-    return resolveWithExtensions(base) ?? base;
-  }
-  try {
-    return require.resolve(source, { paths: [path.dirname(fromPath)] });
-  } catch {
-    return null;
-  }
-}
-
-function resolveWithExtensions(filePath: string): string | null {
-  const extensions = [".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs"];
-  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-    return filePath;
-  }
-  for (const ext of extensions) {
-    const candidate = filePath + ext;
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  const indexPath = path.join(filePath, "index.js");
-  if (fs.existsSync(indexPath)) {
-    return indexPath;
-  }
-  return null;
+  const type = importAttributes?.type;
+  return `${kind}:${request}${type ? `:type=${type}` : ""}`;
 }
 
 function isImportMetaUrl(node: t.MemberExpression): boolean {

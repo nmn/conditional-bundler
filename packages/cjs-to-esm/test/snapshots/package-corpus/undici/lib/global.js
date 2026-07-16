@@ -77,6 +77,3 @@ if (!__cjs_default__) {
   __cjs_cache__.set("undici@8.7.0::lib/global.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
-export const getGlobalDispatcher = __cjs_default__["getGlobalDispatcher"];
-export const installedExports = __cjs_default__["installedExports"];
-export const setGlobalDispatcher = __cjs_default__["setGlobalDispatcher"];

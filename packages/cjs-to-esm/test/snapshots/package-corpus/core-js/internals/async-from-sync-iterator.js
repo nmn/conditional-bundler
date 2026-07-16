@@ -3,15 +3,15 @@ import anObject from "../internals/an-object";
 import create from "../internals/object-create";
 import getMethod from "../internals/get-method";
 import defineBuiltIns from "../internals/define-built-ins";
-import { set as _set, getterFor as _getterFor } from "../internals/internal-state";
+import InternalStateModule from "../internals/internal-state";
 import iteratorClose from "../internals/iterator-close";
 import getBuiltIn from "../internals/get-built-in";
 import AsyncIteratorPrototype from "../internals/async-iterator-prototype";
 import createIterResultObject from "../internals/create-iter-result-object";
 var Promise = getBuiltIn('Promise');
 var ASYNC_FROM_SYNC_ITERATOR = 'AsyncFromSyncIterator';
-var setInternalState = _set;
-var getInternalState = _getterFor(ASYNC_FROM_SYNC_ITERATOR);
+var setInternalState = InternalStateModule.set;
+var getInternalState = InternalStateModule.getterFor(ASYNC_FROM_SYNC_ITERATOR);
 var asyncFromSyncIteratorContinuation = function (result, resolve, reject, syncIterator, closeOnRejection) {
   var done = result.done;
   Promise.resolve(result.value).then(function (value) {

@@ -3,12 +3,12 @@ import anObject from "../internals/an-object";
 import numberIsFinite from "../internals/number-is-finite";
 import createIteratorConstructor from "../internals/iterator-create-constructor";
 import createIterResultObject from "../internals/create-iter-result-object";
-import { set as _set, getterFor as _getterFor } from "../internals/internal-state";
+import InternalStateModule from "../internals/internal-state";
 var SEEDED_RANDOM = 'Seeded Random';
 var SEEDED_RANDOM_GENERATOR = SEEDED_RANDOM + ' Generator';
 var SEED_TYPE_ERROR = 'Math.seededPRNG() argument should have a "seed" field with a finite value.';
-var setInternalState = _set;
-var getInternalState = _getterFor(SEEDED_RANDOM_GENERATOR);
+var setInternalState = InternalStateModule.set;
+var getInternalState = InternalStateModule.getterFor(SEEDED_RANDOM_GENERATOR);
 var $TypeError = TypeError;
 var $SeededRandomGenerator = createIteratorConstructor(function SeededRandomGenerator(seed) {
   setInternalState(this, {

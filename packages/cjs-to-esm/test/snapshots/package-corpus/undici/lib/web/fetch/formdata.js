@@ -1,19 +1,31 @@
-import { iteratorMixin as _iteratorMixin } from "./util";
-import { kEnumerableProperty as _kEnumerableProperty } from "../../core/util";
-import { webidl as _webidl } from "../webidl";
+import _cjs_import from "./util";
+import _cjs_import2 from "../../core/util";
+import _cjs_import3 from "../webidl";
 import * as nodeUtil from "node:util";
-import { runtimeFeatures as _runtimeFeatures } from "../../util/runtime-features.js";
-import * as _cjs_import from "node:crypto";
-const random = _runtimeFeatures.has('crypto') ? _cjs_import.randomInt : max => Math.floor(Math.random() * max);
+import _cjs_import4 from "../../util/runtime-features.js";
+import * as _cjs_import5 from "node:crypto";
+const {
+  iteratorMixin
+} = _cjs_import;
+const {
+  kEnumerableProperty
+} = _cjs_import2;
+const {
+  webidl
+} = _cjs_import3;
+const {
+  runtimeFeatures
+} = _cjs_import4;
+const random = runtimeFeatures.has('crypto') ? _cjs_import5.randomInt : max => Math.floor(Math.random() * max);
 
 // https://xhr.spec.whatwg.org/#formdata
 class FormData {
   #state = [];
   #boundary = null;
   constructor(form = undefined) {
-    _webidl.util.markAsUncloneable(this);
+    webidl.util.markAsUncloneable(this);
     if (form !== undefined) {
-      throw _webidl.errors.conversionFailed({
+      throw webidl.errors.conversionFailed({
         prefix: 'FormData constructor',
         argument: 'Argument 1',
         types: ['undefined']
@@ -21,17 +33,17 @@ class FormData {
     }
   }
   append(name, value, filename = undefined) {
-    _webidl.brandCheck(this, FormData);
+    webidl.brandCheck(this, FormData);
     const prefix = 'FormData.append';
-    _webidl.argumentLengthCheck(arguments, 2, prefix);
-    name = _webidl.converters.USVString(name);
-    if (arguments.length === 3 || _webidl.is.Blob(value)) {
-      value = _webidl.converters.Blob(value, prefix, 'value');
+    webidl.argumentLengthCheck(arguments, 2, prefix);
+    name = webidl.converters.USVString(name);
+    if (arguments.length === 3 || webidl.is.Blob(value)) {
+      value = webidl.converters.Blob(value, prefix, 'value');
       if (filename !== undefined) {
-        filename = _webidl.converters.USVString(filename);
+        filename = webidl.converters.USVString(filename);
       }
     } else {
-      value = _webidl.converters.USVString(value);
+      value = webidl.converters.USVString(value);
     }
 
     // 1. Let value be value if given; otherwise blobValue.
@@ -44,20 +56,20 @@ class FormData {
     this.#state.push(entry);
   }
   delete(name) {
-    _webidl.brandCheck(this, FormData);
+    webidl.brandCheck(this, FormData);
     const prefix = 'FormData.delete';
-    _webidl.argumentLengthCheck(arguments, 1, prefix);
-    name = _webidl.converters.USVString(name);
+    webidl.argumentLengthCheck(arguments, 1, prefix);
+    name = webidl.converters.USVString(name);
 
     // The delete(name) method steps are to remove all entries whose name
     // is name from this’s entry list.
     this.#state = this.#state.filter(entry => entry.name !== name);
   }
   get(name) {
-    _webidl.brandCheck(this, FormData);
+    webidl.brandCheck(this, FormData);
     const prefix = 'FormData.get';
-    _webidl.argumentLengthCheck(arguments, 1, prefix);
-    name = _webidl.converters.USVString(name);
+    webidl.argumentLengthCheck(arguments, 1, prefix);
+    name = webidl.converters.USVString(name);
 
     // 1. If there is no entry whose name is name in this’s entry list,
     // then return null.
@@ -71,10 +83,10 @@ class FormData {
     return this.#state[idx].value;
   }
   getAll(name) {
-    _webidl.brandCheck(this, FormData);
+    webidl.brandCheck(this, FormData);
     const prefix = 'FormData.getAll';
-    _webidl.argumentLengthCheck(arguments, 1, prefix);
-    name = _webidl.converters.USVString(name);
+    webidl.argumentLengthCheck(arguments, 1, prefix);
+    name = webidl.converters.USVString(name);
 
     // 1. If there is no entry whose name is name in this’s entry list,
     // then return the empty list.
@@ -83,27 +95,27 @@ class FormData {
     return this.#state.filter(entry => entry.name === name).map(entry => entry.value);
   }
   has(name) {
-    _webidl.brandCheck(this, FormData);
+    webidl.brandCheck(this, FormData);
     const prefix = 'FormData.has';
-    _webidl.argumentLengthCheck(arguments, 1, prefix);
-    name = _webidl.converters.USVString(name);
+    webidl.argumentLengthCheck(arguments, 1, prefix);
+    name = webidl.converters.USVString(name);
 
     // The has(name) method steps are to return true if there is an entry
     // whose name is name in this’s entry list; otherwise false.
     return this.#state.findIndex(entry => entry.name === name) !== -1;
   }
   set(name, value, filename = undefined) {
-    _webidl.brandCheck(this, FormData);
+    webidl.brandCheck(this, FormData);
     const prefix = 'FormData.set';
-    _webidl.argumentLengthCheck(arguments, 2, prefix);
-    name = _webidl.converters.USVString(name);
-    if (arguments.length === 3 || _webidl.is.Blob(value)) {
-      value = _webidl.converters.Blob(value, prefix, 'value');
+    webidl.argumentLengthCheck(arguments, 2, prefix);
+    name = webidl.converters.USVString(name);
+    if (arguments.length === 3 || webidl.is.Blob(value)) {
+      value = webidl.converters.Blob(value, prefix, 'value');
       if (filename !== undefined) {
-        filename = _webidl.converters.USVString(filename);
+        filename = webidl.converters.USVString(filename);
       }
     } else {
-      value = _webidl.converters.USVString(value);
+      value = webidl.converters.USVString(value);
     }
 
     // The set(name, value) and set(name, blobValue, filename) method steps
@@ -183,14 +195,14 @@ const {
 Reflect.deleteProperty(FormData, 'getFormDataState');
 Reflect.deleteProperty(FormData, 'setFormDataState');
 Reflect.deleteProperty(FormData, 'getFormDataBoundary');
-_iteratorMixin('FormData', FormData, getFormDataState, 'name', 'value');
+iteratorMixin('FormData', FormData, getFormDataState, 'name', 'value');
 Object.defineProperties(FormData.prototype, {
-  append: _kEnumerableProperty,
-  delete: _kEnumerableProperty,
-  get: _kEnumerableProperty,
-  getAll: _kEnumerableProperty,
-  has: _kEnumerableProperty,
-  set: _kEnumerableProperty,
+  append: kEnumerableProperty,
+  delete: kEnumerableProperty,
+  get: kEnumerableProperty,
+  getAll: kEnumerableProperty,
+  has: kEnumerableProperty,
+  set: kEnumerableProperty,
   [Symbol.toStringTag]: {
     value: 'FormData',
     configurable: true
@@ -217,7 +229,7 @@ function makeEntry(name, value, filename) {
 
     // 1. If value is not a File object, then set value to a new File object,
     //    representing the same bytes, whose name attribute value is "blob"
-    if (!_webidl.is.File(value)) {
+    if (!webidl.is.File(value)) {
       value = new File([value], 'blob', {
         type: value.type
       });
@@ -241,7 +253,7 @@ function makeEntry(name, value, filename) {
     value
   };
 }
-_webidl.is.FormData = _webidl.util.MakeTypeAssertion(FormData);
+webidl.is.FormData = webidl.util.MakeTypeAssertion(FormData);
 const _cjs_default = {
   FormData,
   makeEntry,

@@ -1,8 +1,11 @@
-import { LEVEL as _LEVEL } from "triple-beam";
-import { npm as _npm } from "./config";
+import _cjs_import from "triple-beam";
+import config from "./config";
 import Logger from "./logger";
-import _cjs_import from "@dabh/diagnostics";
-const debug = _cjs_import('winston:create-logger');
+import _cjs_import2 from "@dabh/diagnostics";
+const {
+  LEVEL
+} = _cjs_import;
+const debug = _cjs_import2('winston:create-logger');
 function isLevelEnabledFunctionName(level) {
   return 'is' + level.charAt(0).toUpperCase() + level.slice(1) + 'Enabled';
 }
@@ -17,7 +20,7 @@ const _cjs_default = function (opts = {}) {
   //
   // Default levels: npm
   //
-  opts.levels = opts.levels || _npm.levels;
+  opts.levels = opts.levels || config.npm.levels;
 
   /**
    * DerivedLogger to attach the logs level methods.
@@ -68,7 +71,7 @@ const _cjs_default = function (opts = {}) {
         const info = msg && msg.message && msg || {
           message: msg
         };
-        info.level = info[_LEVEL] = level;
+        info.level = info[LEVEL] = level;
         self._addDefaultMeta(info);
         self.write(info);
         return this || logger;

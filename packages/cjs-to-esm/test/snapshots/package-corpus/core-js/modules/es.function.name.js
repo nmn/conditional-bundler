@@ -1,8 +1,8 @@
 import DESCRIPTORS from "../internals/descriptors";
-import { EXISTS as _EXISTS } from "../internals/function-name";
+import _cjs_import from "../internals/function-name";
 import uncurryThis from "../internals/function-uncurry-this";
 import defineBuiltInAccessor from "../internals/define-built-in-accessor";
-var FUNCTION_NAME_EXISTS = _EXISTS;
+var FUNCTION_NAME_EXISTS = _cjs_import.EXISTS;
 var FunctionPrototype = Function.prototype;
 var functionToString = uncurryThis(FunctionPrototype.toString);
 var nameRE = /function\b(?:\s|\/\*[\S\s]*?\*\/|\/\/[^\n\r]*[\n\r]+)*([^\s(/]*)/;

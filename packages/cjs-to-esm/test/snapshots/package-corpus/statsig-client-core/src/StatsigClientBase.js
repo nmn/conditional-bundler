@@ -1,13 +1,13 @@
-import { _getStatsigGlobal } from "./$_StatsigGlobal";
-import { ErrorBoundary as _ErrorBoundary } from "./ErrorBoundary";
-import { EventLogger as _EventLogger } from "./EventLogger";
-import { Log as _Log } from "./Log";
-import { createMemoKey as _createMemoKey } from "./MemoKey";
-import { _isServerEnv } from "./SafeJs";
-import { StatsigSession as _StatsigSession } from "./SessionID";
-import { StableID as _StableID } from "./StableID";
-import { LogEventCompressionMode as _LogEventCompressionMode } from "./StatsigOptionsCommon";
-import { Storage as _Storage } from "./StorageProvider";
+import __StatsigGlobal_1 from "./$_StatsigGlobal";
+import ErrorBoundary_1 from "./ErrorBoundary";
+import EventLogger_1 from "./EventLogger";
+import Log_1 from "./Log";
+import MemoKey_1 from "./MemoKey";
+import SafeJs_1 from "./SafeJs";
+import SessionID_1 from "./SessionID";
+import StableID_1 from "./StableID";
+import StatsigOptionsCommon_1 from "./StatsigOptionsCommon";
+import StorageProvider_1 from "./StorageProvider";
 var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function (resolve) {
@@ -43,25 +43,25 @@ export class StatsigClientBase {
     this._initializePromise = null;
     this._listeners = {};
     const emitter = this.$emt.bind(this);
-    (options === null || options === void 0 ? void 0 : options.logLevel) != null && (_Log.level = options.logLevel);
-    (options === null || options === void 0 ? void 0 : options.disableStorage) && _Storage._setDisabled(true);
-    (options === null || options === void 0 ? void 0 : options.initialSessionID) && _StatsigSession.overrideInitialSessionID(options.initialSessionID, sdkKey);
-    (options === null || options === void 0 ? void 0 : options.storageProvider) && _Storage._setProvider(options.storageProvider);
-    (options === null || options === void 0 ? void 0 : options.enableCookies) && _StableID._setCookiesEnabled(sdkKey, options.enableCookies);
-    (options === null || options === void 0 ? void 0 : options.disableStableID) && _StableID._setDisabled(sdkKey, true);
+    (options === null || options === void 0 ? void 0 : options.logLevel) != null && (Log_1.Log.level = options.logLevel);
+    (options === null || options === void 0 ? void 0 : options.disableStorage) && StorageProvider_1.Storage._setDisabled(true);
+    (options === null || options === void 0 ? void 0 : options.initialSessionID) && SessionID_1.StatsigSession.overrideInitialSessionID(options.initialSessionID, sdkKey);
+    (options === null || options === void 0 ? void 0 : options.storageProvider) && StorageProvider_1.Storage._setProvider(options.storageProvider);
+    (options === null || options === void 0 ? void 0 : options.enableCookies) && StableID_1.StableID._setCookiesEnabled(sdkKey, options.enableCookies);
+    (options === null || options === void 0 ? void 0 : options.disableStableID) && StableID_1.StableID._setDisabled(sdkKey, true);
     this._sdkKey = sdkKey;
     this._options = options !== null && options !== void 0 ? options : {};
     this._memoCache = {};
     this.overrideAdapter = (_a = options === null || options === void 0 ? void 0 : options.overrideAdapter) !== null && _a !== void 0 ? _a : null;
-    this._errorBoundary = new _ErrorBoundary(sdkKey, options, emitter);
-    this._logger = new _EventLogger(sdkKey, emitter, network, options, this._errorBoundary);
+    this._errorBoundary = new ErrorBoundary_1.ErrorBoundary(sdkKey, options, emitter);
+    this._logger = new EventLogger_1.EventLogger(sdkKey, emitter, network, options, this._errorBoundary);
     this._errorBoundary.wrap(this);
     this._errorBoundary.wrap(adapter);
     this._errorBoundary.wrap(this._logger);
     network.setErrorBoundary(this._errorBoundary);
     this.dataAdapter = adapter;
     this.dataAdapter.attach(sdkKey, options, network);
-    this.storageProvider = _Storage;
+    this.storageProvider = StorageProvider_1.Storage;
     (_d = (_c = (_b = this.overrideAdapter) === null || _b === void 0 ? void 0 : _b.loadFromStorage) === null || _c === void 0 ? void 0 : _c.call(_b)) === null || _d === void 0 ? void 0 : _d.catch(e => this._errorBoundary.logError('OA::loadFromStorage', e));
     this._primeReadyRipcord();
     _assignGlobalInstance(sdkKey, this);
@@ -81,16 +81,16 @@ export class StatsigClientBase {
     }
     if (options.disableStorage != null) {
       this._options.disableStorage = options.disableStorage;
-      _Storage._setDisabled(options.disableStorage);
+      StorageProvider_1.Storage._setDisabled(options.disableStorage);
     }
     if (options.enableCookies != null) {
       this._options.enableCookies = options.enableCookies;
-      _StableID._setCookiesEnabled(this._sdkKey, options.enableCookies);
+      StableID_1.StableID._setCookiesEnabled(this._sdkKey, options.enableCookies);
     }
     if (options.logEventCompressionMode) {
       this._logger.setLogEventCompressionMode(options.logEventCompressionMode);
     } else if (options.disableCompression) {
-      this._logger.setLogEventCompressionMode(_LogEventCompressionMode.Disabled);
+      this._logger.setLogEventCompressionMode(StatsigOptionsCommon_1.LogEventCompressionMode.Disabled);
     }
   }
   /**
@@ -158,7 +158,7 @@ export class StatsigClientBase {
           this._errorBoundary.logError(`__emit:${event.name}`, error);
           return;
         }
-        _Log.error(`An error occurred in a StatsigClientEvent listener. This is not an issue with Statsig.`, event);
+        Log_1.Log.error(`An error occurred in a StatsigClientEvent listener. This is not an issue with Statsig.`, event);
       }
     };
     if (this._listeners[event.name]) {
@@ -187,7 +187,7 @@ export class StatsigClientBase {
       if (this._options.disableEvaluationMemoization) {
         return fn(name, options);
       }
-      const memoKey = (0, _createMemoKey)(prefix, name, options);
+      const memoKey = (0, MemoKey_1.createMemoKey)(prefix, name, options);
       if (!memoKey) {
         return fn(name, options);
       }
@@ -203,14 +203,14 @@ export class StatsigClientBase {
 }
 function _assignGlobalInstance(sdkKey, client) {
   var _a;
-  if ((0, _isServerEnv)()) {
+  if ((0, SafeJs_1._isServerEnv)()) {
     return;
   }
-  const statsigGlobal = (0, _getStatsigGlobal)();
+  const statsigGlobal = (0, __StatsigGlobal_1._getStatsigGlobal)();
   const instances = (_a = statsigGlobal.instances) !== null && _a !== void 0 ? _a : {};
   const inst = client;
   if (instances[sdkKey] != null) {
-    _Log.warn('Creating multiple Statsig clients with the same SDK key can lead to unexpected behavior. Multi-instance support requires different SDK keys.');
+    Log_1.Log.warn('Creating multiple Statsig clients with the same SDK key can lead to unexpected behavior. Multi-instance support requires different SDK keys.');
   }
   instances[sdkKey] = inst;
   if (!statsigGlobal.firstInstance) {

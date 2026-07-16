@@ -1,10 +1,13 @@
-import { UndiciError as _UndiciError } from "../core/errors";
+import _cjs_import from "../core/errors";
+const {
+  UndiciError
+} = _cjs_import;
 const kMockNotMatchedError = Symbol.for('undici.error.UND_MOCK_ERR_MOCK_NOT_MATCHED');
 
 /**
  * The request does not match any registered mock dispatches.
  */
-class MockNotMatchedError extends _UndiciError {
+class MockNotMatchedError extends UndiciError {
   constructor(message) {
     super(message);
     this.name = 'MockNotMatchedError';

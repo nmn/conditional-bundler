@@ -4,18 +4,52 @@ const pkgRoot = "/fixture";
 const defaultFilePath = path.posix.join(pkgRoot, "src/index.js");
 
 async function transform(code, filePath = defaultFilePath, root = pkgRoot) {
-  const { transformWithCore } = await import("../dist/transform/core.js");
+  const { scanImportRequests, transformWithCore } =
+    await import("../dist/transform/core.js");
+  const moduleIdentity = `fixture@0.0.0::${path.posix.relative(root, filePath)}`;
+  const input = {
+    code,
+    moduleIdentity,
+    canonicalPath: moduleIdentity,
+    realPath: filePath,
+    pkg: { name: "fixture", version: "0.0.0", root },
+    syntax: { jsx: false, ts: false },
+    envs: ["browser"],
+  };
   return transformWithCore(
     {
-      code,
-      realPath: filePath,
-      pkg: { name: "fixture", version: "0.0.0", root },
-      syntax: { jsx: false, ts: false },
-      envs: ["browser"],
+      ...input,
+      resolvedImports: resolveRequests(
+        scanImportRequests(input),
+        filePath,
+        root,
+      ),
     },
     {
       importAttrAllow: ["json"],
     },
+  );
+}
+
+function resolveRequests(requests, filePath, root) {
+  return Object.fromEntries(
+    requests.map(({ key, request }) => {
+      const relative = request.startsWith(".")
+        ? path.posix.relative(
+            root,
+            path.posix.resolve(path.posix.dirname(filePath), request),
+          )
+        : request;
+      const canonicalPath = `fixture@0.0.0::${relative}`;
+      return [
+        key,
+        {
+          target: { kind: "file", moduleId: canonicalPath, canonicalPath },
+          type: "javascript",
+          intent: "module",
+        },
+      ];
+    }),
   );
 }
 
@@ -46,8 +80,11 @@ test("rewrites dynamic import to constant", async () => {
         hashKey: "__IMPORT_a4tfu7r6i",
         request: "./dep.js",
         source: "src/dep.js",
-        moduleId: "fixture@0.0.0::src/dep.js",
-        external: false,
+        target: {
+          kind: "file",
+          moduleId: "fixture@0.0.0::src/dep.js",
+          canonicalPath: "fixture@0.0.0::src/dep.js",
+        },
       }),
     ],
     exportsLocal: [{ exported: "load", kind: "func", local: "load" }],

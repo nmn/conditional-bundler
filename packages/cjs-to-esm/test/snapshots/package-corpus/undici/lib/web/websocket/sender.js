@@ -1,6 +1,13 @@
-import { WebsocketFrameSend as _WebsocketFrameSend } from "./frame";
-import { opcodes as _opcodes, sendHints as _sendHints } from "./constants";
+import _cjs_import from "./frame";
+import _cjs_import2 from "./constants";
 import FixedQueue from "../../dispatcher/fixed-queue";
+const {
+  WebsocketFrameSend
+} = _cjs_import;
+const {
+  opcodes,
+  sendHints
+} = _cjs_import2;
 /**
  * @typedef {object} SendQueueNode
  * @property {Promise<void> | null} promise
@@ -25,15 +32,15 @@ class SendQueue {
     this.#socket = socket;
   }
   add(item, cb, hint) {
-    if (hint !== _sendHints.blob) {
+    if (hint !== sendHints.blob) {
       if (!this.#running) {
         // TODO(@tsctx): support fast-path for string on running
-        if (hint === _sendHints.text) {
+        if (hint === sendHints.text) {
           // special fast-path for string
           const {
             0: head,
             1: body
-          } = _WebsocketFrameSend.createFastTextFrame(item);
+          } = WebsocketFrameSend.createFastTextFrame(item);
           this.#socket.cork();
           this.#socket.write(head);
           this.#socket.write(body, cb);
@@ -86,15 +93,15 @@ class SendQueue {
   }
 }
 function createFrame(data, hint) {
-  return new _WebsocketFrameSend(toBuffer(data, hint)).createFrame(hint === _sendHints.text ? _opcodes.TEXT : _opcodes.BINARY);
+  return new WebsocketFrameSend(toBuffer(data, hint)).createFrame(hint === sendHints.text ? opcodes.TEXT : opcodes.BINARY);
 }
 function toBuffer(data, hint) {
   switch (hint) {
-    case _sendHints.text:
-    case _sendHints.typedArray:
+    case sendHints.text:
+    case sendHints.typedArray:
       return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-    case _sendHints.arrayBuffer:
-    case _sendHints.blob:
+    case sendHints.arrayBuffer:
+    case sendHints.blob:
       return new Uint8Array(data);
   }
 }

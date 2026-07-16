@@ -1,9 +1,9 @@
 import aSet from "../internals/a-set";
-import { add as _add } from "../internals/set-helpers";
+import _cjs_import from "../internals/set-helpers";
 import clone from "../internals/set-clone";
 import getSetRecord from "../internals/get-set-record";
 import iterateSimple from "../internals/iterate-simple";
-var add = _add;
+var add = _cjs_import.add;
 // `Set.prototype.union` method
 // https://tc39.es/ecma262/#sec-set.prototype.union
 const _cjs_default = function union(other) {

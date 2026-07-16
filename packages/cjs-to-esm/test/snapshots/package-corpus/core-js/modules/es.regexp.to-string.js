@@ -1,10 +1,10 @@
-import { PROPER as _PROPER } from "../internals/function-name";
+import _cjs_import from "../internals/function-name";
 import defineBuiltIn from "../internals/define-built-in";
 import anObject from "../internals/an-object";
 import $toString from "../internals/to-string";
 import fails from "../internals/fails";
 import getRegExpFlags from "../internals/regexp-get-flags";
-var PROPER_FUNCTION_NAME = _PROPER;
+var PROPER_FUNCTION_NAME = _cjs_import.PROPER;
 var TO_STRING = 'toString';
 var RegExpPrototype = RegExp.prototype;
 var nativeToString = RegExpPrototype[TO_STRING];

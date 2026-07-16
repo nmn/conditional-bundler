@@ -1,5 +1,5 @@
 import anObject from "../internals/an-object";
-import { f as _f } from "../internals/object-define-properties";
+import definePropertiesModule from "../internals/object-define-properties";
 import enumBugKeys from "../internals/enum-bug-keys";
 import hiddenKeys from "../internals/hidden-keys";
 import html from "../internals/html";
@@ -74,6 +74,6 @@ const _cjs_default = Object.create || function create(O, Properties) {
     // add "__proto__" for Object.getPrototypeOf polyfill
     result[IE_PROTO] = O;
   } else result = NullProtoObject();
-  return Properties === undefined ? result : _f(result, Properties);
+  return Properties === undefined ? result : definePropertiesModule.f(result, Properties);
 };
 export default _cjs_default;

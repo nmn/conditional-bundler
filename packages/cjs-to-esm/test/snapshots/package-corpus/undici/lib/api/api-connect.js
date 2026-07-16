@@ -1,18 +1,26 @@
 import * as assert from "node:assert";
 import * as _cjs_import from "node:async_hooks";
-import { InvalidArgumentError as _InvalidArgumentError, SocketError as _SocketError } from "../core/errors";
-import { parseRawHeaders as _parseRawHeaders } from "../core/util";
-import { addSignal as _addSignal, removeSignal as _removeSignal } from "./abort-signal";
+import _cjs_import2 from "../core/errors";
+import util from "../core/util";
+import _cjs_import3 from "./abort-signal";
 const {
   AsyncResource
 } = _cjs_import;
+const {
+  InvalidArgumentError,
+  SocketError
+} = _cjs_import2;
+const {
+  addSignal,
+  removeSignal
+} = _cjs_import3;
 class ConnectHandler extends AsyncResource {
   constructor(opts, callback) {
     if (!opts || typeof opts !== 'object') {
-      throw new _InvalidArgumentError('invalid opts');
+      throw new InvalidArgumentError('invalid opts');
     }
     if (typeof callback !== 'function') {
-      throw new _InvalidArgumentError('invalid callback');
+      throw new InvalidArgumentError('invalid callback');
     }
     const {
       signal,
@@ -20,14 +28,14 @@ class ConnectHandler extends AsyncResource {
       responseHeaders
     } = opts;
     if (signal && typeof signal.on !== 'function' && typeof signal.addEventListener !== 'function') {
-      throw new _InvalidArgumentError('signal must be an EventEmitter or EventTarget');
+      throw new InvalidArgumentError('signal must be an EventEmitter or EventTarget');
     }
     super('UNDICI_CONNECT');
     this.opaque = opaque || null;
     this.responseHeaders = responseHeaders || null;
     this.callback = callback;
     this.abort = null;
-    _addSignal(this, signal);
+    addSignal(this, signal);
   }
   onRequestStart(controller, context) {
     if (this.reason) {
@@ -39,7 +47,7 @@ class ConnectHandler extends AsyncResource {
     this.context = context;
   }
   onResponseStart() {
-    throw new _SocketError('bad connect', null);
+    throw new SocketError('bad connect', null);
   }
   onRequestUpgrade(controller, statusCode, headers, socket) {
     const {
@@ -47,13 +55,13 @@ class ConnectHandler extends AsyncResource {
       opaque,
       context
     } = this;
-    _removeSignal(this);
+    removeSignal(this);
     this.callback = null;
     let responseHeaders = headers;
     const rawHeaders = controller?.rawHeaders;
     // Indicates is an HTTP2Session
     if (responseHeaders != null) {
-      responseHeaders = this.responseHeaders === 'raw' ? _parseRawHeaders(rawHeaders) : headers;
+      responseHeaders = this.responseHeaders === 'raw' ? util.parseRawHeaders(rawHeaders) : headers;
     }
     this.runInAsyncScope(callback, null, null, {
       statusCode,
@@ -68,7 +76,7 @@ class ConnectHandler extends AsyncResource {
       callback,
       opaque
     } = this;
-    _removeSignal(this);
+    removeSignal(this);
     if (callback) {
       this.callback = null;
       queueMicrotask(() => {

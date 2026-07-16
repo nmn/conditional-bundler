@@ -1,8 +1,8 @@
-import { aTypedArray as _aTypedArray, exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
-import { right as _right } from "../internals/array-reduce";
-var $reduceRight = _right;
-var aTypedArray = _aTypedArray;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
+import _cjs_import from "../internals/array-reduce";
+var $reduceRight = _cjs_import.right;
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
 
 // `%TypedArray%.prototype.reduceRight` method
 // https://tc39.es/ecma262/#sec-%typedarray%.prototype.reduceright

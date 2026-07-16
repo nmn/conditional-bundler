@@ -1,4 +1,4 @@
-import { Log as _Log } from "./Log";
+import Log_1 from "./Log";
 export class PendingEvents {
   constructor(batchSize) {
     this._pendingEvents = [];
@@ -6,7 +6,7 @@ export class PendingEvents {
   }
   addToPendingEventsQueue(event) {
     this._pendingEvents.push(event);
-    _Log.debug('Enqueued Event:', event);
+    Log_1.Log.debug('Enqueued Event:', event);
   }
   hasEventsForFullBatch() {
     return this._pendingEvents.length >= this._batchSize;

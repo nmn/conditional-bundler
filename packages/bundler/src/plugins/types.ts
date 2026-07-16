@@ -1,11 +1,12 @@
 import type {
   Diagnostic,
   ConditionExpr,
-  DiscoveredEntrypoint,
-  ExtraTransformOutput,
   FileRecord,
+  LinkReference,
+  ResourceTemplate,
 } from "@bundler/shared";
 import type { BundleManifest } from "../manifest.js";
+import type { OutputSpec } from "../config.js";
 
 export type EnvValue<T> = T | ({ default?: T } & Record<string, T | undefined>);
 
@@ -14,15 +15,23 @@ export type ResolveImportKind =
   | "dynamic-import"
   | "reexport"
   | "conditional-import"
-  | "conditional-else";
+  | "conditional-else"
+  | "css-import"
+  | "css-url";
 
-export type ResolveImportResult = null | {
-  id: string;
-  moduleIdentity?: string;
-  filePath: string;
-  virtual?: boolean;
-  meta?: Record<string, unknown>;
-};
+export type ModuleType = "javascript" | "css" | "asset";
+export type ImportIntent = "module" | "url" | "raw" | "base64" | "assetPath";
+
+export type ResolveImportResult =
+  | { preserve: true }
+  | {
+      id: string;
+      moduleIdentity?: string;
+      filePath: string;
+      type?: ModuleType;
+      intent?: ImportIntent;
+      meta?: Record<string, unknown>;
+    };
 
 export type ResolveImportContext = {
   fromId: string;
@@ -32,25 +41,10 @@ export type ResolveImportContext = {
   conditions: string[];
   target: "node" | "browser";
   kind: ResolveImportKind;
+  intent: ImportIntent;
   importAttributes?: Record<string, string>;
+  importerMeta?: Record<string, unknown>;
   resolveDefault: () => Promise<ResolveImportResult>;
-};
-
-export type LoadContext = {
-  id: string;
-  filePath: string;
-  envId: string;
-  target: "node" | "browser";
-  syntax: { jsx: boolean; ts: boolean };
-};
-
-export type LoadResult = {
-  code: string;
-  map?: string;
-  codeByEnv?: Record<string, string>;
-  mapByEnv?: Record<string, string>;
-  discoveredEntrypoints?: DiscoveredEntrypoint[];
-  extraOutputs?: Record<string, ExtraTransformOutput>;
 };
 
 export type BabelPluginSpec = string | [string, Record<string, unknown>];
@@ -65,10 +59,10 @@ export type TransformStageContext = {
 
 export type EmitFileInput = {
   fileName: string;
-  contents: string;
+  contents: string | Uint8Array;
   envId?: string;
   hash?: boolean;
-  type?: "asset" | "manifest" | "style" | "source-map";
+  type?: "asset" | "document" | "manifest" | "style" | "source-map";
   contentType?: string;
   bundleKey?: string;
 };
@@ -76,7 +70,13 @@ export type EmitFileInput = {
 export type EmitFile = (file: EmitFileInput) => void;
 
 export type BuildStartContext = {
-  addEntry: (entry: { id: string; path: string; envs?: string[] }) => void;
+  addEntry: (entry: {
+    id: string;
+    path: string;
+    envs?: string[];
+    kind?: "auto" | "script" | "html" | "style";
+    outputFileName?: string;
+  }) => void;
   emitFile: EmitFile;
 };
 
@@ -96,6 +96,40 @@ export type BundlePart = {
   code: string;
   map?: string;
   sourceContents?: Record<string, string>;
+  references?: LinkReference[];
+};
+
+export type DocumentTransformContext = {
+  id: string;
+  filePath: string;
+  envId: string;
+  target: "node" | "browser";
+  source: string;
+};
+
+export type DocumentScript = {
+  id: string;
+  request?: string;
+  code?: string;
+  map?: string;
+  moduleIdentity?: string;
+  module: boolean;
+};
+
+export type DocumentStyle = {
+  id: string;
+  request?: string;
+  code?: string;
+  moduleIdentity?: string;
+};
+
+export type DocumentTransformResult = {
+  template: ResourceTemplate;
+  scripts: DocumentScript[];
+  styles: DocumentStyle[];
+  references: LinkReference[];
+  outputFileName?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type BundlePlanDraft = {
@@ -131,6 +165,21 @@ export type BuildEndContext = {
   manifest: BundleManifest;
   diagnostics: Diagnostic[];
   modules: FileRecord[];
+  outputs: OutputSpec;
+  resolveReference: (referenceId: string, fromFileName: string) => string;
+  emitFile: EmitFile;
+};
+
+export type GenerateBundleResourcesContext = {
+  bundles: Array<{
+    envId: string;
+    entryId: string;
+    fileName: string;
+    modules: string[];
+  }>;
+  modules: FileRecord[];
+  outputs: OutputSpec;
+  resolveReference: (referenceId: string, fromFileName: string) => string;
   emitFile: EmitFile;
 };
 
@@ -151,6 +200,9 @@ export type BuildStartHook = (
 ) => Promise<void> | void;
 
 export type BuildEndHook = (context: BuildEndContext) => Promise<void> | void;
+export type GenerateBundleResourcesHook = (
+  context: GenerateBundleResourcesContext,
+) => Promise<void> | void;
 
 export type InlineBundlerPlugin = {
   name: string;
@@ -163,14 +215,18 @@ export type InlineBundlerPlugin = {
       | ResolveImportResult
       | undefined
   >;
-  load?: EnvValue<
+  transformDocument?: EnvValue<
     (
-      context: LoadContext,
-    ) => Promise<LoadResult | undefined> | LoadResult | undefined
+      context: DocumentTransformContext,
+    ) =>
+      | Promise<DocumentTransformResult | undefined>
+      | DocumentTransformResult
+      | undefined
   >;
   beforeCombine?: EnvValue<BeforeCombineHook[]>;
   afterCombine?: EnvValue<AfterCombineHook[]>;
   buildEnd?: BuildEndHook;
+  generateBundleResources?: GenerateBundleResourcesHook;
   transform?: EnvValue<BabelPluginSpec[]>;
   transformPre?: EnvValue<BabelPluginSpec[]>;
   transformPost?: EnvValue<BabelPluginSpec[]>;
@@ -193,12 +249,14 @@ export type NormalizedPlugin = {
   name: string;
   modulePath?: string;
   workerFingerprint?: string;
+  resourceFingerprint?: string;
   buildStart?: BuildStartHook;
   resolveImport?: InlineBundlerPlugin["resolveImport"];
-  load?: InlineBundlerPlugin["load"];
+  transformDocument?: InlineBundlerPlugin["transformDocument"];
   beforeCombine?: InlineBundlerPlugin["beforeCombine"];
   afterCombine?: InlineBundlerPlugin["afterCombine"];
   buildEnd?: BuildEndHook;
+  generateBundleResources?: GenerateBundleResourcesHook;
   transform?: EnvValue<NormalizedBabelPluginSpec[]>;
   transformPre?: EnvValue<NormalizedBabelPluginSpec[]>;
   transformPost?: EnvValue<NormalizedBabelPluginSpec[]>;
@@ -216,30 +274,12 @@ export type ModuleResolution = {
   moduleIdentity: string;
   filePath: string;
   pkg: { name: string; version: string; root: string };
-  external: boolean;
-  virtual?: boolean;
+  target:
+    | { kind: "file"; moduleId: string; canonicalPath: string }
+    | { kind: "runtime"; specifier: string };
+  type: ModuleType;
+  intent: ImportIntent;
   meta?: Record<string, unknown>;
-};
-
-export type LoadModuleResult = {
-  code: string;
-  codeByEnv?: Record<string, string>;
-  mapByEnv?: Record<string, string>;
-  discoveredEntrypointsByEnv?: Record<string, DiscoveredEntrypoint[]>;
-  extraOutputsByEnv?: Record<string, Record<string, ExtraTransformOutput>>;
-};
-
-export type LoadedModuleRecord = {
-  id: string;
-  filePath: string;
-  virtual?: boolean;
-  pkg: { name: string; version: string; root: string };
-  syntax: { jsx: boolean; ts: boolean };
-  code: string;
-  codeByEnv?: Record<string, string>;
-  mapByEnv?: Record<string, string>;
-  discoveredEntrypointsByEnv?: Record<string, DiscoveredEntrypoint[]>;
-  extraOutputsByEnv?: Record<string, Record<string, ExtraTransformOutput>>;
 };
 
 export type WorkerTransformResult = {

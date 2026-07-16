@@ -1,4 +1,4 @@
-import { aTypedArray as _aTypedArray, getTypedArrayConstructor as _getTypedArrayConstructor, exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
 import lengthOfArrayLike from "../internals/length-of-array-like";
 import isBigIntArray from "../internals/is-big-int-array";
 import toAbsoluteIndex from "../internals/to-absolute-index";
@@ -6,9 +6,9 @@ import toBigInt from "../internals/to-big-int";
 import toIntegerOrInfinity from "../internals/to-integer-or-infinity";
 // TODO: Remove from `core-js@4`
 
-var aTypedArray = _aTypedArray;
-var getTypedArrayConstructor = _getTypedArrayConstructor;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var getTypedArrayConstructor = ArrayBufferViewCore.getTypedArrayConstructor;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
 var max = Math.max;
 var min = Math.min;
 

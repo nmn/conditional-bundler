@@ -4,15 +4,15 @@ import anObject from "../internals/an-object";
 import isObject from "../internals/is-object";
 import isDataDescriptor from "../internals/is-data-descriptor";
 import fails from "../internals/fails";
-import { f as _f } from "../internals/object-define-property";
-import { f as _f2 } from "../internals/object-get-own-property-descriptor";
+import definePropertyModule from "../internals/object-define-property";
+import getOwnPropertyDescriptorModule from "../internals/object-get-own-property-descriptor";
 import getPrototypeOf from "../internals/object-get-prototype-of";
 import createPropertyDescriptor from "../internals/create-property-descriptor";
 import toPropertyKey from "../internals/to-property-key";
 // `Reflect.set` method
 // https://tc39.es/ecma262/#sec-reflect.set
 var $set = function (target, propertyKey, V, receiver) {
-  var ownDescriptor = _f2(anObject(target), propertyKey);
+  var ownDescriptor = getOwnPropertyDescriptorModule.f(anObject(target), propertyKey);
   var existingDescriptor, prototype, setter;
   if (!ownDescriptor) {
     if (isObject(prototype = getPrototypeOf(target))) {
@@ -22,13 +22,13 @@ var $set = function (target, propertyKey, V, receiver) {
   }
   if (isDataDescriptor(ownDescriptor)) {
     if (ownDescriptor.writable === false || !isObject(receiver)) return false;
-    if (existingDescriptor = _f2(receiver, propertyKey)) {
+    if (existingDescriptor = getOwnPropertyDescriptorModule.f(receiver, propertyKey)) {
       if (!isDataDescriptor(existingDescriptor) || existingDescriptor.writable === false) return false;
-      _f(receiver, propertyKey, {
+      definePropertyModule.f(receiver, propertyKey, {
         value: V
       });
     } else try {
-      _f(receiver, propertyKey, createPropertyDescriptor(0, V));
+      definePropertyModule.f(receiver, propertyKey, createPropertyDescriptor(0, V));
     } catch (error) {
       return false;
     }
@@ -44,7 +44,7 @@ var $set = function (target, propertyKey, V, receiver) {
 // with non-writable property on the prototype
 var MS_EDGE_BUG = fails(function () {
   var Constructor = function () {/* empty */};
-  var object = _f(new Constructor(), 'a', {
+  var object = definePropertyModule.f(new Constructor(), 'a', {
     configurable: true
   });
   // eslint-disable-next-line es/no-reflect -- required for testing

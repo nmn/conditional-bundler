@@ -1,5 +1,5 @@
-import { charAt as _charAt } from "../internals/string-multibyte";
-var charAt = _charAt;
+import _cjs_import from "../internals/string-multibyte";
+var charAt = _cjs_import.charAt;
 
 // `AdvanceStringIndex` abstract operation
 // https://tc39.es/ecma262/#sec-advancestringindex

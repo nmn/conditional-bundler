@@ -1,11 +1,11 @@
 import $ from "../internals/export";
 import aCallable from "../internals/a-callable";
 import aMap from "../internals/a-map";
-import { get as _get, has as _has, set as _set } from "../internals/map-helpers";
+import MapHelpers from "../internals/map-helpers";
 var $TypeError = TypeError;
-var get = _get;
-var has = _has;
-var set = _set;
+var get = MapHelpers.get;
+var has = MapHelpers.has;
+var set = MapHelpers.set;
 
 // `Map.prototype.update` method
 // https://github.com/tc39/proposal-collection-methods

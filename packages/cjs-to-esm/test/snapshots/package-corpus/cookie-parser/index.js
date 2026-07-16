@@ -1,5 +1,5 @@
-import { parse as _parse } from "cookie";
-import { unsign as _unsign } from "cookie-signature";
+import cookie from "cookie";
+import signature from "cookie-signature";
 /**
  * Module dependencies.
  * @private
@@ -41,7 +41,7 @@ function cookieParser(secret, options) {
     if (!cookies) {
       return next();
     }
-    req.cookies = _parse(cookies, options);
+    req.cookies = cookie.parse(cookies, options);
 
     // parse signed cookies
     if (secrets.length !== 0) {
@@ -109,7 +109,7 @@ export function signedCookie(str, secret) {
   }
   var secrets = !secret || Array.isArray(secret) ? secret || [] : [secret];
   for (var i = 0; i < secrets.length; i++) {
-    var val = _unsign(str.slice(2), secrets[i]);
+    var val = signature.unsign(str.slice(2), secrets[i]);
     if (val !== false) {
       return val;
     }

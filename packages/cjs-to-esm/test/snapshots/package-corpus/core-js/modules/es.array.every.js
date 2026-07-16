@@ -1,7 +1,7 @@
 import $ from "../internals/export";
-import { every as _every } from "../internals/array-iteration";
+import _cjs_import from "../internals/array-iteration";
 import arrayMethodIsStrict from "../internals/array-method-is-strict";
-var $every = _every;
+var $every = _cjs_import.every;
 var STRICT_METHOD = arrayMethodIsStrict('every');
 
 // `Array.prototype.every` method

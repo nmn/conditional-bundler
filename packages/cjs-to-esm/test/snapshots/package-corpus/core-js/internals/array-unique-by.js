@@ -3,11 +3,11 @@ import isNullOrUndefined from "../internals/is-null-or-undefined";
 import lengthOfArrayLike from "../internals/length-of-array-like";
 import toObject from "../internals/to-object";
 import createProperty from "../internals/create-property";
-import { Map as _Map, has as _has, set as _set } from "../internals/map-helpers";
+import MapHelpers from "../internals/map-helpers";
 import iterate from "../internals/map-iterate";
-var Map = _Map;
-var mapHas = _has;
-var mapSet = _set;
+var Map = MapHelpers.Map;
+var mapHas = MapHelpers.has;
+var mapSet = MapHelpers.set;
 
 // `Array.prototype.uniqueBy` method
 // https://github.com/tc39/proposal-array-unique

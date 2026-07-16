@@ -17,6 +17,11 @@ function summarizeCells(result) {
   }));
 }
 
+function fileTarget(relativePath) {
+  const canonicalPath = `fixture@0.0.0::src/${relativePath}`;
+  return { kind: "file", moduleId: canonicalPath, canonicalPath };
+}
+
 test("splits unrelated exported functions into independent cells", async () => {
   const prefix = prefixFor(defaultFilePath);
   const result = await transform(`
@@ -155,12 +160,14 @@ test("records static namespace property usage as specific external deps", async 
           source: "src/dep.js",
           request: "./dep.js",
           imported: "alpha",
+          target: fileTarget("dep.js"),
         },
         {
           kind: "import",
           source: "src/dep.js",
           request: "./dep.js",
           imported: "beta",
+          target: fileTarget("dep.js"),
         },
       ],
       eager: false,
@@ -201,6 +208,7 @@ test("records dynamic namespace usage as a namespace external dep", async () => 
           source: "src/dep.js",
           request: "./dep.js",
           imported: "*",
+          target: fileTarget("dep.js"),
         },
       ],
       eager: false,
@@ -229,12 +237,14 @@ test("creates conditional binding cells that feed later worker cells", async () 
           source: "src/dep.js",
           request: "./dep.js",
           imported: "feature",
+          target: fileTarget("dep.js"),
         },
         {
           kind: "import",
           source: "src/fallback.js",
           request: "./fallback.js",
           imported: "feature",
+          target: fileTarget("fallback.js"),
         },
       ],
       eager: false,

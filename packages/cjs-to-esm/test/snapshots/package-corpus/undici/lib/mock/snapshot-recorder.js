@@ -1,8 +1,8 @@
 import * as _cjs_import from "node:fs/promises";
 import * as _cjs_import2 from "node:path";
 import * as _cjs_import3 from "node:timers";
-import { InvalidArgumentError as _InvalidArgumentError, UndiciError as _UndiciError } from "../core/errors";
-import { hashId as _hashId, isUrlExcludedFactory as _isUrlExcludedFactory, normalizeHeaders as _normalizeHeaders, createHeaderFilters as _createHeaderFilters } from "./snapshot-utils";
+import _cjs_import4 from "../core/errors";
+import _cjs_import5 from "./snapshot-utils";
 const {
   writeFile,
   readFile,
@@ -16,6 +16,17 @@ const {
   setTimeout,
   clearTimeout
 } = _cjs_import3;
+const {
+  InvalidArgumentError,
+  UndiciError
+} = _cjs_import4;
+const {
+  hashId,
+  isUrlExcludedFactory,
+  normalizeHeaders,
+  createHeaderFilters
+} = _cjs_import5;
+
 /**
  * @typedef {Object} SnapshotRequestOptions
  * @property {string} method - HTTP method (e.g. 'GET', 'POST', etc.)
@@ -135,7 +146,7 @@ function formatRequestKey(opts, headerFilters, matchOptions = {}) {
   const url = new URL(opts.path, opts.origin);
 
   // Cache normalized headers if not already done
-  const normalized = opts._normalizedHeaders || _normalizeHeaders(opts.headers);
+  const normalized = opts._normalizedHeaders || normalizeHeaders(opts.headers);
   if (!opts._normalizedHeaders) {
     opts._normalizedHeaders = normalized;
   }
@@ -238,7 +249,7 @@ function createRequestHash(formattedRequest) {
   // Add body
   parts.push(formattedRequest.body);
   const content = parts.join('|');
-  return _hashId(content);
+  return hashId(content);
 }
 class SnapshotRecorder {
   /** @type {NodeJS.Timeout | null} */
@@ -290,14 +301,14 @@ class SnapshotRecorder {
     };
 
     // Cache processed header sets to avoid recreating them on every request
-    this.#headerFilters = _createHeaderFilters(this.matchOptions);
+    this.#headerFilters = createHeaderFilters(this.matchOptions);
 
     // Request filtering callbacks
     this.shouldRecord = options.shouldRecord || (() => true); // function(requestOpts) -> boolean
     this.shouldPlayback = options.shouldPlayback || (() => true); // function(requestOpts) -> boolean
 
     // URL pattern filtering
-    this.#isUrlExcluded = _isUrlExcludedFactory(options.excludeUrls); // Array of regex patterns or strings
+    this.#isUrlExcluded = isUrlExcludedFactory(options.excludeUrls); // Array of regex patterns or strings
 
     // Start auto-flush timer if enabled
     if (this.#autoFlush && this.#snapshotPath) {
@@ -325,7 +336,7 @@ class SnapshotRecorder {
     const hash = createRequestHash(request);
 
     // Extract response data - always store body as base64
-    const normalizedHeaders = _normalizeHeaders(response.headers);
+    const normalizedHeaders = normalizeHeaders(response.headers);
 
     /** @type {SnapshotEntryResponse} */
     const responseData = {
@@ -412,7 +423,7 @@ class SnapshotRecorder {
   async loadSnapshots(filePath) {
     const path = filePath || this.#snapshotPath;
     if (!path) {
-      throw new _InvalidArgumentError('Snapshot path is required');
+      throw new InvalidArgumentError('Snapshot path is required');
     }
     try {
       const data = await readFile(resolve(path), 'utf8');
@@ -436,7 +447,7 @@ class SnapshotRecorder {
         // File doesn't exist yet - that's ok for recording mode
         this.#snapshots.clear();
       } else {
-        throw new _UndiciError(`Failed to load snapshots from ${path}`, {
+        throw new UndiciError(`Failed to load snapshots from ${path}`, {
           cause: error
         });
       }
@@ -452,7 +463,7 @@ class SnapshotRecorder {
   async saveSnapshots(filePath) {
     const path = filePath || this.#snapshotPath;
     if (!path) {
-      throw new _InvalidArgumentError('Snapshot path is required');
+      throw new InvalidArgumentError('Snapshot path is required');
     }
     const resolvedPath = resolve(path);
 
@@ -627,7 +638,7 @@ const _cjs_default = {
   createRequestHash,
   filterHeadersForMatching,
   filterHeadersForStorage,
-  createHeaderFilters: _createHeaderFilters
+  createHeaderFilters
 };
 const _SnapshotRecorder = _cjs_default["SnapshotRecorder"];
 export { _SnapshotRecorder as SnapshotRecorder };
@@ -639,6 +650,6 @@ const _filterHeadersForMatching = _cjs_default["filterHeadersForMatching"];
 export { _filterHeadersForMatching as filterHeadersForMatching };
 const _filterHeadersForStorage = _cjs_default["filterHeadersForStorage"];
 export { _filterHeadersForStorage as filterHeadersForStorage };
-const _createHeaderFilters2 = _cjs_default["createHeaderFilters"];
-export { _createHeaderFilters2 as createHeaderFilters };
+const _createHeaderFilters = _cjs_default["createHeaderFilters"];
+export { _createHeaderFilters as createHeaderFilters };
 export default _cjs_default;

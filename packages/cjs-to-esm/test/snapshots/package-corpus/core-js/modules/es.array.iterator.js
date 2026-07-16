@@ -1,16 +1,16 @@
 import toIndexedObject from "../internals/to-indexed-object";
 import addToUnscopables from "../internals/add-to-unscopables";
 import Iterators from "../internals/iterators";
-import { set as _set, getterFor as _getterFor } from "../internals/internal-state";
-import { f as _f } from "../internals/object-define-property";
+import InternalStateModule from "../internals/internal-state";
+import _cjs_import from "../internals/object-define-property";
 import defineIterator from "../internals/iterator-define";
 import createIterResultObject from "../internals/create-iter-result-object";
 import IS_PURE from "../internals/is-pure";
 import DESCRIPTORS from "../internals/descriptors";
-var defineProperty = _f;
+var defineProperty = _cjs_import.f;
 var ARRAY_ITERATOR = 'Array Iterator';
-var setInternalState = _set;
-var getInternalState = _getterFor(ARRAY_ITERATOR);
+var setInternalState = InternalStateModule.set;
+var getInternalState = InternalStateModule.getterFor(ARRAY_ITERATOR);
 
 // `Array.prototype.entries` method
 // https://tc39.es/ecma262/#sec-array.prototype.entries

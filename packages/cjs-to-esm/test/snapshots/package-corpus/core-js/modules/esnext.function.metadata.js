@@ -1,6 +1,6 @@
 import wellKnownSymbol from "../internals/well-known-symbol";
-import { f as _f } from "../internals/object-define-property";
-var defineProperty = _f;
+import _cjs_import from "../internals/object-define-property";
+var defineProperty = _cjs_import.f;
 var METADATA = wellKnownSymbol('metadata');
 var FunctionPrototype = Function.prototype;
 

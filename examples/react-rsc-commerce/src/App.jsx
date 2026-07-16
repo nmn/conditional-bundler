@@ -1,4 +1,6 @@
 import React from "react";
+import monarchMark from "./assets/monarch-mark.svg";
+import "./showcase.css";
 import "./lib/commerceTelemetry.dev.js" with {
   condition: "__DEV__",
   else: "./lib/commerceTelemetry.prod.js",
@@ -21,6 +23,13 @@ export default async function App({ path, searchParams }) {
                 <small>provisions for precise homes</small>
               </span>
             </a>
+            <img
+              className="asset-proof-mark"
+              src={monarchMark.src}
+              width={monarchMark.width}
+              height={monarchMark.height}
+              alt=""
+            />
             <nav className="nav-strip" aria-label="Store">
               {navItems.map((item) => (
                 <a

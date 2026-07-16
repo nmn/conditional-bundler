@@ -1,4 +1,4 @@
 import "../../modules/esnext.symbol.custom-matcher";
-import { f as _f } from "../../internals/well-known-symbol-wrapped";
-const _cjs_default = _f('customMatcher');
+import WrappedWellKnownSymbolModule from "../../internals/well-known-symbol-wrapped";
+const _cjs_default = WrappedWellKnownSymbolModule.f('customMatcher');
 export default _cjs_default;

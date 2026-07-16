@@ -1,6 +1,6 @@
 import $ from "../internals/export";
-import { values as _values } from "../internals/object-to-array";
-var $values = _values;
+import _cjs_import from "../internals/object-to-array";
+var $values = _cjs_import.values;
 
 // `Object.values` method
 // https://tc39.es/ecma262/#sec-object.values

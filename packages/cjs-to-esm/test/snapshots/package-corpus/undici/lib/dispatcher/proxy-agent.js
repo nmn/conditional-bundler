@@ -1,12 +1,27 @@
-import { kProxy as _kProxy, kClose as _kClose, kDestroy as _kDestroy, kDispatch as _kDispatch } from "../core/symbols";
+import _cjs_import from "../core/symbols";
 import Agent from "./agent";
 import Pool from "./pool";
 import DispatcherBase from "./dispatcher-base";
-import { InvalidArgumentError as _InvalidArgumentError, RequestAbortedError as _RequestAbortedError, SecureProxyConnectionError as _SecureProxyConnectionError, ProxyConnectionError as _ProxyConnectionError } from "../core/errors";
+import _cjs_import2 from "../core/errors";
 import buildConnector from "../core/connect";
 import Client from "./client";
-import { channels as _channels } from "../core/diagnostics";
+import _cjs_import3 from "../core/diagnostics";
 import Socks5ProxyAgent from "./socks5-proxy-agent";
+const {
+  kProxy,
+  kClose,
+  kDestroy,
+  kDispatch
+} = _cjs_import;
+const {
+  InvalidArgumentError,
+  RequestAbortedError,
+  SecureProxyConnectionError,
+  ProxyConnectionError
+} = _cjs_import2;
+const {
+  channels
+} = _cjs_import3;
 const kAgent = Symbol('proxy agent');
 const kClient = Symbol('proxy client');
 const kProxyHeaders = Symbol('proxy headers');
@@ -42,7 +57,7 @@ class Http1ProxyWrapper extends DispatcherBase {
     proxyServername
   }) {
     if (!proxyUrl) {
-      throw new _InvalidArgumentError('Proxy URL is mandatory');
+      throw new InvalidArgumentError('Proxy URL is mandatory');
     }
     super();
     this[kProxyHeaders] = headers;
@@ -57,12 +72,12 @@ class Http1ProxyWrapper extends DispatcherBase {
       });
     }
   }
-  [_kDispatch](opts, handler) {
+  [kDispatch](opts, handler) {
     const onResponseStart = handler.onResponseStart;
     handler.onResponseStart = function (controller, statusCode, data, statusMessage) {
       if (statusCode === 407) {
         if (typeof handler.onResponseError === 'function') {
-          handler.onResponseError(controller, new _InvalidArgumentError('Proxy Authentication Required (407)'));
+          handler.onResponseError(controller, new InvalidArgumentError('Proxy Authentication Required (407)'));
         }
         return;
       }
@@ -93,25 +108,25 @@ class Http1ProxyWrapper extends DispatcherBase {
     if (this.#proxyServername != null) {
       opts.servername = this.#proxyServername;
     }
-    return this.#client[_kDispatch](opts, handler);
+    return this.#client[kDispatch](opts, handler);
   }
-  [_kClose]() {
+  [kClose]() {
     return this.#client.close();
   }
-  [_kDestroy](err) {
+  [kDestroy](err) {
     return this.#client.destroy(err);
   }
 }
 class ProxyAgent extends DispatcherBase {
   constructor(opts) {
     if (!opts || typeof opts === 'object' && !(opts instanceof URL) && !opts.uri) {
-      throw new _InvalidArgumentError('Proxy uri is mandatory');
+      throw new InvalidArgumentError('Proxy uri is mandatory');
     }
     const {
       clientFactory = defaultFactory
     } = opts;
     if (typeof clientFactory !== 'function') {
-      throw new _InvalidArgumentError('Proxy opts.clientFactory must be a function.');
+      throw new InvalidArgumentError('Proxy opts.clientFactory must be a function.');
     }
     const {
       proxyTunnel,
@@ -128,7 +143,7 @@ class ProxyAgent extends DispatcherBase {
       password,
       hostname: proxyHostname
     } = url;
-    this[_kProxy] = {
+    this[kProxy] = {
       uri: href,
       protocol
     };
@@ -137,7 +152,7 @@ class ProxyAgent extends DispatcherBase {
     this[kProxyHeaders] = opts.headers || {};
     this[kTunnelProxy] = proxyTunnel;
     if (opts.auth && opts.token) {
-      throw new _InvalidArgumentError('opts.auth cannot be used in combination with opts.token');
+      throw new InvalidArgumentError('opts.auth cannot be used in combination with opts.token');
     } else if (opts.auth) {
       /* @deprecated in favour of opts.token */
       this[kProxyHeaders]['proxy-authorization'] = `Basic ${opts.auth}`;
@@ -173,8 +188,8 @@ class ProxyAgent extends DispatcherBase {
       } = new URL(origin);
 
       // Handle SOCKS5 proxy
-      if (this[_kProxy].protocol === 'socks5:' || this[_kProxy].protocol === 'socks:') {
-        return new Socks5ProxyAgent(this[_kProxy].uri, {
+      if (this[kProxy].protocol === 'socks5:' || this[kProxy].protocol === 'socks:') {
+        return new Socks5ProxyAgent(this[kProxy].uri, {
           headers: this[kProxyHeaders],
           connect,
           factory: agentFactory,
@@ -185,18 +200,18 @@ class ProxyAgent extends DispatcherBase {
         });
       }
       if (!shouldProxyTunnel(protocol, this[kTunnelProxy])) {
-        const forwardConnect = this[_kProxy].protocol === 'https:' ? (opts, cb) => connectHTTP1(opts, (err, socket) => {
+        const forwardConnect = this[kProxy].protocol === 'https:' ? (opts, cb) => connectHTTP1(opts, (err, socket) => {
           if (err && err.code === 'ERR_TLS_CERT_ALTNAME_INVALID') {
-            cb(new _SecureProxyConnectionError(err));
+            cb(new SecureProxyConnectionError(err));
           } else {
             cb(err, socket);
           }
         }) : connectHTTP1;
-        return new Http1ProxyWrapper(this[_kProxy].uri, {
+        return new Http1ProxyWrapper(this[kProxy].uri, {
           headers: this[kProxyHeaders],
           connect: forwardConnect,
           factory: agentFactory,
-          proxyServername: this[_kProxy].protocol === 'https:' ? this[kProxyTls]?.servername || proxyHostname : undefined
+          proxyServername: this[kProxy].protocol === 'https:' ? this[kProxyTls]?.servername || proxyHostname : undefined
         });
       }
       return agentFactory(origin, options);
@@ -218,7 +233,7 @@ class ProxyAgent extends DispatcherBase {
         // SOCKS5 proxies handle their own connections via Socks5ProxyAgent,
         // so this connect function should never be called for them.
         if (!this[kClient]) {
-          callback(new _InvalidArgumentError('Cannot establish tunnel connection without a proxy client'));
+          callback(new InvalidArgumentError('Cannot establish tunnel connection without a proxy client'));
           return;
         }
         let requestedPath = opts.host;
@@ -246,11 +261,11 @@ class ProxyAgent extends DispatcherBase {
           } = await this[kClient].connect(connectParams);
           if (statusCode !== 200) {
             socket.on('error', noop).destroy();
-            callback(new _RequestAbortedError(`Proxy response (${statusCode}) !== 200 when HTTP Tunneling`));
+            callback(new RequestAbortedError(`Proxy response (${statusCode}) !== 200 when HTTP Tunneling`));
             return;
           }
-          if (_channels.proxyConnected.hasSubscribers) {
-            _channels.proxyConnected.publish({
+          if (channels.proxyConnected.hasSubscribers) {
+            channels.proxyConnected.publish({
               socket,
               connectParams
             });
@@ -274,7 +289,7 @@ class ProxyAgent extends DispatcherBase {
         } catch (err) {
           if (err.code === 'ERR_TLS_CERT_ALTNAME_INVALID') {
             // Throw a custom error to avoid loop in client.js#connect
-            callback(new _SecureProxyConnectionError(err));
+            callback(new SecureProxyConnectionError(err));
           } else if (err.code === 'UND_ERR_SOCKET') {
             // A socket failure while establishing the tunnel means the CONNECT
             // never completed, so there is nothing to recover - the proxy just
@@ -282,7 +297,7 @@ class ProxyAgent extends DispatcherBase {
             // as a recoverable error on an established connection and leaves the
             // request queued, which makes connect() retry forever. Surface it as
             // a non-recoverable proxy error so the request fails instead. (#3897)
-            callback(new _ProxyConnectionError(err));
+            callback(new ProxyConnectionError(err));
           } else {
             callback(err);
           }
@@ -318,14 +333,14 @@ class ProxyAgent extends DispatcherBase {
       return new URL(opts.uri);
     }
   }
-  [_kClose]() {
+  [kClose]() {
     const promises = [this[kAgent].close()];
     if (this[kClient]) {
       promises.push(this[kClient].close());
     }
     return Promise.all(promises);
   }
-  [_kDestroy]() {
+  [kDestroy]() {
     const promises = [this[kAgent].destroy()];
     if (this[kClient]) {
       promises.push(this[kClient].destroy());
@@ -379,7 +394,7 @@ function isProxyAuthorizationHeader(key) {
   return key.length === proxyAuthorization.length && key.toLowerCase() === proxyAuthorization;
 }
 function throwProxyAuthError() {
-  throw new _InvalidArgumentError('Proxy-Authorization should be sent in ProxyAgent constructor');
+  throw new InvalidArgumentError('Proxy-Authorization should be sent in ProxyAgent constructor');
 }
 const _cjs_default = ProxyAgent;
 export default _cjs_default;

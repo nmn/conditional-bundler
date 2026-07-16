@@ -1,7 +1,19 @@
-import { webidl as _webidl } from "../../webidl";
-import { validateCloseCodeAndReason as _validateCloseCodeAndReason } from "../util";
-import { kConstruct as _kConstruct } from "../../../core/symbols";
-import { kEnumerableProperty as _kEnumerableProperty } from "../../../core/util";
+import _cjs_import from "../../webidl";
+import _cjs_import2 from "../util";
+import _cjs_import3 from "../../../core/symbols";
+import _cjs_import4 from "../../../core/util";
+const {
+  webidl
+} = _cjs_import;
+const {
+  validateCloseCodeAndReason
+} = _cjs_import2;
+const {
+  kConstruct
+} = _cjs_import3;
+const {
+  kEnumerableProperty
+} = _cjs_import4;
 function createInheritableDOMException() {
   // https://github.com/nodejs/node/issues/59677
   class Test extends DOMException {
@@ -24,15 +36,15 @@ class WebSocketError extends createInheritableDOMException() {
   #closeCode;
   #reason;
   constructor(message = '', init = undefined) {
-    message = _webidl.converters.DOMString(message, 'WebSocketError', 'message');
+    message = webidl.converters.DOMString(message, 'WebSocketError', 'message');
 
     // 1. Set this 's name to " WebSocketError ".
     // 2. Set this 's message to message .
     super(message, 'WebSocketError');
-    if (init === _kConstruct) {
+    if (init === kConstruct) {
       return;
     } else if (init !== null) {
-      init = _webidl.converters.WebSocketCloseInfo(init);
+      init = webidl.converters.WebSocketCloseInfo(init);
     }
 
     // 3. Let code be init [" closeCode "] if it exists , or null otherwise.
@@ -42,7 +54,7 @@ class WebSocketError extends createInheritableDOMException() {
     const reason = init.reason ?? '';
 
     // 5. Validate close code and reason with code and reason .
-    _validateCloseCodeAndReason(code, reason);
+    validateCloseCodeAndReason(code, reason);
 
     // 6. If reason is non-empty, but code is not set, then set code to 1000 ("Normal Closure").
     if (reason.length !== 0 && code === null) {
@@ -68,7 +80,7 @@ class WebSocketError extends createInheritableDOMException() {
    * @param {string} reason
    */
   static createUnvalidatedWebSocketError(message, code, reason) {
-    const error = new WebSocketError(message, _kConstruct);
+    const error = new WebSocketError(message, kConstruct);
     error.#closeCode = code;
     error.#reason = reason;
     return error;
@@ -79,8 +91,8 @@ const {
 } = WebSocketError;
 delete WebSocketError.createUnvalidatedWebSocketError;
 Object.defineProperties(WebSocketError.prototype, {
-  closeCode: _kEnumerableProperty,
-  reason: _kEnumerableProperty,
+  closeCode: kEnumerableProperty,
+  reason: kEnumerableProperty,
   [Symbol.toStringTag]: {
     value: 'WebSocketError',
     writable: false,
@@ -88,7 +100,7 @@ Object.defineProperties(WebSocketError.prototype, {
     configurable: true
   }
 });
-_webidl.is.WebSocketError = _webidl.util.MakeTypeAssertion(WebSocketError);
+webidl.is.WebSocketError = webidl.util.MakeTypeAssertion(WebSocketError);
 const _cjs_default = {
   WebSocketError,
   createUnvalidatedWebSocketError

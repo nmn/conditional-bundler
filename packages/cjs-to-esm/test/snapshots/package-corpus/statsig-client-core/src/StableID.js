@@ -1,8 +1,8 @@
-import { _getStorageKey } from "./CacheKey";
-import { Log as _Log } from "./Log";
-import { _getDocumentSafe } from "./SafeJs";
-import { _setObjectInStorage, _getObjectFromStorage } from "./StorageProvider";
-import { getUUID as _getUUID } from "./UUID";
+import CacheKey_1 from "./CacheKey";
+import Log_1 from "./Log";
+import SafeJs_1 from "./SafeJs";
+import StorageProvider_1 from "./StorageProvider";
+import UUID_1 from "./UUID";
 const PROMISE_MAP = {};
 const COOKIE_ENABLED_MAP = {};
 const DISABLED_MAP = {};
@@ -25,7 +25,7 @@ const _StableID = {
     }
     stableID = _loadFromStorage(sdkKey);
     if (stableID == null) {
-      stableID = (0, _getUUID)();
+      stableID = (0, UUID_1.getUUID)();
     }
     _persistToStorage(stableID, sdkKey);
     _persistToCookie(stableID, sdkKey);
@@ -46,22 +46,22 @@ const _StableID = {
 };
 export { _StableID as StableID };
 function _getStableIDStorageKey(sdkKey) {
-  return `statsig.stable_id.${(0, _getStorageKey)(sdkKey)}`;
+  return `statsig.stable_id.${(0, CacheKey_1._getStorageKey)(sdkKey)}`;
 }
 function _persistToStorage(stableID, sdkKey) {
   const storageKey = _getStableIDStorageKey(sdkKey);
   try {
-    (0, _setObjectInStorage)(storageKey, stableID);
+    (0, StorageProvider_1._setObjectInStorage)(storageKey, stableID);
   } catch (e) {
-    _Log.warn('Failed to save StableID to storage');
+    Log_1.Log.warn('Failed to save StableID to storage');
   }
 }
 function _loadFromStorage(sdkKey) {
   const storageKey = _getStableIDStorageKey(sdkKey);
-  return (0, _getObjectFromStorage)(storageKey);
+  return (0, StorageProvider_1._getObjectFromStorage)(storageKey);
 }
 function _loadFromCookie(sdkKey) {
-  if (!COOKIE_ENABLED_MAP[sdkKey] || (0, _getDocumentSafe)() == null) {
+  if (!COOKIE_ENABLED_MAP[sdkKey] || (0, SafeJs_1._getDocumentSafe)() == null) {
     return null;
   }
   const cookies = document.cookie.split(';');
@@ -74,7 +74,7 @@ function _loadFromCookie(sdkKey) {
   return null;
 }
 function _persistToCookie(stableID, sdkKey) {
-  if (!COOKIE_ENABLED_MAP[sdkKey] || (0, _getDocumentSafe)() == null) {
+  if (!COOKIE_ENABLED_MAP[sdkKey] || (0, SafeJs_1._getDocumentSafe)() == null) {
     return;
   }
   const expiryDate = new Date();
@@ -82,7 +82,7 @@ function _persistToCookie(stableID, sdkKey) {
   document.cookie = `${getCookieName(sdkKey)}=${encodeURIComponent(stableID)}; expires=${expiryDate.toUTCString()}; path=/`;
 }
 export function getCookieName(sdkKey) {
-  return `statsig.stable_id.${(0, _getStorageKey)(sdkKey)}`;
+  return `statsig.stable_id.${(0, CacheKey_1._getStorageKey)(sdkKey)}`;
 }
 const _cjs_default = {
   ["getCookieName"]: getCookieName,

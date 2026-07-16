@@ -1,9 +1,23 @@
-import { InvalidArgumentError as _InvalidArgumentError, MaxOriginsReachedError as _MaxOriginsReachedError } from "../core/errors";
-import { kBusy as _kBusy, kClients as _kClients, kConnected as _kConnected, kRunning as _kRunning, kClose as _kClose, kDestroy as _kDestroy, kDispatch as _kDispatch, kUrl as _kUrl } from "../core/symbols";
+import _cjs_import from "../core/errors";
+import _cjs_import2 from "../core/symbols";
 import DispatcherBase from "./dispatcher-base";
 import Pool from "./pool";
 import Client from "./client";
-import { deepClone as _deepClone } from "../core/util";
+import util from "../core/util";
+const {
+  InvalidArgumentError,
+  MaxOriginsReachedError
+} = _cjs_import;
+const {
+  kBusy,
+  kClients,
+  kConnected,
+  kRunning,
+  kClose,
+  kDestroy,
+  kDispatch,
+  kUrl
+} = _cjs_import2;
 const kOnConnect = Symbol('onConnect');
 const kOnDisconnect = Symbol('onDisconnect');
 const kOnConnectionError = Symbol('onConnectionError');
@@ -22,13 +36,13 @@ class Agent extends DispatcherBase {
     ...options
   } = {}) {
     if (typeof factory !== 'function') {
-      throw new _InvalidArgumentError('factory must be a function.');
+      throw new InvalidArgumentError('factory must be a function.');
     }
     if (connect != null && typeof connect !== 'function' && typeof connect !== 'object') {
-      throw new _InvalidArgumentError('connect must be a function or an object');
+      throw new InvalidArgumentError('connect must be a function or an object');
     }
     if (typeof maxOrigins !== 'number' || Number.isNaN(maxOrigins) || maxOrigins <= 0) {
-      throw new _InvalidArgumentError('maxOrigins must be a number greater than 0');
+      throw new InvalidArgumentError('maxOrigins must be a number greater than 0');
     }
     super(options);
     if (connect && typeof connect !== 'function') {
@@ -37,12 +51,12 @@ class Agent extends DispatcherBase {
       };
     }
     this[kOptions] = {
-      ..._deepClone(options),
+      ...util.deepClone(options),
       maxOrigins,
       connect
     };
     this[kFactory] = factory;
-    this[_kClients] = new Map();
+    this[kClients] = new Map();
     this[kOrigins] = new Set();
     this[kOnDrain] = (origin, targets) => {
       this.emit('drain', origin, [this, ...targets]);
@@ -57,51 +71,51 @@ class Agent extends DispatcherBase {
       this.emit('connectionError', origin, [this, ...targets], err);
     };
   }
-  get [_kRunning]() {
+  get [kRunning]() {
     let ret = 0;
-    for (const dispatcher of this[_kClients].values()) {
-      ret += dispatcher[_kRunning];
+    for (const dispatcher of this[kClients].values()) {
+      ret += dispatcher[kRunning];
     }
     return ret;
   }
-  [_kDispatch](opts, handler) {
+  [kDispatch](opts, handler) {
     let origin;
     if (opts.origin && (typeof opts.origin === 'string' || opts.origin instanceof URL)) {
       origin = String(opts.origin);
     } else {
-      throw new _InvalidArgumentError('opts.origin must be a non-empty string or URL.');
+      throw new InvalidArgumentError('opts.origin must be a non-empty string or URL.');
     }
     const allowH2 = opts.allowH2 ?? this[kOptions].allowH2;
     const key = allowH2 === false ? `${origin}#http1-only` : origin;
     if (this[kOrigins].size >= this[kOptions].maxOrigins && !this[kOrigins].has(origin)) {
-      throw new _MaxOriginsReachedError();
+      throw new MaxOriginsReachedError();
     }
-    let dispatcher = this[_kClients].get(key);
+    let dispatcher = this[kClients].get(key);
     if (!dispatcher) {
       dispatcher = this[kFactory](opts.origin, allowH2 === false ? {
         ...this[kOptions],
         allowH2: false
       } : this[kOptions]);
       const closeClientIfUnused = () => {
-        if (this[_kClients].get(key) !== dispatcher) {
+        if (this[kClients].get(key) !== dispatcher) {
           return;
         }
-        if (dispatcher[_kConnected] > 0 || dispatcher[_kBusy]) {
+        if (dispatcher[kConnected] > 0 || dispatcher[kBusy]) {
           return;
         }
-        this[_kClients].delete(key);
+        this[kClients].delete(key);
         if (!dispatcher.destroyed) {
           dispatcher.close();
         }
         let hasOrigin = false;
-        for (const client of this[_kClients].values()) {
-          if (client[_kUrl].origin === dispatcher[_kUrl].origin) {
+        for (const client of this[kClients].values()) {
+          if (client[kUrl].origin === dispatcher[kUrl].origin) {
             hasOrigin = true;
             break;
           }
         }
         if (!hasOrigin) {
-          this[kOrigins].delete(dispatcher[_kUrl].origin);
+          this[kOrigins].delete(dispatcher[kUrl].origin);
         }
       };
       dispatcher.on('drain', this[kOnDrain]).on('connect', this[kOnConnect]).on('disconnect', (origin, targets, err) => {
@@ -111,32 +125,32 @@ class Agent extends DispatcherBase {
         closeClientIfUnused();
         this[kOnConnectionError](origin, targets, err);
       });
-      this[_kClients].set(key, dispatcher);
+      this[kClients].set(key, dispatcher);
       this[kOrigins].add(origin);
     }
     return dispatcher.dispatch(opts, handler);
   }
-  [_kClose]() {
+  [kClose]() {
     const closePromises = [];
-    for (const dispatcher of this[_kClients].values()) {
+    for (const dispatcher of this[kClients].values()) {
       closePromises.push(dispatcher.close());
     }
-    this[_kClients].clear();
+    this[kClients].clear();
     return Promise.all(closePromises);
   }
-  [_kDestroy](err) {
+  [kDestroy](err) {
     const destroyPromises = [];
-    for (const dispatcher of this[_kClients].values()) {
+    for (const dispatcher of this[kClients].values()) {
       destroyPromises.push(dispatcher.destroy(err));
     }
-    this[_kClients].clear();
+    this[kClients].clear();
     return Promise.all(destroyPromises);
   }
   get stats() {
     const allClientStats = {};
-    for (const dispatcher of this[_kClients].values()) {
+    for (const dispatcher of this[kClients].values()) {
       if (dispatcher.stats) {
-        allClientStats[dispatcher[_kUrl].origin] = dispatcher.stats;
+        allClientStats[dispatcher[kUrl].origin] = dispatcher.stats;
       }
     }
     return allClientStats;

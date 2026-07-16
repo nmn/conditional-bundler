@@ -1,5 +1,13 @@
 import * as assert from "node:assert";
-import { forgivingBase64 as _forgivingBase, collectASequenceOfCodePoints as _collectASequenceOfCodePoints, collectASequenceOfCodePointsFast as _collectASequenceOfCodePointsFast, isomorphicDecode as _isomorphicDecode, removeASCIIWhitespace as _removeASCIIWhitespace, removeChars as _removeChars } from "../infra";
+import _cjs_import from "../infra";
+const {
+  forgivingBase64,
+  collectASequenceOfCodePoints,
+  collectASequenceOfCodePointsFast,
+  isomorphicDecode,
+  removeASCIIWhitespace,
+  removeChars
+} = _cjs_import;
 const encoder = new TextEncoder();
 
 /**
@@ -35,7 +43,7 @@ function dataURLProcessor(dataURL) {
   // 5. Let mimeType be the result of collecting a
   // sequence of code points that are not equal
   // to U+002C (,), given position.
-  let mimeType = _collectASequenceOfCodePointsFast(',', input, position);
+  let mimeType = collectASequenceOfCodePointsFast(',', input, position);
 
   // 6. Strip leading and trailing ASCII whitespace
   // from mimeType.
@@ -44,7 +52,7 @@ function dataURLProcessor(dataURL) {
   // the wrong amount will be sliced from the input in
   // step #9
   const mimeTypeLength = mimeType.length;
-  mimeType = _removeASCIIWhitespace(mimeType, true, true);
+  mimeType = removeASCIIWhitespace(mimeType, true, true);
 
   // 7. If position is past the end of input, then
   // return failure
@@ -66,11 +74,11 @@ function dataURLProcessor(dataURL) {
   // case-insensitive match for "base64", then:
   if (/;(?:\u0020*)base64$/ui.test(mimeType)) {
     // 1. Let stringBody be the isomorphic decode of body.
-    const stringBody = _isomorphicDecode(body);
+    const stringBody = isomorphicDecode(body);
 
     // 2. Set body to the forgiving-base64 decode of
     // stringBody.
-    body = _forgivingBase(stringBody);
+    body = forgivingBase64(stringBody);
 
     // 3. If body is failure, then return failure.
     if (body === 'failure') {
@@ -220,7 +228,7 @@ function parseMIMEType(input) {
   // 3. Let type be the result of collecting a sequence
   // of code points that are not U+002F (/) from
   // input, given position.
-  const type = _collectASequenceOfCodePointsFast('/', input, position);
+  const type = collectASequenceOfCodePointsFast('/', input, position);
 
   // 4. If type is the empty string or does not solely
   // contain HTTP token code points, then return failure.
@@ -241,7 +249,7 @@ function parseMIMEType(input) {
   // 7. Let subtype be the result of collecting a sequence of
   // code points that are not U+003B (;) from input, given
   // position.
-  let subtype = _collectASequenceOfCodePointsFast(';', input, position);
+  let subtype = collectASequenceOfCodePointsFast(';', input, position);
 
   // 8. Remove any trailing HTTP whitespace from subtype.
   subtype = removeHTTPWhitespace(subtype, false, true);
@@ -274,14 +282,14 @@ function parseMIMEType(input) {
 
     // 2. Collect a sequence of code points that are HTTP
     // whitespace from input given position.
-    _collectASequenceOfCodePoints(
+    collectASequenceOfCodePoints(
     // https://fetch.spec.whatwg.org/#http-whitespace
     char => HTTP_WHITESPACE_REGEX.test(char), input, position);
 
     // 3. Let parameterName be the result of collecting a
     // sequence of code points that are not U+003B (;)
     // or U+003D (=) from input, given position.
-    let parameterName = _collectASequenceOfCodePoints(char => char !== ';' && char !== '=', input, position);
+    let parameterName = collectASequenceOfCodePoints(char => char !== ';' && char !== '=', input, position);
 
     // 4. Set parameterName to parameterName, in ASCII
     // lowercase.
@@ -317,14 +325,14 @@ function parseMIMEType(input) {
 
       // 2. Collect a sequence of code points that are not
       // U+003B (;) from input, given position.
-      _collectASequenceOfCodePointsFast(';', input, position);
+      collectASequenceOfCodePointsFast(';', input, position);
 
       // 9. Otherwise:
     } else {
       // 1. Set parameterValue to the result of collecting
       // a sequence of code points that are not U+003B (;)
       // from input, given position.
-      parameterValue = _collectASequenceOfCodePointsFast(';', input, position);
+      parameterValue = collectASequenceOfCodePointsFast(';', input, position);
 
       // 2. Remove any trailing HTTP whitespace from parameterValue.
       parameterValue = removeHTTPWhitespace(parameterValue, false, true);
@@ -376,7 +384,7 @@ function collectAnHTTPQuotedString(input, position, extractValue = false) {
     // 1. Append the result of collecting a sequence of code points
     // that are not U+0022 (") or U+005C (\) from input, given
     // position, to value.
-    value += _collectASequenceOfCodePoints(char => char !== '"' && char !== '\\', input, position);
+    value += collectASequenceOfCodePoints(char => char !== '"' && char !== '\\', input, position);
 
     // 2. If position is past the end of input, then break.
     if (position.position >= input.length) {
@@ -488,7 +496,7 @@ function isHTTPWhiteSpace(char) {
  * @param {boolean} [trailing=true]
  */
 function removeHTTPWhitespace(str, leading = true, trailing = true) {
-  return _removeChars(str, leading, trailing, isHTTPWhiteSpace);
+  return removeChars(str, leading, trailing, isHTTPWhiteSpace);
 }
 
 /**

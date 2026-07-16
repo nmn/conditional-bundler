@@ -1,4 +1,8 @@
-import { makeRequest as _makeRequest } from "../fetch/request";
+import _cjs_import from "../fetch/request";
+const {
+  makeRequest
+} = _cjs_import;
+
 /**
  * Checks if the given value is a valid LastEventId.
  * @param {string} value
@@ -40,7 +44,7 @@ function createPotentialCORSRequest(url, destination, corsAttributeState, sameOr
 
   // 5. Return a new request whose URL is url, destination is destination, mode is mode,
   //    credentials mode is credentialsMode, and whose use-URL-credentials flag is set.
-  return _makeRequest({
+  return makeRequest({
     urlList: [url],
     destination,
     mode,

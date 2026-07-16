@@ -1,6 +1,6 @@
-import { Log as _Log } from "./Log";
-import { SDKType as _SDKType } from "./SDKType";
-import { StatsigMetadataProvider as _StatsigMetadataProvider } from "./StatsigMetadata";
+import Log_1 from "./Log";
+import SDKType_1 from "./SDKType";
+import StatsigMetadata_1 from "./StatsigMetadata";
 var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function (resolve) {
@@ -123,7 +123,7 @@ export class ErrorBoundary {
   }
   _onError(tag, error, bypassDedupe = false, extra) {
     try {
-      _Log.warn(`Caught error in ${tag}`, {
+      Log_1.Log.warn(`Caught error in ${tag}`, {
         error
       });
       const impl = () => __awaiter(this, void 0, void 0, function* () {
@@ -145,8 +145,8 @@ export class ErrorBoundary {
           });
           return;
         }
-        const sdkType = _SDKType._get(this._sdkKey);
-        const statsigMetadata = _StatsigMetadataProvider.get();
+        const sdkType = SDKType_1.SDKType._get(this._sdkKey);
+        const statsigMetadata = StatsigMetadata_1.StatsigMetadataProvider.get();
         const info = isError ? unwrapped.stack : _getDescription(unwrapped);
         const body = Object.assign(Object.assign({
           tag,

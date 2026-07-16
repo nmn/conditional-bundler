@@ -1,7 +1,7 @@
 import $ from "../internals/export";
 import globalThis from "../internals/global-this";
-import { clear as _clear } from "../internals/task";
-var clearImmediate = _clear;
+import _cjs_import from "../internals/task";
+var clearImmediate = _cjs_import.clear;
 
 // `clearImmediate` method
 // http://w3c.github.io/setImmediate/#si-clearImmediate

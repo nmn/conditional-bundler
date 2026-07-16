@@ -1,8 +1,23 @@
-import { BalancedPoolMissingUpstreamError as _BalancedPoolMissingUpstreamError, InvalidArgumentError as _InvalidArgumentError } from "../core/errors";
-import { PoolBase as _PoolBase, kClients as _kClients, kNeedDrain as _kNeedDrain, kAddClient as _kAddClient, kRemoveClient as _kRemoveClient, kGetDispatcher as _kGetDispatcher } from "./pool-base";
+import _cjs_import from "../core/errors";
+import _cjs_import2 from "./pool-base";
 import Pool from "./pool";
-import { kUrl as _kUrl } from "../core/symbols";
-import { deepClone as _deepClone, parseOrigin as _parseOrigin } from "../core/util";
+import _cjs_import3 from "../core/symbols";
+import util from "../core/util";
+const {
+  BalancedPoolMissingUpstreamError,
+  InvalidArgumentError
+} = _cjs_import;
+const {
+  PoolBase,
+  kClients,
+  kNeedDrain,
+  kAddClient,
+  kRemoveClient,
+  kGetDispatcher
+} = _cjs_import2;
+const {
+  kUrl
+} = _cjs_import3;
 const kFactory = Symbol('factory');
 const kOptions = Symbol('options');
 const kGreatestCommonDivisor = Symbol('kGreatestCommonDivisor');
@@ -32,17 +47,17 @@ function getGreatestCommonDivisor(a, b) {
 function defaultFactory(origin, opts) {
   return new Pool(origin, opts);
 }
-class BalancedPool extends _PoolBase {
+class BalancedPool extends PoolBase {
   constructor(upstreams = [], {
     factory = defaultFactory,
     ...opts
   } = {}) {
     if (typeof factory !== 'function') {
-      throw new _InvalidArgumentError('factory must be a function.');
+      throw new InvalidArgumentError('factory must be a function.');
     }
     super();
     this[kOptions] = {
-      ..._deepClone(opts)
+      ...util.deepClone(opts)
     };
     this[kIndex] = -1;
     this[kCurrentWeight] = 0;
@@ -58,12 +73,12 @@ class BalancedPool extends _PoolBase {
     this._updateBalancedPoolStats();
   }
   addUpstream(upstream) {
-    const upstreamOrigin = _parseOrigin(upstream).origin;
-    if (this[_kClients].find(pool => pool[_kUrl].origin === upstreamOrigin && pool.closed !== true && pool.destroyed !== true)) {
+    const upstreamOrigin = util.parseOrigin(upstream).origin;
+    if (this[kClients].find(pool => pool[kUrl].origin === upstreamOrigin && pool.closed !== true && pool.destroyed !== true)) {
       return this;
     }
     const pool = this[kFactory](upstreamOrigin, this[kOptions]);
-    this[_kAddClient](pool);
+    this[kAddClient](pool);
     pool.on('connect', () => {
       pool[kWeight] = Math.min(this[kMaxWeightPerServer], pool[kWeight] + this[kErrorPenalty]);
     });
@@ -79,7 +94,7 @@ class BalancedPool extends _PoolBase {
         this._updateBalancedPoolStats();
       }
     });
-    for (const client of this[_kClients]) {
+    for (const client of this[kClients]) {
       client[kWeight] = this[kMaxWeightPerServer];
     }
     this._updateBalancedPoolStats();
@@ -87,38 +102,38 @@ class BalancedPool extends _PoolBase {
   }
   _updateBalancedPoolStats() {
     let result = 0;
-    for (let i = 0; i < this[_kClients].length; i++) {
-      result = getGreatestCommonDivisor(this[_kClients][i][kWeight], result);
+    for (let i = 0; i < this[kClients].length; i++) {
+      result = getGreatestCommonDivisor(this[kClients][i][kWeight], result);
     }
     this[kGreatestCommonDivisor] = result;
   }
   removeUpstream(upstream) {
-    const upstreamOrigin = _parseOrigin(upstream).origin;
-    const pool = this[_kClients].find(pool => pool[_kUrl].origin === upstreamOrigin && pool.closed !== true && pool.destroyed !== true);
+    const upstreamOrigin = util.parseOrigin(upstream).origin;
+    const pool = this[kClients].find(pool => pool[kUrl].origin === upstreamOrigin && pool.closed !== true && pool.destroyed !== true);
     if (pool) {
-      this[_kRemoveClient](pool);
+      this[kRemoveClient](pool);
     }
     return this;
   }
   getUpstream(upstream) {
-    const upstreamOrigin = _parseOrigin(upstream).origin;
-    return this[_kClients].find(pool => pool[_kUrl].origin === upstreamOrigin && pool.closed !== true && pool.destroyed !== true);
+    const upstreamOrigin = util.parseOrigin(upstream).origin;
+    return this[kClients].find(pool => pool[kUrl].origin === upstreamOrigin && pool.closed !== true && pool.destroyed !== true);
   }
   get upstreams() {
-    return this[_kClients].filter(dispatcher => dispatcher.closed !== true && dispatcher.destroyed !== true).map(p => p[_kUrl].origin);
+    return this[kClients].filter(dispatcher => dispatcher.closed !== true && dispatcher.destroyed !== true).map(p => p[kUrl].origin);
   }
-  [_kGetDispatcher]() {
+  [kGetDispatcher]() {
     // We validate that pools is greater than 0,
     // otherwise we would have to wait until an upstream
     // is added, which might never happen.
-    if (this[_kClients].length === 0) {
-      throw new _BalancedPoolMissingUpstreamError();
+    if (this[kClients].length === 0) {
+      throw new BalancedPoolMissingUpstreamError();
     }
     let counter = 0;
     let maxWeightIndex = -1;
-    while (counter++ < this[_kClients].length) {
-      this[kIndex] = (this[kIndex] + 1) % this[_kClients].length;
-      const pool = this[_kClients][this[kIndex]];
+    while (counter++ < this[kClients].length) {
+      this[kIndex] = (this[kIndex] + 1) % this[kClients].length;
+      const pool = this[kClients][this[kIndex]];
 
       // decrease the current weight every `this[kClients].length`.
       if (this[kIndex] === 0) {
@@ -130,12 +145,12 @@ class BalancedPool extends _PoolBase {
       }
 
       // Skip unavailable pools after updating the current weight for this cycle.
-      if (pool[_kNeedDrain] || pool.closed === true || pool.destroyed === true) {
+      if (pool[kNeedDrain] || pool.closed === true || pool.destroyed === true) {
         continue;
       }
 
       // Track the best fallback if no pool matches the current weight.
-      if (maxWeightIndex === -1 || pool[kWeight] > this[_kClients][maxWeightIndex][kWeight]) {
+      if (maxWeightIndex === -1 || pool[kWeight] > this[kClients][maxWeightIndex][kWeight]) {
         maxWeightIndex = this[kIndex];
       }
       if (pool[kWeight] >= this[kCurrentWeight]) {
@@ -145,9 +160,9 @@ class BalancedPool extends _PoolBase {
     if (maxWeightIndex === -1) {
       return;
     }
-    this[kCurrentWeight] = this[_kClients][maxWeightIndex][kWeight];
+    this[kCurrentWeight] = this[kClients][maxWeightIndex][kWeight];
     this[kIndex] = maxWeightIndex;
-    return this[_kClients][maxWeightIndex];
+    return this[kClients][maxWeightIndex];
   }
 }
 const _cjs_default = BalancedPool;

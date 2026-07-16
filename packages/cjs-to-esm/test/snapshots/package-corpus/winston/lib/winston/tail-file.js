@@ -1,9 +1,13 @@
 import * as fs from "node:fs";
 import * as _cjs_import from "node:string_decoder";
-import { Stream as _Stream } from "readable-stream";
+import _cjs_import2 from "readable-stream";
 const {
   StringDecoder
 } = _cjs_import;
+const {
+  Stream
+} = _cjs_import2;
+
 /**
  * Simple no-op function.
  * @returns {undefined}
@@ -20,7 +24,7 @@ function noop() {}
 const _cjs_default = (options, iter) => {
   const buffer = Buffer.alloc(64 * 1024);
   const decode = new StringDecoder('utf8');
-  const stream = new _Stream();
+  const stream = new Stream();
   let buff = '';
   let pos = 0;
   let row = 0;

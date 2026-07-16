@@ -1,8 +1,8 @@
-import { aTypedArray as _aTypedArray, exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
 import lengthOfArrayLike from "../internals/length-of-array-like";
 import toIntegerOrInfinity from "../internals/to-integer-or-infinity";
-var aTypedArray = _aTypedArray;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
 
 // `%TypedArray%.prototype.at` method
 // https://tc39.es/ecma262/#sec-%typedarray%.prototype.at

@@ -1,7 +1,7 @@
 import $ from "../internals/export";
-import { map as _map } from "../internals/array-iteration";
+import _cjs_import from "../internals/array-iteration";
 import arrayMethodHasSpeciesSupport from "../internals/array-method-has-species-support";
-var $map = _map;
+var $map = _cjs_import.map;
 var HAS_SPECIES_SUPPORT = arrayMethodHasSpeciesSupport('map');
 
 // `Array.prototype.map` method

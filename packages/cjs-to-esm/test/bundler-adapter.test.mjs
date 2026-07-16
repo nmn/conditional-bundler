@@ -1,7 +1,5 @@
-import path from "node:path";
 import { fileURLToPath } from "node:url";
 import cjsToEsmBundlerPlugin from "../bundler.mjs";
-import { decodeCjsVirtualId, encodeCjsVirtualId } from "../index.mjs";
 
 const fixture = fileURLToPath(
   new URL("./fixtures/static-basic.cjs", import.meta.url),
@@ -11,24 +9,20 @@ async function resolve({ buildMode, fromMode, kind, condition }) {
   const plugin = cjsToEsmBundlerPlugin({ mode: buildMode });
   return plugin.resolveImport({
     request: "./static-basic.cjs",
-    fromId: encodeCjsVirtualId(
-      "client",
-      "/project/parent.cjs",
-      undefined,
-      fromMode,
-    ),
+    fromId: "/project/parent.cjs",
+    importerMeta: { format: "commonjs", mode: fromMode },
     envId: "client",
     kind,
     importAttributes: condition ? { condition } : undefined,
     resolveDefault: async () => ({
       id: fixture,
       filePath: fixture,
-      external: false,
+      moduleIdentity: "fixture@0.0.0::static-basic.cjs",
     }),
   });
 }
 
-test("the build NODE_ENV overrides import attributes and parent modes", async () => {
+test("resolves CommonJS dependencies to the same real file in every mode", async () => {
   const production = await resolve({
     buildMode: "production",
     fromMode: "development",
@@ -42,23 +36,27 @@ test("the build NODE_ENV overrides import attributes and parent modes", async ()
     condition: "env:NODE_ENV=production",
   });
 
-  expect(decodeCjsVirtualId(production.id)).toMatchObject({
-    mode: "production",
-    filePath: path.resolve(fixture),
+  expect(production).toMatchObject({
+    id: fixture,
+    filePath: fixture,
+    type: "javascript",
+    meta: { format: "commonjs" },
   });
-  expect(decodeCjsVirtualId(development.id)).toMatchObject({
-    mode: "development",
-    filePath: path.resolve(fixture),
+  expect(development).toMatchObject({
+    id: fixture,
+    filePath: fixture,
+    type: "javascript",
+    meta: { format: "commonjs" },
   });
 });
 
-test("ordinary CJS dependencies use the build NODE_ENV", async () => {
+test("ordinary CJS dependencies retain explicit format metadata", async () => {
   const resolved = await resolve({
     buildMode: "development",
     fromMode: "production",
     kind: "import",
   });
-  expect(decodeCjsVirtualId(resolved.id).mode).toBe("development");
+  expect(resolved.meta).toEqual({ format: "commonjs" });
 });
 
 test("captures NODE_ENV in transform options for cache fingerprinting", () => {

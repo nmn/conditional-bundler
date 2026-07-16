@@ -1,20 +1,28 @@
-import { kConnected as _kConnected, kPending as _kPending, kRunning as _kRunning, kSize as _kSize, kFree as _kFree, kQueued as _kQueued } from "../core/symbols";
+import _cjs_import from "../core/symbols";
+const {
+  kConnected,
+  kPending,
+  kRunning,
+  kSize,
+  kFree,
+  kQueued
+} = _cjs_import;
 class ClientStats {
   constructor(client) {
-    this.connected = client[_kConnected];
-    this.pending = client[_kPending];
-    this.running = client[_kRunning];
-    this.size = client[_kSize];
+    this.connected = client[kConnected];
+    this.pending = client[kPending];
+    this.running = client[kRunning];
+    this.size = client[kSize];
   }
 }
 class PoolStats {
   constructor(pool) {
-    this.connected = pool[_kConnected];
-    this.free = pool[_kFree];
-    this.pending = pool[_kPending];
-    this.queued = pool[_kQueued];
-    this.running = pool[_kRunning];
-    this.size = pool[_kSize];
+    this.connected = pool[kConnected];
+    this.free = pool[kFree];
+    this.pending = pool[kPending];
+    this.queued = pool[kQueued];
+    this.running = pool[kRunning];
+    this.size = pool[kSize];
   }
 }
 const _cjs_default = {

@@ -1,8 +1,8 @@
 import $ from "../internals/export";
 import anObject from "../internals/an-object";
-import { f as _f } from "../internals/object-get-own-property-descriptor";
+import _cjs_import from "../internals/object-get-own-property-descriptor";
 import toPropertyKey from "../internals/to-property-key";
-var getOwnPropertyDescriptor = _f;
+var getOwnPropertyDescriptor = _cjs_import.f;
 // `Reflect.deleteProperty` method
 // https://tc39.es/ecma262/#sec-reflect.deleteproperty
 $({

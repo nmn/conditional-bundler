@@ -1,6 +1,14 @@
-import { safeHTTPMethods as _safeHTTPMethods } from "../core/util";
-import { parseCacheControlHeader as _parseCacheControlHeader, parseVaryHeader as _parseVaryHeader, isEtagUsable as _isEtagUsable } from "../util/cache";
-import { parseHttpDate as _parseHttpDate } from "../util/date.js";
+import util from "../core/util";
+import _cjs_import from "../util/cache";
+import _cjs_import2 from "../util/date.js";
+const {
+  parseCacheControlHeader,
+  parseVaryHeader,
+  isEtagUsable
+} = _cjs_import;
+const {
+  parseHttpDate
+} = _cjs_import2;
 function noop() {}
 
 // Status codes that we can use some heuristics on to cache
@@ -84,7 +92,7 @@ class CacheHandler {
   onResponseStart(controller, statusCode, resHeaders, statusMessage) {
     const downstreamOnHeaders = () => this.#handler.onResponseStart?.(controller, statusCode, resHeaders, statusMessage);
     const handler = this;
-    if (!_safeHTTPMethods.includes(this.#cacheKey.method) && statusCode >= 200 && statusCode <= 399) {
+    if (!util.safeHTTPMethods.includes(this.#cacheKey.method) && statusCode >= 200 && statusCode <= 399) {
       // Successful response to an unsafe method, delete it from cache
       //  https://www.rfc-editor.org/rfc/rfc9111.html#name-invalidating-stored-response
       try {
@@ -101,7 +109,7 @@ class CacheHandler {
       //  caching by default
       return downstreamOnHeaders();
     }
-    const cacheControlDirectives = cacheControlHeader ? _parseCacheControlHeader(cacheControlHeader) : {};
+    const cacheControlDirectives = cacheControlHeader ? parseCacheControlHeader(cacheControlHeader) : {};
     if (!canCacheResponse(this.#cacheType, statusCode, resHeaders, cacheControlDirectives, this.#cacheKey.headers)) {
       return downstreamOnHeaders();
     }
@@ -111,7 +119,7 @@ class CacheHandler {
       // Response considered stale
       return downstreamOnHeaders();
     }
-    const resDate = typeof resHeaders.date === 'string' ? _parseHttpDate(resHeaders.date) : undefined;
+    const resDate = typeof resHeaders.date === 'string' ? parseHttpDate(resHeaders.date) : undefined;
     const staleAt = determineStaleAt(this.#cacheType, now, resAge, resHeaders, resDate, cacheControlDirectives) ?? this.#cacheByDefault;
     if (staleAt === undefined || resAge && resAge > staleAt) {
       return downstreamOnHeaders();
@@ -124,7 +132,7 @@ class CacheHandler {
     }
     let varyDirectives;
     if (this.#cacheKey.headers && resHeaders.vary) {
-      varyDirectives = _parseVaryHeader(resHeaders.vary, this.#cacheKey.headers);
+      varyDirectives = parseVaryHeader(resHeaders.vary, this.#cacheKey.headers);
       if (!varyDirectives) {
         // Parse error
         return downstreamOnHeaders();
@@ -225,7 +233,7 @@ class CacheHandler {
         handle304(result);
       }
     } else {
-      if (typeof resHeaders.etag === 'string' && _isEtagUsable(resHeaders.etag)) {
+      if (typeof resHeaders.etag === 'string' && isEtagUsable(resHeaders.etag)) {
         value.etag = resHeaders.etag;
       }
       this.#writeStream = this.#store.createWriteStream(this.#cacheKey, value);
@@ -353,7 +361,7 @@ function determineStaleAt(cacheType, now, age, resHeaders, responseDate, cacheCo
   }
   if (typeof resHeaders.expires === 'string') {
     // https://www.rfc-editor.org/rfc/rfc9111.html#section-5.3
-    const expiresDate = _parseHttpDate(resHeaders.expires);
+    const expiresDate = parseHttpDate(resHeaders.expires);
     if (expiresDate) {
       if (now >= expiresDate.getTime()) {
         return undefined;

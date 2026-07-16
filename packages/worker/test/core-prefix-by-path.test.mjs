@@ -1,5 +1,4 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { filePrefix } from "../../shared/src/hash.js";
 import {
   defaultFilePath,
@@ -31,21 +30,17 @@ test("changes the prefix when the module path changes", async () => {
   expect(trimCode(first)).not.toBe(trimCode(second));
 });
 
-test("uses the package-relative path for CJS virtual module prefixes", async () => {
+test("uses the portable package-relative identity for CJS module prefixes", async () => {
   const relativePath = "cjs/react-dom-client.production.js";
   const firstRoot = "/Users/first/project/node_modules/react-dom";
   const secondRoot = "/home/second/project/node_modules/react-dom";
-  const makeId = (filePath) =>
-    `virtual:cjs-to-esm:client:production:${Buffer.from(filePath).toString("base64url")}`;
   const code = "export const value = 1;";
 
   const first = await transform(code, {
-    id: makeId(path.posix.join(firstRoot, relativePath)),
     filePath: path.posix.join(firstRoot, relativePath),
     root: firstRoot,
   });
   const second = await transform(code, {
-    id: makeId(path.posix.join(secondRoot, relativePath)),
     filePath: path.posix.join(secondRoot, relativePath),
     root: secondRoot,
   });
@@ -55,13 +50,8 @@ test("uses the package-relative path for CJS virtual module prefixes", async () 
   expect(trimCode(second)).toBe(trimCode(first));
 });
 
-test("uses dependency package identity for imports from CJS virtual modules", async () => {
-  const dependencyRoot = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../../shared",
-  );
-  const dependencyPath = path.join(dependencyRoot, "src/hash.js");
-  const dependencyId = `virtual:cjs-to-esm:client:production:${Buffer.from(dependencyPath).toString("base64url")}`;
+test("uses a dependency's portable package identity for CJS imports", async () => {
+  const dependencyId = "@bundler/shared@0.1.0::src/hash.js";
   const dependencyPrefix = filePrefix(
     "@bundler/shared",
     "0.1.0",
@@ -72,9 +62,13 @@ test("uses dependency package identity for imports from CJS virtual modules", as
     {
       resolvedImports: {
         "import:react-dom/client": {
-          id: dependencyId,
-          filePath: dependencyPath,
-          external: false,
+          target: {
+            kind: "file",
+            moduleId: dependencyId,
+            canonicalPath: dependencyId,
+          },
+          type: "javascript",
+          intent: "module",
         },
       },
     },

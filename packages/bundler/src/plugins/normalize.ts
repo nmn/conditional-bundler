@@ -80,10 +80,11 @@ export async function normalizePlugins(plugins: BundlerPlugin[]): Promise<{
       name: plugin.name,
       buildStart: plugin.buildStart,
       resolveImport: plugin.resolveImport,
-      load: plugin.load,
+      transformDocument: plugin.transformDocument,
       beforeCombine: plugin.beforeCombine,
       afterCombine: plugin.afterCombine,
       buildEnd: plugin.buildEnd,
+      generateBundleResources: plugin.generateBundleResources,
     });
   }
 
@@ -104,6 +105,11 @@ function isModulePlugin(plugin: BundlerPlugin): plugin is ModuleBundlerPlugin {
 }
 
 function validateInlinePlugin(plugin: InlineBundlerPlugin): void {
+  if ("load" in plugin) {
+    throw new Error(
+      `Plugin '${plugin.name}' declares the removed 'load' hook. Resolver plugins may only return existing regular files or { preserve: true }.`,
+    );
+  }
   if (plugin.transform || plugin.transformPre || plugin.transformPost) {
     throw new Error(
       `Inline plugin '${plugin.name}' cannot declare worker-phase hooks. Use plugin(moduleSpecifier, options) instead.`,
@@ -130,6 +136,11 @@ async function loadModulePlugin(
   if (!plugin.name) {
     throw new Error(
       `Plugin module '${pluginRef.module}' is missing a plugin name.`,
+    );
+  }
+  if ("load" in plugin) {
+    throw new Error(
+      `Plugin '${plugin.name}' declares the removed 'load' hook. Resolver plugins may only return existing regular files or { preserve: true }.`,
     );
   }
 

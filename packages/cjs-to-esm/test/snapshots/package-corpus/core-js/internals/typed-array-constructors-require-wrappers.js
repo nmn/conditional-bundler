@@ -1,10 +1,10 @@
 import globalThis from "../internals/global-this";
 import fails from "../internals/fails";
 import checkCorrectnessOfIteration from "../internals/check-correctness-of-iteration";
-import { NATIVE_ARRAY_BUFFER_VIEWS as _NATIVE_ARRAY_BUFFER_VIEWS } from "../internals/array-buffer-view-core";
+import _cjs_import from "../internals/array-buffer-view-core";
 /* eslint-disable no-new, sonarjs/inconsistent-function-call -- required for testing */
 
-var NATIVE_ARRAY_BUFFER_VIEWS = _NATIVE_ARRAY_BUFFER_VIEWS;
+var NATIVE_ARRAY_BUFFER_VIEWS = _cjs_import.NATIVE_ARRAY_BUFFER_VIEWS;
 var ArrayBuffer = globalThis.ArrayBuffer;
 var Int8Array = globalThis.Int8Array;
 const _cjs_default = !NATIVE_ARRAY_BUFFER_VIEWS || !fails(function () {

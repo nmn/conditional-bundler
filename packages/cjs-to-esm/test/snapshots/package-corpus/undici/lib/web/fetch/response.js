@@ -689,12 +689,3 @@ if (!__cjs_default__) {
   __cjs_cache__.set("undici@8.7.0::lib/web/fetch/response.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
-export const Response = __cjs_default__["Response"];
-export const cloneResponse = __cjs_default__["cloneResponse"];
-export const filterResponse = __cjs_default__["filterResponse"];
-export const fromInnerResponse = __cjs_default__["fromInnerResponse"];
-export const getResponseState = __cjs_default__["getResponseState"];
-export const isNetworkError = __cjs_default__["isNetworkError"];
-export const makeAppropriateNetworkError = __cjs_default__["makeAppropriateNetworkError"];
-export const makeNetworkError = __cjs_default__["makeNetworkError"];
-export const makeResponse = __cjs_default__["makeResponse"];

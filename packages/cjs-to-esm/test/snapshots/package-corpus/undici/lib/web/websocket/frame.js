@@ -143,5 +143,3 @@ if (!__cjs_default__) {
   __cjs_cache__.set("undici@8.7.0::lib/web/websocket/frame.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
-export const WebsocketFrameSend = __cjs_default__["WebsocketFrameSend"];
-export const generateMask = __cjs_default__["generateMask"];

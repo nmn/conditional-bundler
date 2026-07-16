@@ -1160,10 +1160,3 @@ if (!__cjs_default__) {
   __cjs_cache__.set("undici@8.7.0::lib/web/fetch/request.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
-export const Request = __cjs_default__["Request"];
-export const cloneRequest = __cjs_default__["cloneRequest"];
-export const fromInnerRequest = __cjs_default__["fromInnerRequest"];
-export const getRequestDispatcher = __cjs_default__["getRequestDispatcher"];
-export const getRequestState = __cjs_default__["getRequestState"];
-export const makeRequest = __cjs_default__["makeRequest"];
-export const removeRequestAbortListener = __cjs_default__["removeRequestAbortListener"];

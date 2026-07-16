@@ -1,5 +1,5 @@
-import { Log as _Log } from "./Log";
-import { _isTypeMatch } from "./TypingUtils";
+import Log_1 from "./Log";
+import TypingUtils_1 from "./TypingUtils";
 function _makeEvaluation(name, details, evaluation, value) {
   var _a;
   return {
@@ -51,8 +51,8 @@ export function _makeTypedGet(name, value, exposeFunc) {
     if (found == null) {
       return fallback !== null && fallback !== void 0 ? fallback : null;
     }
-    if (fallback != null && !(0, _isTypeMatch)(found, fallback)) {
-      _Log.warn(`Parameter type mismatch. '${name}.${param}' was found to be type '${typeof found}' but fallback/return type is '${typeof fallback}'. See https://docs.statsig.com/client/javascript-sdk/#typed-getters`);
+    if (fallback != null && !(0, TypingUtils_1._isTypeMatch)(found, fallback)) {
+      Log_1.Log.warn(`Parameter type mismatch. '${name}.${param}' was found to be type '${typeof found}' but fallback/return type is '${typeof fallback}'. See https://docs.statsig.com/client/javascript-sdk/#typed-getters`);
       return fallback !== null && fallback !== void 0 ? fallback : null;
     }
     exposeFunc === null || exposeFunc === void 0 ? void 0 : exposeFunc(param);

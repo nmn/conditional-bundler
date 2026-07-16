@@ -14,15 +14,15 @@ import defineBuiltIns from "../internals/define-built-ins";
 import defineBuiltInAccessor from "../internals/define-built-in-accessor";
 import hostReportErrors from "../internals/host-report-errors";
 import wellKnownSymbol from "../internals/well-known-symbol";
-import { getterFor as _getterFor, set as _set } from "../internals/internal-state";
+import InternalStateModule from "../internals/internal-state";
 // https://github.com/tc39/proposal-observable
 
 var $$OBSERVABLE = wellKnownSymbol('observable');
 var OBSERVABLE = 'Observable';
 var SUBSCRIPTION = 'Subscription';
 var SUBSCRIPTION_OBSERVER = 'SubscriptionObserver';
-var getterFor = _getterFor;
-var setInternalState = _set;
+var getterFor = InternalStateModule.getterFor;
+var setInternalState = InternalStateModule.set;
 var getObservableInternalState = getterFor(OBSERVABLE);
 var getSubscriptionInternalState = getterFor(SUBSCRIPTION);
 var getSubscriptionObserverInternalState = getterFor(SUBSCRIPTION_OBSERVER);

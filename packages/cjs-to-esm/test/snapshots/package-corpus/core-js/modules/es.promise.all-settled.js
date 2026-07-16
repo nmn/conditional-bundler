@@ -1,7 +1,7 @@
 import $ from "../internals/export";
 import call from "../internals/function-call";
 import aCallable from "../internals/a-callable";
-import { f as _f } from "../internals/new-promise-capability";
+import newPromiseCapabilityModule from "../internals/new-promise-capability";
 import perform from "../internals/perform";
 import iterate from "../internals/iterate";
 import PROMISE_STATICS_INCORRECT_ITERATION from "../internals/promise-statics-incorrect-iteration";
@@ -14,7 +14,7 @@ $({
 }, {
   allSettled: function allSettled(iterable) {
     var C = this;
-    var capability = _f(C);
+    var capability = newPromiseCapabilityModule.f(C);
     var resolve = capability.resolve;
     var reject = capability.reject;
     var result = perform(function () {

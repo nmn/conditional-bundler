@@ -3,21 +3,21 @@ import create from "../internals/object-create";
 import createNonEnumerableProperty from "../internals/create-non-enumerable-property";
 import defineBuiltIns from "../internals/define-built-ins";
 import wellKnownSymbol from "../internals/well-known-symbol";
-import { set as _set, getterFor as _getterFor } from "../internals/internal-state";
+import InternalStateModule from "../internals/internal-state";
 import getMethod from "../internals/get-method";
-import { IteratorPrototype as _IteratorPrototype } from "../internals/iterators-core";
+import _cjs_import from "../internals/iterators-core";
 import createIterResultObject from "../internals/create-iter-result-object";
 import iteratorClose from "../internals/iterator-close";
 import iteratorCloseAll from "../internals/iterator-close-all";
-var IteratorPrototype = _IteratorPrototype;
+var IteratorPrototype = _cjs_import.IteratorPrototype;
 var TO_STRING_TAG = wellKnownSymbol('toStringTag');
 var ITERATOR_HELPER = 'IteratorHelper';
 var WRAP_FOR_VALID_ITERATOR = 'WrapForValidIterator';
 var NORMAL = 'normal';
 var THROW = 'throw';
-var setInternalState = _set;
+var setInternalState = InternalStateModule.set;
 var createIteratorProxyPrototype = function (IS_ITERATOR) {
-  var getInternalState = _getterFor(IS_ITERATOR ? WRAP_FOR_VALID_ITERATOR : ITERATOR_HELPER);
+  var getInternalState = InternalStateModule.getterFor(IS_ITERATOR ? WRAP_FOR_VALID_ITERATOR : ITERATOR_HELPER);
   return defineBuiltIns(create(IteratorPrototype), {
     next: function next() {
       var state = getInternalState(this);

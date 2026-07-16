@@ -1,7 +1,7 @@
 import "../modules/es.iterator.map";
 import call from "../internals/function-call";
-import { IteratorPrototype as _IteratorPrototype } from "../internals/iterators-core";
-var map = _IteratorPrototype.map;
+import _cjs_import from "../internals/iterators-core";
+var map = _cjs_import.IteratorPrototype.map;
 var callback = function (value, counter) {
   return [counter, value];
 };

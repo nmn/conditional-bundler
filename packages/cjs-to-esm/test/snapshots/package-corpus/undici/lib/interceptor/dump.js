@@ -1,5 +1,9 @@
-import { InvalidArgumentError as _InvalidArgumentError, RequestAbortedError as _RequestAbortedError } from "../core/errors";
+import _cjs_import from "../core/errors";
 import DecoratorHandler from "../handler/decorator-handler";
+const {
+  InvalidArgumentError,
+  RequestAbortedError
+} = _cjs_import;
 class DumpHandler extends DecoratorHandler {
   #maxSize = 1024 * 1024;
   #dumped = false;
@@ -12,7 +16,7 @@ class DumpHandler extends DecoratorHandler {
     signal
   }, handler) {
     if (maxSize != null && (!Number.isFinite(maxSize) || maxSize < 1)) {
-      throw new _InvalidArgumentError('maxSize must be a number greater than 0');
+      throw new InvalidArgumentError('maxSize must be a number greater than 0');
     }
     super(handler);
     this.#maxSize = maxSize ?? this.#maxSize;
@@ -30,7 +34,7 @@ class DumpHandler extends DecoratorHandler {
   onResponseStart(controller, statusCode, headers, statusMessage) {
     const contentLength = headers['content-length'];
     if (contentLength != null && contentLength > this.#maxSize) {
-      throw new _RequestAbortedError(`Response size (${contentLength}) larger than maxSize (${this.#maxSize})`);
+      throw new RequestAbortedError(`Response size (${contentLength}) larger than maxSize (${this.#maxSize})`);
     }
     if (this.aborted === true) {
       return true;

@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" href="./src/styles.css" integrity="sha384-stale" />
+    <style>
+      .inline {
+        color: green;
+      }
+    </style>
+  </head>
+  <body>
+    <img
+      src="./src/logo.svg"
+      srcset="./src/logo.svg 1x, ./src/logo.svg 2x"
+      alt="Logo"
+    />
+    <source srcset="data:image/png;base64,AAAA 1x, ./src/logo.svg 2x" />
+    <script type="module" src="./src/main.js" integrity="sha384-stale"></script>
+    <script type="module">
+      document.body.dataset.inline = "yes";
+    </script>
+  </body>
+</html>

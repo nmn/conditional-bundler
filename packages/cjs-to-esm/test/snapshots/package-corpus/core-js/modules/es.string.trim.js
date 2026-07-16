@@ -1,7 +1,7 @@
 import $ from "../internals/export";
-import { trim as _trim } from "../internals/string-trim";
+import _cjs_import from "../internals/string-trim";
 import forcedStringTrimMethod from "../internals/string-trim-forced";
-var $trim = _trim;
+var $trim = _cjs_import.trim;
 // `String.prototype.trim` method
 // https://tc39.es/ecma262/#sec-string.prototype.trim
 $({

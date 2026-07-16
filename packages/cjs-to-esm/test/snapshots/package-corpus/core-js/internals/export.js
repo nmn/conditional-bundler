@@ -1,11 +1,11 @@
 import globalThis from "../internals/global-this";
-import { f as _f } from "../internals/object-get-own-property-descriptor";
+import _cjs_import from "../internals/object-get-own-property-descriptor";
 import createNonEnumerableProperty from "../internals/create-non-enumerable-property";
 import defineBuiltIn from "../internals/define-built-in";
 import defineGlobalProperty from "../internals/define-global-property";
 import copyConstructorProperties from "../internals/copy-constructor-properties";
 import isForced from "../internals/is-forced";
-var getOwnPropertyDescriptor = _f;
+var getOwnPropertyDescriptor = _cjs_import.f;
 /*
   options.target         - name of the target object
   options.global         - target is the global object

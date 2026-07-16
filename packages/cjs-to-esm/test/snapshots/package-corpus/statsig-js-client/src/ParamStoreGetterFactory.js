@@ -1,4 +1,4 @@
-import { _isTypeMatch, _typeOf } from "@statsig/client-core";
+import client_core_1 from "@statsig/client-core";
 const NO_EXPOSURE_OPT = {
   disableExposureLog: true
 };
@@ -6,7 +6,7 @@ function _shouldLogExposure(options) {
   return options == null || options.disableExposureLog === false;
 }
 function _shouldReturnFallback(value, fallback) {
-  return fallback != null && !(0, _isTypeMatch)(value, fallback);
+  return fallback != null && !(0, client_core_1._isTypeMatch)(value, fallback);
 }
 function _getMappedStaticValue(param, _options) {
   return param.value;
@@ -48,7 +48,7 @@ export function _makeParamStoreGetter(client, config, options) {
       return fallback;
     }
     const param = config[paramName];
-    if (param == null || fallback != null && (0, _typeOf)(fallback) !== param.param_type) {
+    if (param == null || fallback != null && (0, client_core_1._typeOf)(fallback) !== param.param_type) {
       return fallback;
     }
     switch (param.ref_type) {

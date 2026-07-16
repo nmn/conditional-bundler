@@ -1,17 +1,35 @@
-import { MockNotMatchedError as _MockNotMatchedError } from "./mock-errors";
-import { kDispatches as _kDispatches, kMockAgent as _kMockAgent, kOriginalDispatch as _kOriginalDispatch, kOrigin as _kOrigin, kGetNetConnect as _kGetNetConnect, kTotalDispatchCount as _kTotalDispatchCount } from "./mock-symbols";
-import { serializePathWithQuery as _serializePathWithQuery, parseHeaders as _parseHeaders } from "../core/util";
-import * as _cjs_import from "node:http";
-import * as _cjs_import2 from "node:util";
-import { InvalidArgumentError as _InvalidArgumentError } from "../core/errors";
+import _cjs_import from "./mock-errors";
+import _cjs_import2 from "./mock-symbols";
+import _cjs_import3 from "../core/util";
+import * as _cjs_import4 from "node:http";
+import * as _cjs_import5 from "node:util";
+import _cjs_import6 from "../core/errors";
+const {
+  MockNotMatchedError
+} = _cjs_import;
+const {
+  kDispatches,
+  kMockAgent,
+  kOriginalDispatch,
+  kOrigin,
+  kGetNetConnect,
+  kTotalDispatchCount
+} = _cjs_import2;
+const {
+  serializePathWithQuery,
+  parseHeaders
+} = _cjs_import3;
 const {
   STATUS_CODES
-} = _cjs_import;
+} = _cjs_import4;
 const {
   types: {
     isPromise
   }
-} = _cjs_import2;
+} = _cjs_import5;
+const {
+  InvalidArgumentError
+} = _cjs_import6;
 function matchValue(match, value) {
   if (typeof match === 'string') {
     return match === value;
@@ -145,7 +163,7 @@ function getResponseData(data) {
   }
 }
 function getMockDispatch(mockDispatches, key) {
-  const basePath = key.query ? _serializePathWithQuery(key.path, key.query) : key.path;
+  const basePath = key.query ? serializePathWithQuery(key.path, key.query) : key.path;
   const resolvedPath = typeof basePath === 'string' ? safeUrl(basePath) : basePath;
   const resolvedPathWithoutTrailingSlash = removeTrailingSlash(resolvedPath);
 
@@ -159,7 +177,7 @@ function getMockDispatch(mockDispatches, key) {
     return ignoreTrailingSlash ? matchValue(removeTrailingSlash(safeUrl(path)), resolvedPathWithoutTrailingSlash) : matchValue(safeUrl(path), resolvedPath);
   });
   if (matchedMockDispatches.length === 0) {
-    throw new _MockNotMatchedError(`Mock dispatch not matched for path '${resolvedPath}'`);
+    throw new MockNotMatchedError(`Mock dispatch not matched for path '${resolvedPath}'`);
   }
 
   // Match method
@@ -167,7 +185,7 @@ function getMockDispatch(mockDispatches, key) {
     method
   }) => matchValue(method, key.method));
   if (matchedMockDispatches.length === 0) {
-    throw new _MockNotMatchedError(`Mock dispatch not matched for method '${key.method}' on path '${resolvedPath}'`);
+    throw new MockNotMatchedError(`Mock dispatch not matched for method '${key.method}' on path '${resolvedPath}'`);
   }
 
   // Match body
@@ -175,14 +193,14 @@ function getMockDispatch(mockDispatches, key) {
     body
   }) => typeof body !== 'undefined' ? matchValue(body, key.body) : true);
   if (matchedMockDispatches.length === 0) {
-    throw new _MockNotMatchedError(`Mock dispatch not matched for body '${key.body}' on path '${resolvedPath}'`);
+    throw new MockNotMatchedError(`Mock dispatch not matched for body '${key.body}' on path '${resolvedPath}'`);
   }
 
   // Match headers
   matchedMockDispatches = matchedMockDispatches.filter(mockDispatch => matchHeaders(mockDispatch, key.headers));
   if (matchedMockDispatches.length === 0) {
     const headers = typeof key.headers === 'object' ? JSON.stringify(key.headers) : key.headers;
-    throw new _MockNotMatchedError(`Mock dispatch not matched for headers '${headers}' on path '${resolvedPath}'`);
+    throw new MockNotMatchedError(`Mock dispatch not matched for headers '${headers}' on path '${resolvedPath}'`);
   }
   return matchedMockDispatches[0];
 }
@@ -210,7 +228,7 @@ function addMockDispatch(mockDispatches, key, data, opts) {
   };
   mockDispatches.push(newMockDispatch);
   // Track total number of intercepts ever registered for better error messages
-  mockDispatches[_kTotalDispatchCount] = (mockDispatches[_kTotalDispatchCount] || 0) + 1;
+  mockDispatches[kTotalDispatchCount] = (mockDispatches[kTotalDispatchCount] || 0) + 1;
   return newMockDispatch;
 }
 function deleteMockDispatch(mockDispatches, key) {
@@ -292,7 +310,7 @@ async function getResponse(body) {
 function mockDispatch(opts, handler) {
   // Get mock dispatch from built key
   const key = buildKey(opts);
-  const mockDispatch = getMockDispatch(this[_kDispatches], key);
+  const mockDispatch = getMockDispatch(this[kDispatches], key);
   mockDispatch.timesInvoked++;
 
   // Here's where we resolve a callback if a callback is present for the dispatch data.
@@ -326,7 +344,7 @@ function mockDispatch(opts, handler) {
 
   // If specified, trigger dispatch error
   if (error !== null) {
-    deleteMockDispatch(this[_kDispatches], key);
+    deleteMockDispatch(this[kDispatches], key);
     handler.onResponseError(null, error);
     return true;
   }
@@ -368,10 +386,10 @@ function mockDispatch(opts, handler) {
   if (typeof delay === 'number' && delay > 0) {
     timer = setTimeout(() => {
       timer = null;
-      handleReply(this[_kDispatches]);
+      handleReply(this[kDispatches]);
     }, delay);
   } else {
-    handleReply(this[_kDispatches]);
+    handleReply(this[kDispatches]);
   }
   function handleReply(mockDispatches, _data = data) {
     // Don't send response if the request was aborted
@@ -407,31 +425,31 @@ function mockDispatch(opts, handler) {
     // Update the controller with response data
     controller.rawHeaders = responseHeaders;
     controller.rawTrailers = responseTrailers;
-    handler.onResponseStart?.(controller, statusCode, _parseHeaders(responseHeaders), getStatusText(statusCode));
+    handler.onResponseStart?.(controller, statusCode, parseHeaders(responseHeaders), getStatusText(statusCode));
     handler.onResponseData?.(controller, Buffer.from(responseData));
-    handler.onResponseEnd?.(controller, _parseHeaders(responseTrailers));
+    handler.onResponseEnd?.(controller, parseHeaders(responseTrailers));
     deleteMockDispatch(mockDispatches, key);
   }
   return true;
 }
 function buildMockDispatch() {
-  const agent = this[_kMockAgent];
-  const origin = this[_kOrigin];
-  const originalDispatch = this[_kOriginalDispatch];
+  const agent = this[kMockAgent];
+  const origin = this[kOrigin];
+  const originalDispatch = this[kOriginalDispatch];
   return function dispatch(opts, handler) {
     if (agent.isMockActive) {
       try {
         mockDispatch.call(this, opts, handler);
       } catch (error) {
         if (error.code === 'UND_MOCK_ERR_MOCK_NOT_MATCHED') {
-          const netConnect = agent[_kGetNetConnect]();
-          const totalInterceptsCount = this[_kDispatches][_kTotalDispatchCount] || this[_kDispatches].length;
-          const pendingInterceptsCount = this[_kDispatches].filter(({
+          const netConnect = agent[kGetNetConnect]();
+          const totalInterceptsCount = this[kDispatches][kTotalDispatchCount] || this[kDispatches].length;
+          const pendingInterceptsCount = this[kDispatches].filter(({
             consumed
           }) => !consumed).length;
           const interceptsMessage = `, ${pendingInterceptsCount} interceptor(s) remaining out of ${totalInterceptsCount} defined`;
           if (netConnect === false) {
-            throw new _MockNotMatchedError(`${error.message}: subsequent request to origin ${origin} was not allowed (net.connect disabled)${interceptsMessage}`);
+            throw new MockNotMatchedError(`${error.message}: subsequent request to origin ${origin} was not allowed (net.connect disabled)${interceptsMessage}`);
           }
           if (checkNetConnect(netConnect, origin)) {
             originalDispatch.call(this, '__mockAgentBodyForDispatch' in opts ? {
@@ -439,7 +457,7 @@ function buildMockDispatch() {
               body: opts.__mockAgentBodyForDispatch
             } : opts, handler);
           } else {
-            throw new _MockNotMatchedError(`${error.message}: subsequent request to origin ${origin} was not allowed (net.connect is not enabled for this origin)${interceptsMessage}`);
+            throw new MockNotMatchedError(`${error.message}: subsequent request to origin ${origin} was not allowed (net.connect is not enabled for this origin)${interceptsMessage}`);
           }
         } else {
           throw error;
@@ -474,13 +492,13 @@ function buildAndValidateMockOptions(opts) {
     ...mockOptions
   } = opts;
   if ('enableCallHistory' in mockOptions && typeof mockOptions.enableCallHistory !== 'boolean') {
-    throw new _InvalidArgumentError('options.enableCallHistory must to be a boolean');
+    throw new InvalidArgumentError('options.enableCallHistory must to be a boolean');
   }
   if ('acceptNonStandardSearchParameters' in mockOptions && typeof mockOptions.acceptNonStandardSearchParameters !== 'boolean') {
-    throw new _InvalidArgumentError('options.acceptNonStandardSearchParameters must to be a boolean');
+    throw new InvalidArgumentError('options.acceptNonStandardSearchParameters must to be a boolean');
   }
   if ('ignoreTrailingSlash' in mockOptions && typeof mockOptions.ignoreTrailingSlash !== 'boolean') {
-    throw new _InvalidArgumentError('options.ignoreTrailingSlash must to be a boolean');
+    throw new InvalidArgumentError('options.ignoreTrailingSlash must to be a boolean');
   }
   return mockOptions;
 }

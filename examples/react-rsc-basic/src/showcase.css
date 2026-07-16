@@ -1,0 +1,14 @@
+.asset-proof-start {
+  isolation: isolate;
+}
+
+@import "./showcase-theme.css" layer(example-import);
+
+.asset-proof-mark {
+  background: url("./assets/basic-texture.svg") center / cover;
+  border: 1px solid currentColor;
+  float: right;
+  height: 56px;
+  padding: 8px;
+  width: 56px;
+}

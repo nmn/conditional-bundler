@@ -1,11 +1,11 @@
 import hasOwn from "../internals/has-own-property";
 import ownKeys from "../internals/own-keys";
-import { f as _f } from "../internals/object-get-own-property-descriptor";
-import { f as _f2 } from "../internals/object-define-property";
+import getOwnPropertyDescriptorModule from "../internals/object-get-own-property-descriptor";
+import definePropertyModule from "../internals/object-define-property";
 const _cjs_default = function (target, source, exceptions) {
   var keys = ownKeys(source);
-  var defineProperty = _f2;
-  var getOwnPropertyDescriptor = _f;
+  var defineProperty = definePropertyModule.f;
+  var getOwnPropertyDescriptor = getOwnPropertyDescriptorModule.f;
   for (var i = 0; i < keys.length; i++) {
     var key = keys[i];
     if (!hasOwn(target, key) && !(exceptions && hasOwn(exceptions, key))) {

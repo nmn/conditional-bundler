@@ -1,13 +1,13 @@
 import $ from "../internals/export";
 import uncurryThis from "../internals/function-uncurry-this-clause";
-import { f as _f } from "../internals/object-get-own-property-descriptor";
+import _cjs_import from "../internals/object-get-own-property-descriptor";
 import toLength from "../internals/to-length";
 import toString from "../internals/to-string";
 import notARegExp from "../internals/not-a-regexp";
 import requireObjectCoercible from "../internals/require-object-coercible";
 import correctIsRegExpLogic from "../internals/correct-is-regexp-logic";
 import IS_PURE from "../internals/is-pure";
-var getOwnPropertyDescriptor = _f;
+var getOwnPropertyDescriptor = _cjs_import.f;
 var slice = uncurryThis(''.slice);
 var min = Math.min;
 var CORRECT_IS_REGEXP_LOGIC = correctIsRegExpLogic('endsWith');

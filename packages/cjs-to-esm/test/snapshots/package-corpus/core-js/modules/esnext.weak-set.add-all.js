@@ -1,7 +1,7 @@
 import $ from "../internals/export";
 import aWeakSet from "../internals/a-weak-set";
-import { add as _add } from "../internals/weak-set-helpers";
-var add = _add;
+import _cjs_import from "../internals/weak-set-helpers";
+var add = _cjs_import.add;
 
 // `WeakSet.prototype.addAll` method
 // https://github.com/tc39/proposal-collection-methods

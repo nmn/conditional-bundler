@@ -1,12 +1,17 @@
 import * as _cjs_import from "node:stream";
 import * as _cjs_import2 from "node:events";
-import { assertCacheKey as _assertCacheKey, assertCacheValue as _assertCacheValue } from "../util/cache.js";
+import _cjs_import3 from "../util/cache.js";
 const {
   Writable
 } = _cjs_import;
 const {
   EventEmitter
 } = _cjs_import2;
+const {
+  assertCacheKey,
+  assertCacheValue
+} = _cjs_import3;
+
 /**
  * @typedef {import('../../types/cache-interceptor.d.ts').default.CacheKey} CacheKey
  * @typedef {import('../../types/cache-interceptor.d.ts').default.CacheValue} CacheValue
@@ -79,7 +84,7 @@ class MemoryCacheStore extends EventEmitter {
    * @returns {import('../../types/cache-interceptor.d.ts').default.GetResult | undefined}
    */
   get(key) {
-    _assertCacheKey(key);
+    assertCacheKey(key);
     const topLevelKey = `${key.origin}:${key.path}`;
     const now = Date.now();
     const entries = this.#entries.get(topLevelKey);
@@ -104,8 +109,8 @@ class MemoryCacheStore extends EventEmitter {
    * @returns {Writable | undefined}
    */
   createWriteStream(key, val) {
-    _assertCacheKey(key);
-    _assertCacheValue(val);
+    assertCacheKey(key);
+    assertCacheValue(val);
     const topLevelKey = `${key.origin}:${key.path}`;
     const store = this;
     const entry = {

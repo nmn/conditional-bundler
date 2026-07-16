@@ -1,16 +1,23 @@
 import * as assert from "node:assert";
 import * as _cjs_import from "node:async_hooks";
-import { Readable as _Readable } from "./readable";
-import { InvalidArgumentError as _InvalidArgumentError, RequestAbortedError as _RequestAbortedError } from "../core/errors";
-import { isStream as _isStream, destroy as _destroy, addAbortListener as _addAbortListener, parseRawHeaders as _parseRawHeaders } from "../core/util";
+import _cjs_import2 from "./readable";
+import _cjs_import3 from "../core/errors";
+import util from "../core/util";
 const {
   AsyncResource
 } = _cjs_import;
+const {
+  Readable
+} = _cjs_import2;
+const {
+  InvalidArgumentError,
+  RequestAbortedError
+} = _cjs_import3;
 function noop() {}
 export class RequestHandler extends AsyncResource {
   constructor(opts, callback) {
     if (!opts || typeof opts !== 'object') {
-      throw new _InvalidArgumentError('invalid opts');
+      throw new InvalidArgumentError('invalid opts');
     }
     const {
       signal,
@@ -23,24 +30,24 @@ export class RequestHandler extends AsyncResource {
     } = opts;
     try {
       if (typeof callback !== 'function') {
-        throw new _InvalidArgumentError('invalid callback');
+        throw new InvalidArgumentError('invalid callback');
       }
       if (highWaterMark != null && (!Number.isFinite(highWaterMark) || highWaterMark < 0)) {
-        throw new _InvalidArgumentError('invalid highWaterMark');
+        throw new InvalidArgumentError('invalid highWaterMark');
       }
       if (signal && typeof signal.on !== 'function' && typeof signal.addEventListener !== 'function') {
-        throw new _InvalidArgumentError('signal must be an EventEmitter or EventTarget');
+        throw new InvalidArgumentError('signal must be an EventEmitter or EventTarget');
       }
       if (method === 'CONNECT') {
-        throw new _InvalidArgumentError('invalid method');
+        throw new InvalidArgumentError('invalid method');
       }
       if (onInfo && typeof onInfo !== 'function') {
-        throw new _InvalidArgumentError('invalid onInfo callback');
+        throw new InvalidArgumentError('invalid onInfo callback');
       }
       super('UNDICI_REQUEST');
     } catch (err) {
-      if (_isStream(body)) {
-        _destroy(body.on('error', noop), err);
+      if (util.isStream(body)) {
+        util.destroy(body.on('error', noop), err);
       }
       throw err;
     }
@@ -59,10 +66,10 @@ export class RequestHandler extends AsyncResource {
     this.reason = null;
     this.removeAbortListener = null;
     if (signal?.aborted) {
-      this.reason = signal.reason ?? new _RequestAbortedError();
+      this.reason = signal.reason ?? new RequestAbortedError();
     } else if (signal) {
-      this.removeAbortListener = _addAbortListener(signal, () => {
-        this.reason = signal.reason ?? new _RequestAbortedError();
+      this.removeAbortListener = util.addAbortListener(signal, () => {
+        this.reason = signal.reason ?? new RequestAbortedError();
         if (this.res) {
           // Null the reference before destroying, mirroring onResponseError, so
           // that chunks flushed after the abort (e.g. an async decompressor
@@ -70,7 +77,7 @@ export class RequestHandler extends AsyncResource {
           // instead of being pushed into the torn-down stream.
           const res = this.res;
           this.res = null;
-          _destroy(res.on('error', noop), this.reason);
+          util.destroy(res.on('error', noop), this.reason);
         } else if (this.abort) {
           this.abort(this.reason);
         }
@@ -96,7 +103,7 @@ export class RequestHandler extends AsyncResource {
       highWaterMark
     } = this;
     const rawHeaders = controller?.rawHeaders;
-    const responseHeaderData = responseHeaders === 'raw' ? _parseRawHeaders(rawHeaders) : headers;
+    const responseHeaderData = responseHeaders === 'raw' ? util.parseRawHeaders(rawHeaders) : headers;
     if (statusCode < 200) {
       if (this.onInfo) {
         this.onInfo({
@@ -109,7 +116,7 @@ export class RequestHandler extends AsyncResource {
     const parsedHeaders = headers;
     const contentType = parsedHeaders?.['content-type'];
     const contentLength = parsedHeaders?.['content-length'];
-    const res = new _Readable({
+    const res = new Readable({
       resume: () => controller.resume(),
       abort: reason => controller.abort(reason),
       contentType,
@@ -139,7 +146,7 @@ export class RequestHandler extends AsyncResource {
         this.res = null;
 
         // Destroy the response stream
-        _destroy(res.on('error', noop), err);
+        util.destroy(res.on('error', noop), err);
 
         // Use queueMicrotask to re-throw the error so it reaches uncaughtException
         queueMicrotask(() => {
@@ -193,14 +200,14 @@ export class RequestHandler extends AsyncResource {
       this.res = null;
       // Ensure all queued handlers are invoked before destroying res.
       queueMicrotask(() => {
-        _destroy(res.on('error', noop), err);
+        util.destroy(res.on('error', noop), err);
       });
     }
     if (body) {
       this.body = null;
-      if (_isStream(body)) {
+      if (util.isStream(body)) {
         body.on('error', noop);
-        _destroy(body, err);
+        util.destroy(body, err);
       }
     }
     if (this.removeAbortListener) {

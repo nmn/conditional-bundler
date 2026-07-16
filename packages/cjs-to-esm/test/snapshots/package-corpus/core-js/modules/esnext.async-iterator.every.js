@@ -1,6 +1,6 @@
 import $ from "../internals/export";
-import { every as _every } from "../internals/async-iterator-iteration";
-var $every = _every;
+import _cjs_import from "../internals/async-iterator-iteration";
+var $every = _cjs_import.every;
 
 // `AsyncIterator.prototype.every` method
 // https://github.com/tc39/proposal-async-iterator-helpers

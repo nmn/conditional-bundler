@@ -5,23 +5,23 @@ import isForced from "../internals/is-forced";
 import inheritIfRequired from "../internals/inherit-if-required";
 import createNonEnumerableProperty from "../internals/create-non-enumerable-property";
 import create from "../internals/object-create";
-import { f as _f } from "../internals/object-get-own-property-names";
+import _cjs_import from "../internals/object-get-own-property-names";
 import isPrototypeOf from "../internals/object-is-prototype-of";
 import isRegExp from "../internals/is-regexp";
 import toString from "../internals/to-string";
 import getRegExpFlags from "../internals/regexp-get-flags";
-import { MISSED_STICKY as _MISSED_STICKY, UNSUPPORTED_Y as _UNSUPPORTED_Y } from "../internals/regexp-sticky-helpers";
+import stickyHelpers from "../internals/regexp-sticky-helpers";
 import proxyAccessor from "../internals/proxy-accessor";
 import defineBuiltIn from "../internals/define-built-in";
 import fails from "../internals/fails";
 import hasOwn from "../internals/has-own-property";
-import { enforce as _enforce } from "../internals/internal-state";
+import _cjs_import2 from "../internals/internal-state";
 import setSpecies from "../internals/set-species";
 import wellKnownSymbol from "../internals/well-known-symbol";
 import UNSUPPORTED_DOT_ALL from "../internals/regexp-unsupported-dot-all";
 import UNSUPPORTED_NCG from "../internals/regexp-unsupported-ncg";
-var getOwnPropertyNames = _f;
-var enforceInternalState = _enforce;
+var getOwnPropertyNames = _cjs_import.f;
+var enforceInternalState = _cjs_import2.enforce;
 var MATCH = wellKnownSymbol('match');
 var NativeRegExp = globalThis.RegExp;
 var RegExpPrototype = NativeRegExp.prototype;
@@ -38,8 +38,8 @@ var re2 = /a/g;
 
 // "new" should create a new object, old webkit bug
 var CORRECT_NEW = new NativeRegExp(re1) !== re1;
-var MISSED_STICKY = _MISSED_STICKY;
-var UNSUPPORTED_Y = _UNSUPPORTED_Y;
+var MISSED_STICKY = stickyHelpers.MISSED_STICKY;
+var UNSUPPORTED_Y = stickyHelpers.UNSUPPORTED_Y;
 var BASE_FORCED = DESCRIPTORS && (!CORRECT_NEW || MISSED_STICKY || UNSUPPORTED_DOT_ALL || UNSUPPORTED_NCG || fails(function () {
   re2[MATCH] = false;
   // RegExp constructor can alter flags and IsRegExp works correct with @@match

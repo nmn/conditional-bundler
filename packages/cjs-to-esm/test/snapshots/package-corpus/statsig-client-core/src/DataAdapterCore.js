@@ -1,8 +1,8 @@
-import { Log as _Log } from "./Log";
-import { StableID as _StableID } from "./StableID";
-import { _normalizeUser, _getFullUserHash } from "./StatsigUser";
-import { Storage as _Storage, _getObjectFromStorage, _setObjectInStorage } from "./StorageProvider";
-import { _typedJsonParse } from "./TypedJsonParse";
+import Log_1 from "./Log";
+import StableID_1 from "./StableID";
+import StatsigUser_1 from "./StatsigUser";
+import StorageProvider_1 from "./StorageProvider";
+import TypedJsonParse_1 from "./TypedJsonParse";
 var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function (resolve) {
@@ -47,7 +47,7 @@ export class DataAdapterCore {
     this._options = options;
   }
   getDataSync(user) {
-    const normalized = user && (0, _normalizeUser)(user, this._options);
+    const normalized = user && (0, StatsigUser_1._normalizeUser)(user, this._options);
     const cacheKey = this._getCacheKey(normalized);
     const inMem = this._inMemoryCache.get(cacheKey, normalized);
     if (inMem && this._getIsCacheValueValid(inMem)) {
@@ -61,23 +61,23 @@ export class DataAdapterCore {
     return null;
   }
   setData(data, user) {
-    const normalized = user && (0, _normalizeUser)(user, this._options);
+    const normalized = user && (0, StatsigUser_1._normalizeUser)(user, this._options);
     const cacheKey = this._getCacheKey(normalized);
     this._inMemoryCache.add(cacheKey, _makeDataAdapterResult('Bootstrap', data, null, normalized), this._cacheLimit);
   }
   _getIsCacheValueValid(current) {
-    return current.stableID == null || current.stableID === _StableID.get(this._getSdkKey());
+    return current.stableID == null || current.stableID === StableID_1.StableID.get(this._getSdkKey());
   }
   _getDataAsyncImpl(current, user, options) {
     return __awaiter(this, void 0, void 0, function* () {
-      if (!_Storage.isReady()) {
-        yield _Storage.isReadyResolver();
+      if (!StorageProvider_1.Storage.isReady()) {
+        yield StorageProvider_1.Storage.isReadyResolver();
       }
       const cache = current !== null && current !== void 0 ? current : this.getDataSync(user);
       const ops = [this._fetchAndPrepFromNetwork(cache, user, options)];
       if (options === null || options === void 0 ? void 0 : options.timeoutMs) {
         ops.push(new Promise(r => setTimeout(r, options.timeoutMs)).then(() => {
-          _Log.debug('Fetching latest value timed out');
+          Log_1.Log.debug('Fetching latest value timed out');
           return null;
         }));
       }
@@ -86,7 +86,7 @@ export class DataAdapterCore {
   }
   _prefetchDataImpl(user, options) {
     return __awaiter(this, void 0, void 0, function* () {
-      const normalized = user && (0, _normalizeUser)(user, this._options);
+      const normalized = user && (0, StatsigUser_1._normalizeUser)(user, this._options);
       const cacheKey = this._getCacheKey(normalized);
       const result = yield this._getDataAsyncImpl(null, normalized, options);
       if (result) {
@@ -103,12 +103,12 @@ export class DataAdapterCore {
       const isCacheValidFor204 = cachedResult != null && this._isCachedResultValidFor204(cachedResult, user);
       const latest = yield this._fetchFromNetwork(cachedData, user, options, isCacheValidFor204);
       if (!latest) {
-        _Log.debug('No response returned for latest value');
+        Log_1.Log.debug('No response returned for latest value');
         return null;
       }
-      const response = (0, _typedJsonParse)(latest, 'has_updates', 'Response');
+      const response = (0, TypedJsonParse_1._typedJsonParse)(latest, 'has_updates', 'Response');
       const sdkKey = this._getSdkKey();
-      const stableID = _StableID.get(sdkKey);
+      const stableID = StableID_1.StableID.get(sdkKey);
       let result = null;
       if ((response === null || response === void 0 ? void 0 : response.has_updates) === true) {
         result = _makeDataAdapterResult('Network', latest, stableID, user);
@@ -127,16 +127,16 @@ export class DataAdapterCore {
     if (this._sdkKey != null) {
       return this._sdkKey;
     }
-    _Log.error(`${this._adapterName} is not attached to a Client`);
+    Log_1.Log.error(`${this._adapterName} is not attached to a Client`);
     return '';
   }
   _loadFromCache(cacheKey) {
     var _a;
-    const cache = (_a = _Storage.getItem) === null || _a === void 0 ? void 0 : _a.call(_Storage, cacheKey);
+    const cache = (_a = StorageProvider_1.Storage.getItem) === null || _a === void 0 ? void 0 : _a.call(StorageProvider_1.Storage, cacheKey);
     if (cache == null) {
       return null;
     }
-    const result = (0, _typedJsonParse)(cache, 'source', 'Cached Result');
+    const result = (0, TypedJsonParse_1._typedJsonParse)(cache, 'source', 'Cached Result');
     return result ? Object.assign(Object.assign({}, result), {
       source: 'Cache'
     }) : null;
@@ -145,7 +145,7 @@ export class DataAdapterCore {
     const resultString = JSON.stringify(result);
     for (let i = 0; i < MAX_CACHE_WRITE_ATTEMPTS; i++) {
       try {
-        _Storage.setItem(cacheKey, resultString);
+        StorageProvider_1.Storage.setItem(cacheKey, resultString);
         break;
       } catch (error) {
         if (!(error instanceof Error) || !(error.toString().includes('QuotaExceededError') || error.toString().includes('QUOTA_EXCEEDED_ERR')) || this._cacheLimit <= 1) {
@@ -159,14 +159,14 @@ export class DataAdapterCore {
   }
   _runLocalStorageCacheEviction(cacheKey, cacheLimit = this._cacheLimit) {
     var _a;
-    const lastModifiedTimeMap = (_a = (0, _getObjectFromStorage)(this._lastModifiedStoreKey)) !== null && _a !== void 0 ? _a : {};
+    const lastModifiedTimeMap = (_a = (0, StorageProvider_1._getObjectFromStorage)(this._lastModifiedStoreKey)) !== null && _a !== void 0 ? _a : {};
     lastModifiedTimeMap[cacheKey] = Date.now();
     const evictableKeys = _getEvictableKeys(lastModifiedTimeMap, cacheLimit);
     for (const evictable of evictableKeys) {
       delete lastModifiedTimeMap[evictable];
-      _Storage.removeItem(evictable);
+      StorageProvider_1.Storage.removeItem(evictable);
     }
-    (0, _setObjectInStorage)(this._lastModifiedStoreKey, lastModifiedTimeMap);
+    (0, StorageProvider_1._setObjectInStorage)(this._lastModifiedStoreKey, lastModifiedTimeMap);
   }
 }
 export function _makeDataAdapterResult(source, data, stableID, user) {
@@ -175,7 +175,7 @@ export function _makeDataAdapterResult(source, data, stableID, user) {
     data,
     receivedAt: Date.now(),
     stableID,
-    fullUserHash: (0, _getFullUserHash)(user)
+    fullUserHash: (0, StatsigUser_1._getFullUserHash)(user)
   };
 }
 class InMemoryCache {
@@ -188,7 +188,7 @@ class InMemoryCache {
     const cached = result === null || result === void 0 ? void 0 : result.stableID;
     const provided = (_a = user === null || user === void 0 ? void 0 : user.customIDs) === null || _a === void 0 ? void 0 : _a.stableID;
     if (provided && cached && provided !== cached) {
-      _Log.warn("'StatsigUser.customIDs.stableID' mismatch");
+      Log_1.Log.warn("'StatsigUser.customIDs.stableID' mismatch");
       return null;
     }
     return result;

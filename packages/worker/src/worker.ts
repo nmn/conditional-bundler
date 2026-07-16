@@ -4,23 +4,26 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { transformAsync } from "@babel/core";
 import remappingModule from "@ampproject/remapping";
-import { filePrefix, contentHash, normalizePosixPath } from "@bundler/shared";
+import { contentHash, normalizePosixPath } from "@bundler/shared";
 import type {
   CellRecord,
   DiscoveredEntrypoint,
   ExtraTransformOutput,
   FileRecord,
+  LinkReference,
+  RemoteCacheAdapter,
   RemoteCacheConfig,
   TransformResult,
 } from "@bundler/shared";
 import {
+  createRemoteCacheAdapter,
+  joinRemoteKey,
   writeFileAtomic,
   writeJsonAtomic,
   ensureDir,
   readJsonIfExists,
   fileExists,
 } from "@bundler/shared";
-import { modulePrefixIdentity } from "./module-identity.js";
 
 if (!parentPort) {
   throw new Error("Worker must be spawned with parentPort.");
@@ -43,8 +46,16 @@ type WorkerRequest = {
   moduleIdentity: string;
   realPath: string;
   code: string;
+  sourceBytes?: Uint8Array;
+  moduleType?: "javascript" | "css" | "asset";
+  importIntent?: "module" | "url" | "raw" | "base64" | "assetPath";
+  canonicalPath?: string;
+  resolutionMeta?: Record<string, unknown>;
+  buildMode?: string;
+  transformConfig?: Record<string, unknown>;
   pkg: { name: string; version: string; root: string };
   envs: string[];
+  targets: Record<string, "node" | "browser">;
   cacheDir: string;
   cacheNamespace?: string;
   remoteCache?: RemoteCacheConfig;
@@ -58,6 +69,7 @@ type WorkerRequest = {
   };
   discoveredEntrypointsByEnv?: Record<string, DiscoveredEntrypoint[]>;
   extraOutputsByEnv?: Record<string, Record<string, ExtraTransformOutput>>;
+  linkReferencesByEnv?: Record<string, LinkReference[]>;
   workerProfile: WorkerTransformProfile;
   dev?: {
     hmr?: boolean;
@@ -79,7 +91,9 @@ type WorkerImportRequest = {
     | "dynamic-import"
     | "reexport"
     | "conditional-import"
-    | "conditional-else";
+    | "conditional-else"
+    | "css-import"
+    | "css-url";
   request: string;
   importAttributes?: Record<string, string>;
 };
@@ -89,11 +103,11 @@ type ResolvedImportsByEnv = Record<
   Record<
     string,
     {
-      id: string | null;
-      moduleIdentity?: string | null;
-      filePath: string | null;
-      external: boolean;
-      virtual?: boolean;
+      target:
+        | { kind: "file"; moduleId: string; canonicalPath: string }
+        | { kind: "runtime"; specifier: string };
+      type: "javascript" | "css" | "asset";
+      intent: "module" | "url" | "raw" | "base64" | "assetPath";
       meta?: Record<string, unknown>;
     }
   >
@@ -107,10 +121,16 @@ type CoordinatorResponseMessage = {
 };
 
 type ModuleCacheRecord = {
+  baseKey: string;
   moduleKey: string;
+  dependencyRequestsByEnv: Record<string, WorkerImportRequest[]>;
   fileRecordsByEnv: Record<string, FileRecord>;
-  createdAt: string;
-  updatedAt: string;
+};
+
+type TransformFileOutput = {
+  resultsByEnv: Record<string, TransformResult>;
+  dependencyRequestsByEnv: Record<string, WorkerImportRequest[]>;
+  resolvedImportsByEnv: ResolvedImportsByEnv;
 };
 
 type FileCachePaths = {
@@ -120,18 +140,13 @@ type FileCachePaths = {
   remoteBaseKey: string;
 };
 
-type RemoteCacheAdapter = {
-  get: (key: string) => Promise<string | null>;
-  set: (key: string, value: string) => Promise<void>;
-};
-
 const babelModuleCache = new Map<string, unknown>();
 const pendingCoordinatorRequests = new Map<
   number,
   { resolve: (value: unknown) => void; reject: (error: Error) => void }
 >();
 let nextCoordinatorRequestId = 1;
-const CELL_ARTIFACT_FORMAT = 11;
+const CELL_ARTIFACT_FORMAT = 18;
 const remapping = ((
   remappingModule as unknown as {
     default?: typeof import("@ampproject/remapping").default;
@@ -142,12 +157,13 @@ const remapping = ((
 async function handleTransform(
   request: WorkerRequest,
 ): Promise<WorkerResponse> {
-  const moduleKey = buildModuleKey(request);
-  const fileHash = contentHash(request.code);
+  const baseKey = buildBaseModuleKey(request);
+  const sourceContent = request.sourceBytes ?? request.code;
+  const fileHash = contentHash(sourceContent);
   const cachePaths = buildFileCachePaths(
     request.cacheDir,
-    request.envs,
-    request.moduleIdentity,
+    request.canonicalPath ?? request.moduleIdentity,
+    baseKey,
   );
   const remote = createRemoteCacheAdapter(
     request.remoteCache,
@@ -164,28 +180,30 @@ async function handleTransform(
         ),
       }
     : null;
+  const validatedCached = hydratedCached
+    ? await validateCacheCandidate(hydratedCached, request, baseKey)
+    : null;
   if (
-    hydratedCached &&
-    hydratedCached.moduleKey === moduleKey &&
+    validatedCached &&
     (await hasCachedArtifacts(
-      hydratedCached.fileRecordsByEnv,
+      validatedCached.fileRecordsByEnv,
       Boolean(request.sourceMap),
     ))
   ) {
-    const first = Object.values(hydratedCached.fileRecordsByEnv)[0];
+    const first = Object.values(validatedCached.fileRecordsByEnv)[0];
     return {
       ok: true,
       cacheHit: true,
       contentHash: first.contentHash,
       prefix: first.prefix,
-      fileRecordsByEnv: hydratedCached.fileRecordsByEnv,
+      fileRecordsByEnv: validatedCached.fileRecordsByEnv,
     };
   }
   const remoteCached = remote
     ? await readRemoteModuleCache(
         remote,
         cachePaths,
-        moduleKey,
+        baseKey,
         Boolean(request.sourceMap),
         request,
       )
@@ -201,14 +219,9 @@ async function handleTransform(
     };
   }
 
-  const normalizedPath = normalizePosixPath(request.realPath);
-  const relPath = path.posix.relative(request.pkg.root, normalizedPath);
-  const prefix = filePrefix(
-    request.pkg.name,
-    request.pkg.version,
-    modulePrefixIdentity(request.id, relPath),
-  );
-  const resultsByEnv = await transformFile(request);
+  const transformed = await transformFile(request);
+  const resultsByEnv = transformed.resultsByEnv;
+  const moduleKey = buildModuleKey(baseKey, transformed.resolvedImportsByEnv);
   const fileRecordsByEnv = Object.fromEntries(
     Object.entries(resultsByEnv).map(([envId, result]) => {
       if (!result.fileRecord) {
@@ -223,14 +236,15 @@ async function handleTransform(
             ...result.fileRecord,
             id: request.id,
             filePath: request.realPath,
-            prefix,
+            prefix: result.fileRecord.prefix,
             contentHash: contentHash(
-              request.codeByEnv?.[envId] ?? request.code,
+              request.codeByEnv?.[envId] ?? sourceContent,
             ),
             envs: [envId],
             codeByEnv: {},
             mapByEnv: {},
             pkg: request.pkg,
+            resolutionMeta: request.resolutionMeta,
           },
           cachePaths.fileDir,
           envId,
@@ -244,6 +258,8 @@ async function handleTransform(
     resultsByEnv,
     fileRecordsByEnv,
     moduleKey,
+    baseKey,
+    transformed.dependencyRequestsByEnv,
     request.moduleIdentity,
   );
   if (remote) {
@@ -252,6 +268,8 @@ async function handleTransform(
       cachePaths,
       fileRecordsByEnv,
       moduleKey,
+      baseKey,
+      transformed.dependencyRequestsByEnv,
       request.moduleIdentity,
     );
   }
@@ -260,14 +278,24 @@ async function handleTransform(
     ok: true,
     cacheHit: false,
     contentHash: fileRecordsByEnv[request.envs[0]]?.contentHash ?? fileHash,
-    prefix,
+    prefix: fileRecordsByEnv[request.envs[0]]?.prefix ?? "",
     fileRecordsByEnv,
   };
 }
 
 async function transformFile(
   request: WorkerRequest,
-): Promise<Record<string, TransformResult>> {
+): Promise<TransformFileOutput> {
+  if (request.moduleType === "asset") {
+    return {
+      resultsByEnv: await transformAssetFile(request),
+      dependencyRequestsByEnv: {},
+      resolvedImportsByEnv: {},
+    };
+  }
+  if (request.moduleType === "css") {
+    return transformCssFile(request);
+  }
   const { prepareCoreTransform, transformWithCore } =
     await import("./transform/core.js");
   const results: Record<string, TransformResult> = {};
@@ -328,6 +356,7 @@ async function transformFile(
       {
         id: request.id,
         moduleIdentity: request.moduleIdentity,
+        canonicalPath: request.canonicalPath ?? request.moduleIdentity,
         code: preResult.code,
         realPath: request.realPath,
         pkg: request.pkg,
@@ -338,7 +367,7 @@ async function transformFile(
         dev: request.dev,
       },
       {
-        importAttrAllow: ["json"],
+        importAttrAllow: ["json", "url", "raw", "base64", "assetPath"],
         generateModuleOutput: false,
         sourceMap: request.sourceMap
           ? {
@@ -372,21 +401,35 @@ async function transformFile(
     const postCells = coreResult.fileRecord
       ? await applyBabelStageToCells(coreCells, request, envId, postSpecs)
       : [];
-    const normalizedCells = postCells.map((cell) => ({
-      ...cell,
-      map: normalizeSourceMap(cell.map, request, sourceContents),
-    }));
     const metadata = preResult.metadata as
       | {
           conditionalBundlerExtraOutputs?: Record<string, ExtraTransformOutput>;
           conditionalBundlerDiscoveredEntrypoints?: DiscoveredEntrypoint[];
+          conditionalBundlerLinkReferences?: LinkReference[];
         }
       | undefined;
-    const extraOutputs = {
-      ...(request.extraOutputsByEnv?.[envId] ?? {}),
-      ...(coreResult.extraOutputs ?? {}),
-      ...(metadata?.conditionalBundlerExtraOutputs ?? {}),
-    };
+    const linkReferences = dedupeLinkReferences([
+      ...(request.linkReferencesByEnv?.[envId] ?? []),
+      ...(metadata?.conditionalBundlerLinkReferences ?? []),
+    ]);
+    const normalizedCells = postCells.map((cell) => ({
+      ...cell,
+      map: normalizeSourceMap(cell.map, request, sourceContents),
+      linkReferences: linkReferences.filter(
+        (reference) =>
+          cell.code != null &&
+          "symbol" in reference &&
+          cell.code.includes(reference.symbol),
+      ),
+    }));
+    const extraOutputs = hydrateResourceReferences(
+      {
+        ...(request.extraOutputsByEnv?.[envId] ?? {}),
+        ...(coreResult.extraOutputs ?? {}),
+        ...(metadata?.conditionalBundlerExtraOutputs ?? {}),
+      },
+      resolvedImportsByEnv[envId] ?? {},
+    );
     const discoveredEntrypoints = [
       ...(coreResult.fileRecord?.discoveredEntrypoints ?? []),
       ...(request.discoveredEntrypointsByEnv?.[envId] ?? []),
@@ -398,6 +441,7 @@ async function transformFile(
         ? {
             ...coreResult.fileRecord,
             discoveredEntrypoints,
+            linkReferences,
             extraOutputs:
               Object.keys(extraOutputs).length > 0 ? extraOutputs : undefined,
             sourceContents:
@@ -410,7 +454,206 @@ async function transformFile(
     };
   }
 
-  return results;
+  return {
+    resultsByEnv: results,
+    dependencyRequestsByEnv: requestsByEnv,
+    resolvedImportsByEnv,
+  };
+}
+
+async function transformAssetFile(
+  request: WorkerRequest,
+): Promise<Record<string, TransformResult>> {
+  const { transformAsset } = await import("./transform/asset.js");
+  const bytes = request.sourceBytes;
+  if (!bytes) {
+    throw new Error(
+      `Asset '${request.canonicalPath ?? request.realPath}' has no source bytes.`,
+    );
+  }
+  const assetId = request.resolutionMeta?.assetId;
+  if (typeof assetId !== "string") {
+    throw new Error(
+      `Asset '${request.canonicalPath ?? request.realPath}' has no portable asset identity.`,
+    );
+  }
+  const intent =
+    request.importIntent === "module" ? "url" : request.importIntent;
+  if (
+    intent !== "url" &&
+    intent !== "raw" &&
+    intent !== "base64" &&
+    intent !== "assetPath"
+  ) {
+    throw new Error(`Unsupported asset intent '${String(intent)}'.`);
+  }
+  return Object.fromEntries(
+    request.envs.map((envId) => [
+      envId,
+      transformAsset({
+        id: request.id,
+        moduleIdentity: request.moduleIdentity,
+        canonicalPath: request.canonicalPath ?? request.moduleIdentity,
+        realPath: request.realPath,
+        bytes,
+        intent,
+        assetId,
+        pkg: request.pkg,
+        envs: request.envs,
+        envId,
+        dev: request.dev,
+      }),
+    ]),
+  );
+}
+
+async function transformCssFile(
+  request: WorkerRequest,
+): Promise<TransformFileOutput> {
+  const { analyzeCss, finalizeCssTransform } =
+    await import("./transform/css.js");
+  const analyses: Record<string, ReturnType<typeof analyzeCss>> = {};
+  const requestsByEnv: Record<string, WorkerImportRequest[]> = {};
+  for (const envId of request.envs) {
+    const analysis = analyzeCss({
+      id: request.id,
+      moduleIdentity: request.moduleIdentity,
+      canonicalPath: request.canonicalPath ?? request.moduleIdentity,
+      realPath: request.realPath,
+      code: request.codeByEnv?.[envId] ?? request.code,
+      pkg: request.pkg,
+      envs: request.envs,
+      envId,
+      target: request.targets[envId] ?? "browser",
+      buildMode: request.buildMode ?? "development",
+      sourceMap: request.sourceMap
+        ? {
+            sourceFileName: request.sourceMap.sourceFileName,
+            sourcesContent: request.sourceMap.sourcesContent,
+          }
+        : undefined,
+      dev: request.dev,
+    });
+    analyses[envId] = analysis;
+    requestsByEnv[envId] = analysis.requests;
+  }
+  const hasRequests = Object.values(requestsByEnv).some(
+    (requests) => requests.length > 0,
+  );
+  const resolvedByEnv = hasRequests
+    ? await requestCoordinator<ResolvedImportsByEnv>({
+        type: "resolve-imports",
+        requestsByEnv,
+      })
+    : {};
+  const resultsByEnv = Object.fromEntries(
+    request.envs.map((envId) => [
+      envId,
+      finalizeCssTransform(
+        {
+          id: request.id,
+          moduleIdentity: request.moduleIdentity,
+          canonicalPath: request.canonicalPath ?? request.moduleIdentity,
+          realPath: request.realPath,
+          code: request.codeByEnv?.[envId] ?? request.code,
+          pkg: request.pkg,
+          envs: request.envs,
+          envId,
+          target: request.targets[envId] ?? "browser",
+          buildMode: request.buildMode ?? "development",
+          sourceMap: request.sourceMap
+            ? {
+                sourceFileName: request.sourceMap.sourceFileName,
+                sourcesContent: request.sourceMap.sourcesContent,
+              }
+            : undefined,
+          dev: request.dev,
+        },
+        analyses[envId],
+        resolvedByEnv[envId] ?? {},
+      ),
+    ]),
+  );
+  return {
+    resultsByEnv,
+    dependencyRequestsByEnv: requestsByEnv,
+    resolvedImportsByEnv: resolvedByEnv,
+  };
+}
+
+function hydrateResourceReferences(
+  outputs: Record<string, ExtraTransformOutput>,
+  resolvedImports: ResolvedImportsByEnv[string],
+): Record<string, ExtraTransformOutput> {
+  const assetIdsByRequest = new Map<string, string>();
+  const cssIdsByRequest = new Map<string, string>();
+  for (const resolved of Object.values(resolvedImports)) {
+    const request = resolved.meta?.request;
+    const assetId = resolved.meta?.assetId;
+    if (typeof request === "string" && typeof assetId === "string") {
+      assetIdsByRequest.set(request, assetId);
+    }
+    const cssId = resolved.meta?.cssId;
+    if (typeof request === "string" && typeof cssId === "string") {
+      cssIdsByRequest.set(request, cssId);
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(outputs).map(([name, output]) => {
+      const references =
+        output.template?.references.map((reference) => {
+          if (
+            reference.kind !== "asset-url" ||
+            reference.assetId ||
+            !reference.request
+          ) {
+            return reference;
+          }
+          const assetId = assetIdsByRequest.get(reference.request);
+          if (!assetId) {
+            throw new Error(
+              `Could not resolve resource URL '${reference.request}' from '${reference.ownerId ?? "resource"}'.`,
+            );
+          }
+          return { ...reference, assetId };
+        }) ?? [];
+      const metadata =
+        output.metadata && typeof output.metadata === "object"
+          ? (output.metadata as Record<string, unknown>)
+          : undefined;
+      const imports = Array.isArray(metadata?.imports)
+        ? metadata.imports.map((item) => {
+            if (!item || typeof item !== "object") return item;
+            const dependency = item as Record<string, unknown>;
+            const request = dependency.request;
+            return typeof request === "string"
+              ? {
+                  ...dependency,
+                  moduleId: cssIdsByRequest.get(request),
+                }
+              : item;
+          })
+        : undefined;
+      return [
+        name,
+        {
+          ...output,
+          template: output.template
+            ? { ...output.template, references }
+            : undefined,
+          metadata: metadata
+            ? { ...metadata, ...(imports ? { imports } : {}) }
+            : output.metadata,
+        },
+      ];
+    }),
+  );
+}
+
+function dedupeLinkReferences(references: LinkReference[]): LinkReference[] {
+  return Array.from(
+    new Map(references.map((reference) => [reference.id, reference])).values(),
+  );
 }
 
 async function applyBabelStage(
@@ -440,7 +683,11 @@ async function applyBabelStage(
           envId,
           filePath: request.realPath,
           id: request.id,
+          moduleIdentity: request.moduleIdentity,
+          target: request.targets[envId] ?? "browser",
           pkg: request.pkg,
+          format: request.resolutionMeta?.format,
+          reactCjsEnv: request.resolutionMeta?.reactCjsEnv,
         },
         `${envId}:${index}:${spec.modulePath}`,
       ] as const;
@@ -668,7 +915,7 @@ async function loadBabelPlugin(modulePath: string): Promise<unknown> {
   return plugin;
 }
 
-function buildModuleKey(request: WorkerRequest): string {
+function buildBaseModuleKey(request: WorkerRequest): string {
   const envHashes = Object.fromEntries(
     Object.entries(request.codeByEnv ?? {}).map(([envId, code]) => [
       envId,
@@ -689,7 +936,11 @@ function buildModuleKey(request: WorkerRequest): string {
           name,
           contentHash(
             JSON.stringify({
-              contents: output.contents,
+              contentsHash:
+                output.contents != null
+                  ? contentHash(output.contents)
+                  : undefined,
+              template: output.template,
               map: output.map,
               metadata: output.metadata,
             }),
@@ -707,8 +958,19 @@ function buildModuleKey(request: WorkerRequest): string {
       version: request.pkg.version,
     },
     envs: [...request.envs].sort(),
+    targets: Object.fromEntries(
+      Object.entries(request.targets).sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    ),
     syntax: request.syntax,
-    codeHash: contentHash(request.code),
+    codeHash: contentHash(request.sourceBytes ?? request.code),
+    moduleType: request.moduleType ?? "javascript",
+    importIntent: request.importIntent ?? "module",
+    canonicalPath: request.canonicalPath ?? request.moduleIdentity,
+    buildMode: request.buildMode ?? "development",
+    transformConfig: request.transformConfig,
+    resolutionMeta: request.resolutionMeta,
     envHashes,
     mapHashes,
     sourceMap: request.sourceMap
@@ -718,23 +980,76 @@ function buildModuleKey(request: WorkerRequest): string {
         }
       : undefined,
     extraOutputHashes,
+    linkReferencesByEnv: request.linkReferencesByEnv,
     workerProfile: request.workerProfile.fingerprint,
   });
 }
 
+function buildModuleKey(
+  baseKey: string,
+  resolvedImportsByEnv: ResolvedImportsByEnv,
+): string {
+  const resolved = Object.fromEntries(
+    Object.entries(resolvedImportsByEnv)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([envId, entries]) => [
+        envId,
+        Object.fromEntries(
+          Object.entries(entries)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, value]) => [
+              key,
+              {
+                target: value.target,
+                type: value.type,
+                intent: value.intent,
+                meta: value.meta,
+              },
+            ]),
+        ),
+      ]),
+  );
+  return JSON.stringify({ baseKey, resolved });
+}
+
+async function validateCacheCandidate(
+  candidate: ModuleCacheRecord,
+  request: WorkerRequest,
+  baseKey: string,
+): Promise<ModuleCacheRecord | null> {
+  if (candidate.baseKey !== baseKey) return null;
+  const resolvedImportsByEnv = await resolveDependencyRequests(
+    candidate.dependencyRequestsByEnv,
+  );
+  return candidate.moduleKey === buildModuleKey(baseKey, resolvedImportsByEnv)
+    ? candidate
+    : null;
+}
+
+async function resolveDependencyRequests(
+  requestsByEnv: Record<string, WorkerImportRequest[]>,
+): Promise<ResolvedImportsByEnv> {
+  return Object.values(requestsByEnv).some((requests) => requests.length > 0)
+    ? await requestCoordinator<ResolvedImportsByEnv>({
+        type: "resolve-imports",
+        requestsByEnv,
+      })
+    : {};
+}
+
 function buildFileCachePaths(
   cacheRoot: string,
-  envs: string[],
-  moduleIdentity: string,
+  canonicalPath: string,
+  baseKey: string,
 ): FileCachePaths {
-  const fileHash = contentHash(moduleIdentity);
-  const envHash = contentHash(JSON.stringify([...envs].sort())).slice(0, 12);
-  const fileDir = path.join(cacheRoot, "files", fileHash, envHash);
+  const fileHash = contentHash(canonicalPath);
+  const variantHash = contentHash(baseKey);
+  const fileDir = path.join(cacheRoot, "files", fileHash, variantHash);
   return {
     fileHash,
     fileDir,
     modulePath: path.join(fileDir, "module.json"),
-    remoteBaseKey: joinRemoteKey("files", fileHash, envHash),
+    remoteBaseKey: joinRemoteKey("files", fileHash, variantHash),
   };
 }
 
@@ -745,6 +1060,37 @@ function finalizeFileRecord(
 ): FileRecord {
   return {
     ...fileRecord,
+    extraOutputs: fileRecord.extraOutputs
+      ? Object.fromEntries(
+          Object.entries(fileRecord.extraOutputs).map(
+            ([name, output], index) => [
+              name,
+              {
+                ...output,
+                artifactPath:
+                  output.contents != null
+                    ? path.join(
+                        fileDir,
+                        envId,
+                        "resources",
+                        `${String(index).padStart(3, "0")}.bin`,
+                      )
+                    : output.artifactPath,
+                mapArtifactPath: output.map
+                  ? path.join(
+                      fileDir,
+                      envId,
+                      "resources",
+                      `${String(index).padStart(3, "0")}.map`,
+                    )
+                  : output.mapArtifactPath,
+                contents: undefined,
+                map: undefined,
+              },
+            ],
+          ),
+        )
+      : undefined,
     cells: fileRecord.cells.map((cell, index) =>
       cell.kind === "generated"
         ? cell
@@ -778,9 +1124,10 @@ async function writeFileCache(
   sourceResultsByEnv: Record<string, TransformResult>,
   fileRecordsByEnv: Record<string, FileRecord>,
   moduleKey: string,
+  baseKey: string,
+  dependencyRequestsByEnv: Record<string, WorkerImportRequest[]>,
   moduleIdentity: string,
 ): Promise<void> {
-  const existing = await readModuleCache(cachePaths.modulePath);
   await fs.rm(cachePaths.fileDir, { recursive: true, force: true });
   await ensureDir(cachePaths.fileDir);
 
@@ -801,18 +1148,28 @@ async function writeFileCache(
         await writeFileAtomic(mapArtifactPath, cell.map);
       }
     }
+    for (const [name, output] of Object.entries(
+      result.fileRecord?.extraOutputs ?? {},
+    )) {
+      const cachedOutput = fileRecord.extraOutputs?.[name];
+      if (cachedOutput?.artifactPath && output.contents != null) {
+        await writeFileAtomic(cachedOutput.artifactPath, output.contents);
+      }
+      if (cachedOutput?.mapArtifactPath && output.map) {
+        await writeFileAtomic(cachedOutput.mapArtifactPath, output.map);
+      }
+    }
   }
 
-  const now = new Date().toISOString();
   const moduleRecord: ModuleCacheRecord = {
+    baseKey,
     moduleKey,
+    dependencyRequestsByEnv,
     fileRecordsByEnv: toCachedFileRecords(
       fileRecordsByEnv,
       cachePaths.fileDir,
       moduleIdentity,
     ),
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
   };
   await writeJsonAtomic(cachePaths.modulePath, moduleRecord);
 }
@@ -837,22 +1194,27 @@ async function readModuleCache(
       ? { default: (parsed.fileRecord ?? parsed.irHeader) as FileRecord }
       : null);
   const moduleKey = parsed.moduleKey ?? parsed.cacheKey;
-  if (!moduleKey || !fileRecordsByEnv) {
+  if (
+    !moduleKey ||
+    !parsed.baseKey ||
+    !parsed.dependencyRequestsByEnv ||
+    !fileRecordsByEnv
+  ) {
     return null;
   }
 
   return {
+    baseKey: parsed.baseKey,
     moduleKey,
+    dependencyRequestsByEnv: parsed.dependencyRequestsByEnv,
     fileRecordsByEnv,
-    createdAt: parsed.createdAt ?? new Date(0).toISOString(),
-    updatedAt: parsed.updatedAt ?? new Date(0).toISOString(),
   };
 }
 
 async function readRemoteModuleCache(
   remote: RemoteCacheAdapter,
   cachePaths: FileCachePaths,
-  moduleKey: string,
+  baseKey: string,
   sourceMapsRequired: boolean,
   request: WorkerRequest,
 ): Promise<ModuleCacheRecord | null> {
@@ -869,14 +1231,17 @@ async function readRemoteModuleCache(
   } catch {
     return null;
   }
-  if (!parsed || parsed.moduleKey !== moduleKey || !parsed.fileRecordsByEnv) {
+  if (!parsed || !parsed.fileRecordsByEnv) {
     return null;
   }
 
+  const validated = await validateCacheCandidate(parsed, request, baseKey);
+  if (!validated) return null;
+
   const hydrated: ModuleCacheRecord = {
-    ...parsed,
+    ...validated,
     fileRecordsByEnv: hydrateCachedFileRecords(
-      parsed.fileRecordsByEnv,
+      validated.fileRecordsByEnv,
       cachePaths.fileDir,
       request,
     ),
@@ -913,6 +1278,35 @@ async function readRemoteModuleCache(
         await writeFileAtomic(cell.mapArtifactPath, sourceMap);
       }
     }
+    for (const output of Object.values(fileRecord.extraOutputs ?? {})) {
+      if (output.artifactPath) {
+        const relativePath = normalizePosixPath(
+          path.relative(cachePaths.fileDir, output.artifactPath),
+        );
+        const encoded = await remote.get(
+          joinRemoteKey(cachePaths.remoteBaseKey, relativePath),
+        );
+        if (encoded == null) {
+          return null;
+        }
+        await writeFileAtomic(
+          output.artifactPath,
+          Buffer.from(encoded, "base64"),
+        );
+      }
+      if (output.mapArtifactPath) {
+        const relativeMapPath = normalizePosixPath(
+          path.relative(cachePaths.fileDir, output.mapArtifactPath),
+        );
+        const sourceMap = await remote.get(
+          joinRemoteKey(cachePaths.remoteBaseKey, relativeMapPath),
+        );
+        if (sourceMap == null) {
+          return null;
+        }
+        await writeFileAtomic(output.mapArtifactPath, sourceMap);
+      }
+    }
   }
 
   await writeJsonAtomic(cachePaths.modulePath, {
@@ -936,19 +1330,19 @@ async function writeRemoteFileCache(
   cachePaths: FileCachePaths,
   fileRecordsByEnv: Record<string, FileRecord>,
   moduleKey: string,
+  baseKey: string,
+  dependencyRequestsByEnv: Record<string, WorkerImportRequest[]>,
   moduleIdentity: string,
 ): Promise<void> {
-  const local = await readModuleCache(cachePaths.modulePath);
-  const now = new Date().toISOString();
   const remoteRecord: ModuleCacheRecord = {
+    baseKey,
     moduleKey,
+    dependencyRequestsByEnv,
     fileRecordsByEnv: toCachedFileRecords(
       fileRecordsByEnv,
       cachePaths.fileDir,
       moduleIdentity,
     ),
-    createdAt: local?.createdAt ?? now,
-    updatedAt: now,
   };
 
   for (const fileRecord of Object.values(fileRecordsByEnv)) {
@@ -974,6 +1368,27 @@ async function writeRemoteFileCache(
         );
       }
     }
+    for (const output of Object.values(fileRecord.extraOutputs ?? {})) {
+      if (output.artifactPath) {
+        const relativePath = normalizePosixPath(
+          path.relative(cachePaths.fileDir, output.artifactPath),
+        );
+        const artifact = await fs.readFile(output.artifactPath);
+        await remote.set(
+          joinRemoteKey(cachePaths.remoteBaseKey, relativePath),
+          artifact.toString("base64"),
+        );
+      }
+      if (output.mapArtifactPath) {
+        const relativeMapPath = normalizePosixPath(
+          path.relative(cachePaths.fileDir, output.mapArtifactPath),
+        );
+        await remote.set(
+          joinRemoteKey(cachePaths.remoteBaseKey, relativeMapPath),
+          await fs.readFile(output.mapArtifactPath, "utf8"),
+        );
+      }
+    }
   }
 
   await remote.set(
@@ -995,6 +1410,25 @@ function hydrateCachedFileRecords(
         id: request.id,
         filePath: request.realPath,
         pkg: request.pkg,
+        extraOutputs: record.extraOutputs
+          ? Object.fromEntries(
+              Object.entries(record.extraOutputs).map(([name, output]) => [
+                name,
+                {
+                  ...output,
+                  artifactPath:
+                    output.artifactPath && !path.isAbsolute(output.artifactPath)
+                      ? path.join(fileDir, output.artifactPath)
+                      : output.artifactPath,
+                  mapArtifactPath:
+                    output.mapArtifactPath &&
+                    !path.isAbsolute(output.mapArtifactPath)
+                      ? path.join(fileDir, output.mapArtifactPath)
+                      : output.mapArtifactPath,
+                },
+              ]),
+            )
+          : undefined,
         cells: record.cells.map((cell) => ({
           ...cell,
           artifactPath:
@@ -1028,6 +1462,26 @@ function toCachedFileRecords(
           version: record.pkg.version,
           root: ".",
         },
+        extraOutputs: record.extraOutputs
+          ? Object.fromEntries(
+              Object.entries(record.extraOutputs).map(([name, output]) => [
+                name,
+                {
+                  ...output,
+                  artifactPath: output.artifactPath
+                    ? normalizePosixPath(
+                        path.relative(fileDir, output.artifactPath),
+                      )
+                    : undefined,
+                  mapArtifactPath: output.mapArtifactPath
+                    ? normalizePosixPath(
+                        path.relative(fileDir, output.mapArtifactPath),
+                      )
+                    : undefined,
+                },
+              ]),
+            )
+          : undefined,
         cells: record.cells.map((cell) => ({
           ...cell,
           artifactPath: cell.artifactPath
@@ -1040,84 +1494,6 @@ function toCachedFileRecords(
       },
     ]),
   );
-}
-
-function createRemoteCacheAdapter(
-  config: RemoteCacheConfig | undefined,
-  namespace = "default",
-): RemoteCacheAdapter | null {
-  if (!config) {
-    return null;
-  }
-  const prefix = joinRemoteKey(config.prefix, namespace);
-  if (config.kind === "file") {
-    return {
-      async get(key) {
-        try {
-          return await fs.readFile(path.join(config.dir, prefix, key), "utf8");
-        } catch {
-          return null;
-        }
-      },
-      async set(key, value) {
-        await writeFileAtomic(path.join(config.dir, prefix, key), value);
-      },
-    };
-  }
-  if (config.kind === "cloudflare-kv") {
-    const token = process.env[config.apiTokenEnv];
-    if (!token) {
-      throw new Error(
-        `Cloudflare KV cache token env '${config.apiTokenEnv}' is not set.`,
-      );
-    }
-    const baseUrl = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(
-      config.accountId,
-    )}/storage/kv/namespaces/${encodeURIComponent(config.namespaceId)}/values`;
-    return {
-      async get(key) {
-        const response = await fetch(
-          `${baseUrl}/${encodeURIComponent(joinRemoteKey(prefix, key))}`,
-          {
-            headers: { authorization: `Bearer ${token}` },
-          },
-        );
-        if (response.status === 404) {
-          return null;
-        }
-        if (!response.ok) {
-          throw new Error(
-            `Cloudflare KV cache read failed (${response.status}).`,
-          );
-        }
-        return response.text();
-      },
-      async set(key, value) {
-        const response = await fetch(
-          `${baseUrl}/${encodeURIComponent(joinRemoteKey(prefix, key))}`,
-          {
-            method: "PUT",
-            headers: { authorization: `Bearer ${token}` },
-            body: value,
-          },
-        );
-        if (!response.ok) {
-          throw new Error(
-            `Cloudflare KV cache write failed (${response.status}).`,
-          );
-        }
-      },
-    };
-  }
-  return null;
-}
-
-function joinRemoteKey(...parts: Array<string | undefined>): string {
-  return parts
-    .filter((part): part is string => Boolean(part))
-    .flatMap((part) => part.split("/"))
-    .filter(Boolean)
-    .join("/");
 }
 
 async function hasCachedArtifacts(
@@ -1143,6 +1519,17 @@ async function hasCachedArtifacts(
         return false;
       }
       if (cell.mapArtifactPath && !(await fileExists(cell.mapArtifactPath))) {
+        return false;
+      }
+    }
+    for (const output of Object.values(fileRecord.extraOutputs ?? {})) {
+      if (output.artifactPath && !(await fileExists(output.artifactPath))) {
+        return false;
+      }
+      if (
+        output.mapArtifactPath &&
+        !(await fileExists(output.mapArtifactPath))
+      ) {
         return false;
       }
     }

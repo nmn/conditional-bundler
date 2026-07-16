@@ -1,12 +1,12 @@
-import { set as _set, getterFor as _getterFor } from "../internals/internal-state";
+import InternalStateModule from "../internals/internal-state";
 import createIteratorConstructor from "../internals/iterator-create-constructor";
 import createIterResultObject from "../internals/create-iter-result-object";
 import hasOwn from "../internals/has-own-property";
 import objectKeys from "../internals/object-keys";
 import toObject from "../internals/to-object";
 var OBJECT_ITERATOR = 'Object Iterator';
-var setInternalState = _set;
-var getInternalState = _getterFor(OBJECT_ITERATOR);
+var setInternalState = InternalStateModule.set;
+var getInternalState = InternalStateModule.getterFor(OBJECT_ITERATOR);
 const _cjs_default = createIteratorConstructor(function ObjectIterator(source, mode) {
   var object = toObject(source);
   setInternalState(this, {

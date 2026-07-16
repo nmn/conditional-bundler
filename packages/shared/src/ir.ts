@@ -6,11 +6,14 @@ export type ImportSpecifier = {
   useRanges: Array<[number, number]>;
 };
 
+export type DependencyTarget =
+  | { kind: "file"; moduleId: string; canonicalPath: string }
+  | { kind: "runtime"; specifier: string };
+
 export type ImportEntry = {
   source: string;
   request?: string;
-  moduleId?: string | null;
-  external?: boolean;
+  target: DependencyTarget;
   kind: "value" | "type" | "side-effect";
   isNamespace: boolean;
   isDefault: boolean;
@@ -29,8 +32,7 @@ export type ExportLocal = {
 export type ReexportNamed = {
   source: string;
   request?: string;
-  moduleId?: string | null;
-  external?: boolean;
+  target: DependencyTarget;
   imported: string;
   exported: string;
   isNamespace?: boolean;
@@ -40,16 +42,14 @@ export type ReexportNamed = {
 export type ExportStar = {
   source: string;
   request?: string;
-  moduleId?: string | null;
-  external?: boolean;
+  target: DependencyTarget;
   sourceOrder?: number;
 };
 
 export type DynamicImport = {
   source: string;
   request?: string;
-  moduleId?: string | null;
-  external?: boolean;
+  target: DependencyTarget;
   hashKey: string;
 };
 
@@ -61,9 +61,70 @@ export type DiscoveredEntrypoint =
       envs?: string[];
     };
 
+export type ReferenceEncoding =
+  | "javascript-expression"
+  | "html-attribute"
+  | "html-elements"
+  | "html-srcset"
+  | "css-url"
+  | "url";
+
+export type LinkReference =
+  | {
+      id: string;
+      kind: "module-url" | "module-filename" | "module-dirname";
+      symbol: string;
+      ownerId: string;
+    }
+  | {
+      id: string;
+      kind: "asset-url";
+      symbol: string;
+      assetId: string;
+      ownerId?: string;
+      request?: string;
+      usage?: "javascript" | "css-variable";
+    }
+  | {
+      id: string;
+      kind: "output-url";
+      outputId: string;
+      outputType: "script" | "style";
+      ownerId?: string;
+    }
+  | {
+      id: string;
+      kind: "output-integrity";
+      outputId: string;
+      outputType: "script" | "style";
+      ownerId?: string;
+    }
+  | {
+      id: string;
+      kind: "output-styles";
+      outputIds: string[];
+      ownerId?: string;
+    };
+
+export type TemplatePart =
+  | { kind: "text"; value: string; map?: string }
+  | {
+      kind: "reference";
+      referenceId: string;
+      encoding: ReferenceEncoding;
+    };
+
+export type ResourceTemplate = {
+  parts: TemplatePart[];
+  references: LinkReference[];
+};
+
 export type ExtraTransformOutput = {
-  contents: string;
+  contents?: string | Uint8Array;
+  artifactPath?: string;
   map?: string;
+  mapArtifactPath?: string;
+  template?: ResourceTemplate;
   metadata?: unknown;
 };
 
@@ -72,12 +133,14 @@ export type CellExternalDep =
       kind: "import";
       source: string;
       request?: string;
+      target?: DependencyTarget;
       imported: string;
     }
   | {
       kind: "side-effect";
       source: string;
       request?: string;
+      target?: DependencyTarget;
     };
 
 export type CellRecord = {
@@ -89,8 +152,10 @@ export type CellRecord = {
   map?: string;
   artifactPath?: string;
   mapArtifactPath?: string;
+  linkReferences?: LinkReference[];
   provides: string[];
   internalDeps: string[];
+  resourceDeps?: string[];
   externalDeps: CellExternalDep[];
   providerDeps?: Provider[];
   eager: boolean;
@@ -99,13 +164,11 @@ export type CellRecord = {
 export type ConditionalImport = {
   source: string;
   request?: string;
-  moduleId?: string | null;
-  external?: boolean;
+  target: DependencyTarget;
   condition: ConditionExpr;
   elseSource?: string;
   elseRequest?: string;
-  elseModuleId?: string | null;
-  elseExternal?: boolean;
+  elseTarget?: DependencyTarget;
 };
 
 export type FileFlags = {
@@ -119,7 +182,6 @@ export type FileIR = {
   moduleIdentity?: string;
   realPath: string;
   filePath: string;
-  virtual?: boolean;
   pkg: { name: string; version: string; root: string };
   prefix: string;
   contentHash: string;
@@ -133,6 +195,8 @@ export type FileIR = {
   conditionalImports: ConditionalImport[];
   discoveredEntrypoints: DiscoveredEntrypoint[];
   extraOutputs?: Record<string, ExtraTransformOutput>;
+  linkReferences?: LinkReference[];
+  resolutionMeta?: Record<string, unknown>;
   cells: CellRecord[];
   importRanges: Array<[number, number]>;
   exportRanges: Array<[number, number]>;
@@ -146,7 +210,6 @@ export type FileRecord = Pick<
   | "id"
   | "moduleIdentity"
   | "filePath"
-  | "virtual"
   | "prefix"
   | "contentHash"
   | "imports"
@@ -158,6 +221,8 @@ export type FileRecord = Pick<
   | "conditionalImports"
   | "discoveredEntrypoints"
   | "extraOutputs"
+  | "linkReferences"
+  | "resolutionMeta"
   | "cells"
   | "importRanges"
   | "exportRanges"
@@ -180,7 +245,6 @@ export type Provider = {
 export type ModuleNode = {
   id: string;
   filePath: string;
-  virtual?: boolean;
   prefix: string;
   deps: string[];
   unconditionalDeps: Set<string>;

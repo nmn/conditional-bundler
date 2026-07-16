@@ -1,10 +1,10 @@
-import { aTypedArray as _aTypedArray, getTypedArrayConstructor as _getTypedArrayConstructor, exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
 import $group from "../internals/array-group";
 // TODO: Remove from `core-js@4`
 
-var aTypedArray = _aTypedArray;
-var getTypedArrayConstructor = _getTypedArrayConstructor;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var getTypedArrayConstructor = ArrayBufferViewCore.getTypedArrayConstructor;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
 
 // `%TypedArray%.prototype.groupBy` method
 // https://github.com/tc39/proposal-array-grouping

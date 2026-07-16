@@ -1,7 +1,7 @@
 import $ from "../internals/export";
-import { end as _end } from "../internals/string-pad";
+import _cjs_import from "../internals/string-pad";
 import WEBKIT_BUG from "../internals/string-pad-webkit-bug";
-var $padEnd = _end;
+var $padEnd = _cjs_import.end;
 // `String.prototype.padEnd` method
 // https://tc39.es/ecma262/#sec-string.prototype.padend
 $({

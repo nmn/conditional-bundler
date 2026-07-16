@@ -1,11 +1,11 @@
 import globalThis from "../internals/global-this";
 import apply from "../internals/function-apply";
-import { aTypedArray as _aTypedArray, exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
 import fails from "../internals/fails";
 import arraySlice from "../internals/array-slice";
 var Int8Array = globalThis.Int8Array;
-var aTypedArray = _aTypedArray;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
 var $toLocaleString = [].toLocaleString;
 
 // iOS Safari 6.x fails here

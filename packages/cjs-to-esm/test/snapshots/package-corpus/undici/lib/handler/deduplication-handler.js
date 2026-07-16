@@ -1,4 +1,8 @@
-import { RequestAbortedError as _RequestAbortedError } from "../core/errors";
+import _cjs_import from "../core/errors";
+const {
+  RequestAbortedError
+} = _cjs_import;
+
 /**
  * @typedef {import('../../types/dispatcher.d.ts').default.DispatchHandler} DispatchHandler
  */
@@ -346,7 +350,7 @@ class DeduplicationHandler {
     waitingHandler.bufferedChunks.push(bufferedChunk);
     waitingHandler.bufferedBytes += bufferedChunk.length;
     if (waitingHandler.bufferedBytes > this.#maxBufferSize) {
-      const err = new _RequestAbortedError(`Deduplicated waiting handler exceeded maxBufferSize (${this.#maxBufferSize} bytes) while paused`);
+      const err = new RequestAbortedError(`Deduplicated waiting handler exceeded maxBufferSize (${this.#maxBufferSize} bytes) while paused`);
       this.#errorWaitingHandler(waitingHandler, err);
     }
   }

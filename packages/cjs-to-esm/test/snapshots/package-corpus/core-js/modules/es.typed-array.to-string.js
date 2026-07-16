@@ -1,8 +1,8 @@
-import { exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
+import _cjs_import from "../internals/array-buffer-view-core";
 import fails from "../internals/fails";
 import globalThis from "../internals/global-this";
 import uncurryThis from "../internals/function-uncurry-this";
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+var exportTypedArrayMethod = _cjs_import.exportTypedArrayMethod;
 var Uint8Array = globalThis.Uint8Array;
 var Uint8ArrayPrototype = Uint8Array && Uint8Array.prototype || {};
 var arrayToString = [].toString;

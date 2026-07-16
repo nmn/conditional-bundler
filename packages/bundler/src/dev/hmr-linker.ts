@@ -7,12 +7,14 @@ import { assembleBundle, stringifySourceMap } from "../sourcemap/compose.js";
 
 export type HmrCellRecord = {
   id: string;
+  fileId: string;
   symbols: string[];
   deps: string[];
   hash: string;
-  code: string;
+  code?: string;
+  artifactPath?: string;
   map?: string;
-  patchCode?: string;
+  mapArtifactPath?: string;
 };
 
 export type HmrBundleRecord = {
@@ -21,6 +23,16 @@ export type HmrBundleRecord = {
   reactRefresh: boolean;
   symbols: string[];
   cells: HmrCellRecord[];
+};
+
+export type HmrBuildState = {
+  bundles: Record<string, HmrBundleRecord>;
+};
+
+export type EmittedHmrCell = {
+  record: HmrCellRecord;
+  code: string;
+  map?: string;
 };
 
 const requireFromBundler = createRequire(import.meta.url);
@@ -32,6 +44,7 @@ export function emitHmrPrelude(options: {
   return `${options.reactRefresh ? emitReactRefreshRuntimeSetup() : ""}
 const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
   const cells = new Map();
+  const bundleHandlers = new Map();
   const data = Object.create(null);
   let activeCellId = null;
   const runtime = {
@@ -68,15 +81,29 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
         runtime.performReactRefresh();
       });
     },
-    async applyPatch(records, imports, styles) {
+    registerBundle(key, handler) {
+      bundleHandlers.set(key, handler);
+    },
+    async applyPatch(updates, imports, styles, rscChunks) {
       try {
-        for (const source of records) (0, eval)(source);
+        const sources = await Promise.all((updates || []).map(async (update) => {
+          const response = await fetch(update.url, { cache: "no-store" });
+          if (!response.ok) throw new Error("HMR update request failed: " + response.status + " " + update.url);
+          return response.text();
+        }));
+        for (let index = 0; index < sources.length; index += 1) {
+          const update = updates[index];
+          const handler = bundleHandlers.get(update.bundleKey);
+          if (!handler) throw new Error("HMR bundle is not loaded: " + update.bundleKey);
+          handler(sources[index]);
+        }
+        if (rscChunks) Object.assign(globalThis.__BUNDLER_RSC_CHUNKS__ ??= {}, rscChunks);
         for (const href of imports || []) {
           const module = await import(href);
           runtime.updateRscModuleCache(href, module);
         }
         runtime.updateStyles(styles || []);
-        if ((records.length > 0 || (imports || []).length > 0) && !runtime.performReactRefresh()) location.reload();
+        if (((updates || []).length > 0 || (imports || []).length > 0) && !runtime.performReactRefresh()) location.reload();
       } catch (error) {
         console.error("[bundler] HMR patch failed", error);
         location.reload();
@@ -143,7 +170,7 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
       const socket = new WebSocket(protocol + "//" + location.host + "/__bundler_hmr");
       socket.addEventListener("message", (event) => {
         const message = JSON.parse(event.data);
-        if (message.type === "patch") runtime.applyPatch(message.records || [], message.imports || [], message.styles || []);
+        if (message.type === "patch") runtime.applyPatch(message.updates || [], message.imports || [], message.styles || [], message.rscChunks);
         if (message.type === "rsc-refresh") runtime.refreshRsc();
         if (message.type === "reload") location.reload();
         if (message.type === "error") console.error("[bundler] rebuild failed", message.message);
@@ -158,7 +185,7 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
 export async function emitHmrCell(
   cell: CellRecord,
   extraDeps: string[] = [],
-): Promise<HmrCellRecord> {
+): Promise<EmittedHmrCell> {
   const source = await readCellCode(cell);
   const sourceMap = await readCellMap(cell);
   const symbols = cell.provides;
@@ -166,14 +193,35 @@ export async function emitHmrCell(
   const installer = wrapCellInstaller(cell, source, sourceMap, symbols, deps);
   const id = cellIdentifier(cell);
   return {
-    id,
-    symbols,
-    deps,
-    hash: contentHashShort(source),
+    record: {
+      id,
+      fileId: cell.fileId,
+      symbols,
+      deps,
+      hash: contentHashShort(source),
+      code: cell.code,
+      artifactPath: cell.artifactPath,
+      map: cell.map,
+      mapArtifactPath: cell.mapArtifactPath,
+    },
     code: installer.code,
     map: installer.map,
-    patchCode: emitPatchCode(installer.code, installer.map, id),
   };
+}
+
+export async function materializeHmrPatch(
+  record: HmrCellRecord,
+): Promise<string> {
+  const source = await readHmrRecordCode(record);
+  const sourceMap = await readHmrRecordMap(record);
+  const installer = wrapHmrInstaller(
+    record.id,
+    source,
+    sourceMap,
+    record.symbols,
+    record.deps,
+  );
+  return emitPatchCode(installer.code, installer.map, record.id);
 }
 
 export function emitHmrSymbolDeclarations(symbols: Iterable<string>): string {
@@ -220,10 +268,8 @@ export function emitReactRefreshRegistrations(
   return lines.join("\n");
 }
 
-export function emitHmrBundleMetadata(
-  record: HmrBundleRecord,
-): HmrBundleRecord {
-  return record;
+export function emitHmrBundleRegistration(bundleKey: string): string {
+  return `__BUNDLER_HMR__.registerBundle(${JSON.stringify(bundleKey)}, (source) => eval(source));`;
 }
 
 function emitReactRefreshRuntimeSetup(): string {
@@ -291,6 +337,22 @@ function wrapCellInstaller(
   symbols: string[],
   deps: string[],
 ): { code: string; map?: string } {
+  return wrapHmrInstaller(
+    cellIdentifier(cell),
+    source,
+    sourceMap,
+    symbols,
+    deps,
+  );
+}
+
+function wrapHmrInstaller(
+  id: string,
+  source: string,
+  sourceMap: string | undefined,
+  symbols: string[],
+  deps: string[],
+): { code: string; map?: string } {
   if (isTopLevelModuleSyntax(source)) {
     return { code: source, map: sourceMap };
   }
@@ -301,7 +363,7 @@ function wrapCellInstaller(
         `__BUNDLER_HMR__.reactRefreshRegister(${symbol}, ${JSON.stringify(symbol)});`,
     );
   const opening = `__BUNDLER_HMR__.register({
-  id: ${JSON.stringify(cellIdentifier(cell))},
+  id: ${JSON.stringify(id)},
   symbols: ${JSON.stringify(symbols)},
   deps: ${JSON.stringify(deps)},
   hash: ${JSON.stringify(contentHashShort(source))},
@@ -318,6 +380,30 @@ function wrapCellInstaller(
     code: assembled.code,
     map: sourceMap ? stringifySourceMap(assembled.map) : undefined,
   };
+}
+
+async function readHmrRecordCode(record: HmrCellRecord): Promise<string> {
+  if (record.code != null) {
+    return record.code;
+  }
+  if (record.artifactPath) {
+    const fs = await import("node:fs/promises");
+    return fs.readFile(record.artifactPath, "utf8");
+  }
+  throw new Error(`HMR cell '${record.id}' is missing code and artifactPath.`);
+}
+
+async function readHmrRecordMap(
+  record: HmrCellRecord,
+): Promise<string | undefined> {
+  if (record.map != null) {
+    return record.map;
+  }
+  if (record.mapArtifactPath) {
+    const fs = await import("node:fs/promises");
+    return fs.readFile(record.mapArtifactPath, "utf8");
+  }
+  return undefined;
 }
 
 function collectIdentifierDeps(

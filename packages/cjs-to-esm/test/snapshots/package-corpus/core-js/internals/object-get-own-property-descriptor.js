@@ -1,6 +1,6 @@
 import DESCRIPTORS from "../internals/descriptors";
 import call from "../internals/function-call";
-import { f as _f } from "../internals/object-property-is-enumerable";
+import propertyIsEnumerableModule from "../internals/object-property-is-enumerable";
 import createPropertyDescriptor from "../internals/create-property-descriptor";
 import toIndexedObject from "../internals/to-indexed-object";
 import toPropertyKey from "../internals/to-property-key";
@@ -11,16 +11,16 @@ var $getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
 
 // `Object.getOwnPropertyDescriptor` method
 // https://tc39.es/ecma262/#sec-object.getownpropertydescriptor
-const _f2 = DESCRIPTORS ? $getOwnPropertyDescriptor : function getOwnPropertyDescriptor(O, P) {
+const _f = DESCRIPTORS ? $getOwnPropertyDescriptor : function getOwnPropertyDescriptor(O, P) {
   O = toIndexedObject(O);
   P = toPropertyKey(P);
   if (IE8_DOM_DEFINE) try {
     return $getOwnPropertyDescriptor(O, P);
   } catch (error) {/* empty */}
-  if (hasOwn(O, P)) return createPropertyDescriptor(!call(_f, O, P), O[P]);
+  if (hasOwn(O, P)) return createPropertyDescriptor(!call(propertyIsEnumerableModule.f, O, P), O[P]);
 };
-export { _f2 as f };
+export { _f as f };
 const _cjs_default = {
-  ["f"]: _f2
+  ["f"]: _f
 };
 export default _cjs_default;

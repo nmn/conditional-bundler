@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-export function hashString(input: string): string {
+export function hashString(input: string | Uint8Array): string {
   return crypto.createHash("sha1").update(input).digest("hex");
 }
 
@@ -20,11 +20,14 @@ export function base36ShortAlpha(hex: string, length = 8): string {
   return raw;
 }
 
-export function contentHash(input: string): string {
+export function contentHash(input: string | Uint8Array): string {
   return hashString(input);
 }
 
-export function contentHashShort(input: string, length = 8): string {
+export function contentHashShort(
+  input: string | Uint8Array,
+  length = 8,
+): string {
   return base36Short(hashString(input), length);
 }
 
@@ -44,4 +47,12 @@ export function importConstKey(
 ): string {
   const key = `${pkgName}@${pkgVersion}:${relPath}`;
   return base36ShortAlpha(hashString(key));
+}
+
+export function portableSourceName(canonicalPath: string): string {
+  const encodedPath = canonicalPath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `bundler:///${encodedPath}`;
 }

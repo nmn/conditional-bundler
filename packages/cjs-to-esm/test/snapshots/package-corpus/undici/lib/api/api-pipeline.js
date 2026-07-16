@@ -1,10 +1,10 @@
 import * as _cjs_import from "node:stream";
 import * as assert from "node:assert";
 import * as _cjs_import2 from "node:async_hooks";
-import { InvalidArgumentError as _InvalidArgumentError, InvalidReturnValueError as _InvalidReturnValueError, RequestAbortedError as _RequestAbortedError } from "../core/errors";
-import { destroy as _destroy, parseRawHeaders as _parseRawHeaders } from "../core/util";
-import { kBodyUsed as _kBodyUsed } from "../core/symbols";
-import { addSignal as _addSignal, removeSignal as _removeSignal } from "./abort-signal";
+import _cjs_import3 from "../core/errors";
+import util from "../core/util";
+import _cjs_import4 from "../core/symbols";
+import _cjs_import5 from "./abort-signal";
 const {
   Readable,
   Duplex,
@@ -13,6 +13,18 @@ const {
 const {
   AsyncResource
 } = _cjs_import2;
+const {
+  InvalidArgumentError,
+  InvalidReturnValueError,
+  RequestAbortedError
+} = _cjs_import3;
+const {
+  kBodyUsed
+} = _cjs_import4;
+const {
+  addSignal,
+  removeSignal
+} = _cjs_import5;
 function noop() {}
 const kResume = Symbol('resume');
 class PipelineRequest extends Readable {
@@ -23,7 +35,7 @@ class PipelineRequest extends Readable {
     this[kResume] = null;
     // Pipeline request bodies come from a live writable side and cannot be
     // replayed across redirects or retries, even before any bytes are read.
-    this[_kBodyUsed] = true;
+    this[kBodyUsed] = true;
   }
   _read() {
     const {
@@ -51,7 +63,7 @@ class PipelineResponse extends Readable {
   }
   _destroy(err, callback) {
     if (!err && !this._readableState.endEmitted) {
-      err = new _RequestAbortedError();
+      err = new RequestAbortedError();
     }
     callback(err);
   }
@@ -59,10 +71,10 @@ class PipelineResponse extends Readable {
 class PipelineHandler extends AsyncResource {
   constructor(opts, handler) {
     if (!opts || typeof opts !== 'object') {
-      throw new _InvalidArgumentError('invalid opts');
+      throw new InvalidArgumentError('invalid opts');
     }
     if (typeof handler !== 'function') {
-      throw new _InvalidArgumentError('invalid handler');
+      throw new InvalidArgumentError('invalid handler');
     }
     const {
       signal,
@@ -72,13 +84,13 @@ class PipelineHandler extends AsyncResource {
       responseHeaders
     } = opts;
     if (signal && typeof signal.on !== 'function' && typeof signal.addEventListener !== 'function') {
-      throw new _InvalidArgumentError('signal must be an EventEmitter or EventTarget');
+      throw new InvalidArgumentError('signal must be an EventEmitter or EventTarget');
     }
     if (method === 'CONNECT') {
-      throw new _InvalidArgumentError('invalid method');
+      throw new InvalidArgumentError('invalid method');
     }
     if (onInfo && typeof onInfo !== 'function') {
-      throw new _InvalidArgumentError('invalid onInfo callback');
+      throw new InvalidArgumentError('invalid onInfo callback');
     }
     super('UNDICI_PIPELINE');
     this.opaque = opaque || null;
@@ -118,15 +130,15 @@ class PipelineHandler extends AsyncResource {
           abort
         } = this;
         if (!err && !ret._readableState.endEmitted) {
-          err = new _RequestAbortedError();
+          err = new RequestAbortedError();
         }
         if (abort && err) {
           abort();
         }
-        _destroy(body, err);
-        _destroy(req, err);
-        _destroy(res, err);
-        _removeSignal(this);
+        util.destroy(body, err);
+        util.destroy(req, err);
+        util.destroy(res, err);
+        removeSignal(this);
         callback(err);
       }
     }).on('prefinish', () => {
@@ -138,7 +150,7 @@ class PipelineHandler extends AsyncResource {
       req.push(null);
     });
     this.res = null;
-    _addSignal(this, signal);
+    addSignal(this, signal);
   }
   onRequestStart(controller, context) {
     const {
@@ -161,7 +173,7 @@ class PipelineHandler extends AsyncResource {
     if (statusCode < 200) {
       if (this.onInfo) {
         const rawHeaders = controller?.rawHeaders;
-        const responseHeaders = this.responseHeaders === 'raw' ? _parseRawHeaders(rawHeaders) : headers;
+        const responseHeaders = this.responseHeaders === 'raw' ? util.parseRawHeaders(rawHeaders) : headers;
         this.onInfo({
           statusCode,
           headers: responseHeaders
@@ -174,7 +186,7 @@ class PipelineHandler extends AsyncResource {
     try {
       this.handler = null;
       const rawHeaders = controller?.rawHeaders;
-      const responseHeaders = this.responseHeaders === 'raw' ? _parseRawHeaders(rawHeaders) : headers;
+      const responseHeaders = this.responseHeaders === 'raw' ? util.parseRawHeaders(rawHeaders) : headers;
       body = this.runInAsyncScope(handler, null, {
         statusCode,
         headers: responseHeaders,
@@ -187,7 +199,7 @@ class PipelineHandler extends AsyncResource {
       throw err;
     }
     if (!body || typeof body.on !== 'function') {
-      throw new _InvalidReturnValueError('expected Readable');
+      throw new InvalidReturnValueError('expected Readable');
     }
     body.on('data', chunk => {
       const {
@@ -201,7 +213,7 @@ class PipelineHandler extends AsyncResource {
       const {
         ret
       } = this;
-      _destroy(ret, err);
+      util.destroy(ret, err);
     }).on('end', () => {
       const {
         ret
@@ -212,7 +224,7 @@ class PipelineHandler extends AsyncResource {
         ret
       } = this;
       if (!ret._readableState.ended) {
-        _destroy(ret, new _RequestAbortedError());
+        util.destroy(ret, new RequestAbortedError());
       }
     });
     this.body = body;
@@ -236,7 +248,7 @@ class PipelineHandler extends AsyncResource {
       ret
     } = this;
     this.handler = null;
-    _destroy(ret, err);
+    util.destroy(ret, err);
   }
 }
 function pipeline(opts, handler) {

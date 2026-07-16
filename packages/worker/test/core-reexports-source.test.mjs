@@ -10,8 +10,11 @@ test("rewrites named re-exports from another module to the imported module prefi
       request: "./dep.js",
       imported: "foo",
       exported: "bar",
-      moduleId: "fixture@0.0.0::src/dep.js",
-      external: false,
+      target: {
+        kind: "file",
+        moduleId: "fixture@0.0.0::src/dep.js",
+        canonicalPath: "fixture@0.0.0::src/dep.js",
+      },
       sourceOrder: 0,
     }),
   ]);
@@ -28,8 +31,11 @@ test("rewrites namespace re-exports from another module to the namespace object"
       imported: "*",
       exported: "ns",
       isNamespace: true,
-      moduleId: "fixture@0.0.0::src/dep.js",
-      external: false,
+      target: {
+        kind: "file",
+        moduleId: "fixture@0.0.0::src/dep.js",
+        canonicalPath: "fixture@0.0.0::src/dep.js",
+      },
       sourceOrder: 0,
     }),
   ]);
@@ -44,8 +50,11 @@ test("records export star metadata without leaving export syntax behind", async 
     expect.objectContaining({
       source: "src/dep.js",
       request: "./dep.js",
-      moduleId: "fixture@0.0.0::src/dep.js",
-      external: false,
+      target: {
+        kind: "file",
+        moduleId: "fixture@0.0.0::src/dep.js",
+        canonicalPath: "fixture@0.0.0::src/dep.js",
+      },
       sourceOrder: 0,
     }),
   ]);

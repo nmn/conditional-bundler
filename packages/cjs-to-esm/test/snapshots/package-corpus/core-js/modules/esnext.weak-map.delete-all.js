@@ -1,7 +1,7 @@
 import $ from "../internals/export";
 import aWeakMap from "../internals/a-weak-map";
-import { remove as _remove } from "../internals/weak-map-helpers";
-var remove = _remove;
+import _cjs_import from "../internals/weak-map-helpers";
+var remove = _cjs_import.remove;
 
 // `WeakMap.prototype.deleteAll` method
 // https://github.com/tc39/proposal-collection-methods

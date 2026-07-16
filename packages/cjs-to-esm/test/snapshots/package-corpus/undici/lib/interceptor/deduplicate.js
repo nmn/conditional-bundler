@@ -1,7 +1,12 @@
 import * as diagnosticsChannel from "node:diagnostics_channel";
-import { safeHTTPMethods as _safeHTTPMethods } from "../core/util";
+import util from "../core/util";
 import DeduplicationHandler from "../handler/deduplication-handler";
-import { normalizeHeaders as _normalizeHeaders, makeCacheKey as _makeCacheKey, makeDeduplicationKey as _makeDeduplicationKey } from "../util/cache.js";
+import _cjs_import from "../util/cache.js";
+const {
+  normalizeHeaders,
+  makeCacheKey,
+  makeDeduplicationKey
+} = _cjs_import;
 const pendingRequestsChannel = diagnosticsChannel.channel('undici:request:pending-requests');
 
 /**
@@ -22,7 +27,7 @@ const _cjs_default = (opts = {}) => {
     throw new TypeError(`expected opts.methods to be an array, got ${typeof methods}`);
   }
   for (const method of methods) {
-    if (!_safeHTTPMethods.includes(method)) {
+    if (!util.safeHTTPMethods.includes(method)) {
       throw new TypeError(`expected opts.methods to only contain safe HTTP methods, got ${method}`);
     }
   }
@@ -54,7 +59,7 @@ const _cjs_default = (opts = {}) => {
       }
       opts = {
         ...opts,
-        headers: _normalizeHeaders(opts)
+        headers: normalizeHeaders(opts)
       };
 
       // Skip deduplication if request contains any of the specified headers
@@ -65,8 +70,8 @@ const _cjs_default = (opts = {}) => {
           }
         }
       }
-      const cacheKey = _makeCacheKey(opts);
-      const dedupeKey = _makeDeduplicationKey(cacheKey, excludeHeaderNamesSet);
+      const cacheKey = makeCacheKey(opts);
+      const dedupeKey = makeDeduplicationKey(cacheKey, excludeHeaderNamesSet);
 
       // Check if there's already a pending request for this key
       const pendingHandler = pendingRequests.get(dedupeKey);

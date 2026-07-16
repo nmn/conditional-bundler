@@ -1,13 +1,17 @@
 import * as _cjs_import from "node:net";
 import * as _cjs_import2 from "node:dns";
 import DecoratorHandler from "../handler/decorator-handler";
-import { InvalidArgumentError as _InvalidArgumentError, InformationalError as _InformationalError } from "../core/errors";
+import _cjs_import3 from "../core/errors";
 const {
   isIP
 } = _cjs_import;
 const {
   lookup
 } = _cjs_import2;
+const {
+  InvalidArgumentError,
+  InformationalError
+} = _cjs_import3;
 const maxInt = Math.pow(2, 31) - 1;
 function hasSafeIterator(headers) {
   const prototype = Object.getPrototypeOf(headers);
@@ -153,7 +157,7 @@ class DNSInstance {
     if (ips == null) {
       this.lookup(origin, newOpts, (err, addresses) => {
         if (err || addresses == null || addresses.length === 0) {
-          cb(err ?? new _InformationalError('No DNS entries found'));
+          cb(err ?? new InformationalError('No DNS entries found'));
           return;
         }
         this.setRecords(origin, addresses);
@@ -397,25 +401,25 @@ class DNSDispatchHandler extends DecoratorHandler {
 }
 const _cjs_default = interceptorOpts => {
   if (interceptorOpts?.maxTTL != null && (typeof interceptorOpts?.maxTTL !== 'number' || interceptorOpts?.maxTTL < 0)) {
-    throw new _InvalidArgumentError('Invalid maxTTL. Must be a positive number');
+    throw new InvalidArgumentError('Invalid maxTTL. Must be a positive number');
   }
   if (interceptorOpts?.maxItems != null && (typeof interceptorOpts?.maxItems !== 'number' || interceptorOpts?.maxItems < 1)) {
-    throw new _InvalidArgumentError('Invalid maxItems. Must be a positive number and greater than zero');
+    throw new InvalidArgumentError('Invalid maxItems. Must be a positive number and greater than zero');
   }
   if (interceptorOpts?.affinity != null && interceptorOpts?.affinity !== 4 && interceptorOpts?.affinity !== 6) {
-    throw new _InvalidArgumentError('Invalid affinity. Must be either 4 or 6');
+    throw new InvalidArgumentError('Invalid affinity. Must be either 4 or 6');
   }
   if (interceptorOpts?.dualStack != null && typeof interceptorOpts?.dualStack !== 'boolean') {
-    throw new _InvalidArgumentError('Invalid dualStack. Must be a boolean');
+    throw new InvalidArgumentError('Invalid dualStack. Must be a boolean');
   }
   if (interceptorOpts?.lookup != null && typeof interceptorOpts?.lookup !== 'function') {
-    throw new _InvalidArgumentError('Invalid lookup. Must be a function');
+    throw new InvalidArgumentError('Invalid lookup. Must be a function');
   }
   if (interceptorOpts?.pick != null && typeof interceptorOpts?.pick !== 'function') {
-    throw new _InvalidArgumentError('Invalid pick. Must be a function');
+    throw new InvalidArgumentError('Invalid pick. Must be a function');
   }
   if (interceptorOpts?.storage != null && (typeof interceptorOpts?.storage?.get !== 'function' || typeof interceptorOpts?.storage?.set !== 'function' || typeof interceptorOpts?.storage?.full !== 'function' || typeof interceptorOpts?.storage?.delete !== 'function')) {
-    throw new _InvalidArgumentError('Invalid storage. Must be a object with methods: { get, set, full, delete }');
+    throw new InvalidArgumentError('Invalid storage. Must be a object with methods: { get, set, full, delete }');
   }
   const dualStack = interceptorOpts?.dualStack ?? true;
   let affinity;

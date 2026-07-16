@@ -1,7 +1,7 @@
 import $ from "../internals/export";
-import { some as _some } from "../internals/array-iteration";
+import _cjs_import from "../internals/array-iteration";
 import arrayMethodIsStrict from "../internals/array-method-is-strict";
-var $some = _some;
+var $some = _cjs_import.some;
 var STRICT_METHOD = arrayMethodIsStrict('some');
 
 // `Array.prototype.some` method

@@ -1,13 +1,34 @@
-import { getResponseData as _getResponseData, buildKey as _buildKey, addMockDispatch as _addMockDispatch } from "./mock-utils";
-import { kDispatches as _kDispatches, kDispatchKey as _kDispatchKey, kDefaultHeaders as _kDefaultHeaders, kDefaultTrailers as _kDefaultTrailers, kContentLength as _kContentLength, kMockDispatch as _kMockDispatch, kIgnoreTrailingSlash as _kIgnoreTrailingSlash } from "./mock-symbols";
-import { InvalidArgumentError as _InvalidArgumentError } from "../core/errors";
-import { serializePathWithQuery as _serializePathWithQuery } from "../core/util";
+import _cjs_import from "./mock-utils";
+import _cjs_import2 from "./mock-symbols";
+import _cjs_import3 from "../core/errors";
+import _cjs_import4 from "../core/util";
+const {
+  getResponseData,
+  buildKey,
+  addMockDispatch
+} = _cjs_import;
+const {
+  kDispatches,
+  kDispatchKey,
+  kDefaultHeaders,
+  kDefaultTrailers,
+  kContentLength,
+  kMockDispatch,
+  kIgnoreTrailingSlash
+} = _cjs_import2;
+const {
+  InvalidArgumentError
+} = _cjs_import3;
+const {
+  serializePathWithQuery
+} = _cjs_import4;
+
 /**
  * Defines the scope API for an interceptor reply
  */
 export class MockScope {
   constructor(mockDispatch) {
-    this[_kMockDispatch] = mockDispatch;
+    this[kMockDispatch] = mockDispatch;
   }
 
   /**
@@ -15,9 +36,9 @@ export class MockScope {
    */
   delay(waitInMs) {
     if (typeof waitInMs !== 'number' || !Number.isInteger(waitInMs) || waitInMs <= 0) {
-      throw new _InvalidArgumentError('waitInMs must be a valid integer > 0');
+      throw new InvalidArgumentError('waitInMs must be a valid integer > 0');
     }
-    this[_kMockDispatch].delay = waitInMs;
+    this[kMockDispatch].delay = waitInMs;
     return this;
   }
 
@@ -25,7 +46,7 @@ export class MockScope {
    * For a defined reply, never mark as consumed.
    */
   persist() {
-    this[_kMockDispatch].persist = true;
+    this[kMockDispatch].persist = true;
     return this;
   }
 
@@ -34,9 +55,9 @@ export class MockScope {
    */
   times(repeatTimes) {
     if (typeof repeatTimes !== 'number' || !Number.isInteger(repeatTimes) || repeatTimes <= 0) {
-      throw new _InvalidArgumentError('repeatTimes must be a valid integer > 0');
+      throw new InvalidArgumentError('repeatTimes must be a valid integer > 0');
     }
-    this[_kMockDispatch].times = repeatTimes;
+    this[kMockDispatch].times = repeatTimes;
     return this;
   }
 }
@@ -46,10 +67,10 @@ export class MockScope {
 export class MockInterceptor {
   constructor(opts, mockDispatches) {
     if (typeof opts !== 'object') {
-      throw new _InvalidArgumentError('opts must be an object');
+      throw new InvalidArgumentError('opts must be an object');
     }
     if (typeof opts.path === 'undefined') {
-      throw new _InvalidArgumentError('opts.path must be defined');
+      throw new InvalidArgumentError('opts.path must be defined');
     }
     if (typeof opts.method === 'undefined') {
       opts.method = 'GET';
@@ -59,7 +80,7 @@ export class MockInterceptor {
     // fragments to servers when they retrieve a document,
     if (typeof opts.path === 'string') {
       if (opts.query) {
-        opts.path = _serializePathWithQuery(opts.path, opts.query);
+        opts.path = serializePathWithQuery(opts.path, opts.query);
       } else {
         // Matches https://github.com/nodejs/undici/blob/main/lib/web/fetch/index.js#L1811
         const parsedURL = new URL(opts.path, 'data://');
@@ -69,29 +90,29 @@ export class MockInterceptor {
     if (typeof opts.method === 'string') {
       opts.method = opts.method.toUpperCase();
     }
-    this[_kDispatchKey] = _buildKey(opts);
-    this[_kDispatches] = mockDispatches;
-    this[_kIgnoreTrailingSlash] = opts.ignoreTrailingSlash ?? false;
-    this[_kDefaultHeaders] = {};
-    this[_kDefaultTrailers] = {};
-    this[_kContentLength] = false;
+    this[kDispatchKey] = buildKey(opts);
+    this[kDispatches] = mockDispatches;
+    this[kIgnoreTrailingSlash] = opts.ignoreTrailingSlash ?? false;
+    this[kDefaultHeaders] = {};
+    this[kDefaultTrailers] = {};
+    this[kContentLength] = false;
   }
   createMockScopeDispatchData({
     statusCode,
     data,
     responseOptions
   }) {
-    const responseData = _getResponseData(data);
-    const contentLength = this[_kContentLength] ? {
+    const responseData = getResponseData(data);
+    const contentLength = this[kContentLength] ? {
       'content-length': responseData.length
     } : {};
     const headers = {
-      ...this[_kDefaultHeaders],
+      ...this[kDefaultHeaders],
       ...contentLength,
       ...responseOptions.headers
     };
     const trailers = {
-      ...this[_kDefaultTrailers],
+      ...this[kDefaultTrailers],
       ...responseOptions.trailers
     };
     return {
@@ -103,10 +124,10 @@ export class MockInterceptor {
   }
   validateReplyParameters(replyParameters) {
     if (typeof replyParameters.statusCode === 'undefined') {
-      throw new _InvalidArgumentError('statusCode must be defined');
+      throw new InvalidArgumentError('statusCode must be defined');
     }
     if (typeof replyParameters.responseOptions !== 'object' || replyParameters.responseOptions === null) {
-      throw new _InvalidArgumentError('responseOptions must be an object');
+      throw new InvalidArgumentError('responseOptions must be an object');
     }
   }
 
@@ -126,7 +147,7 @@ export class MockInterceptor {
 
         // Check if it is in the right format
         if (typeof resolvedData !== 'object' || resolvedData === null) {
-          throw new _InvalidArgumentError('reply options callback must return an object');
+          throw new InvalidArgumentError('reply options callback must return an object');
         }
         const replyParameters = {
           data: '',
@@ -142,8 +163,8 @@ export class MockInterceptor {
       };
 
       // Add usual dispatch data, but this time set the data parameter to function that will eventually provide data.
-      const newMockDispatch = _addMockDispatch(this[_kDispatches], this[_kDispatchKey], wrappedDefaultsCallback, {
-        ignoreTrailingSlash: this[_kIgnoreTrailingSlash]
+      const newMockDispatch = addMockDispatch(this[kDispatches], this[kDispatchKey], wrappedDefaultsCallback, {
+        ignoreTrailingSlash: this[kIgnoreTrailingSlash]
       });
       return new MockScope(newMockDispatch);
     }
@@ -161,8 +182,8 @@ export class MockInterceptor {
 
     // Send in-already provided data like usual
     const dispatchData = this.createMockScopeDispatchData(replyParameters);
-    const newMockDispatch = _addMockDispatch(this[_kDispatches], this[_kDispatchKey], dispatchData, {
-      ignoreTrailingSlash: this[_kIgnoreTrailingSlash]
+    const newMockDispatch = addMockDispatch(this[kDispatches], this[kDispatchKey], dispatchData, {
+      ignoreTrailingSlash: this[kIgnoreTrailingSlash]
     });
     return new MockScope(newMockDispatch);
   }
@@ -172,12 +193,12 @@ export class MockInterceptor {
    */
   replyWithError(error) {
     if (typeof error === 'undefined') {
-      throw new _InvalidArgumentError('error must be defined');
+      throw new InvalidArgumentError('error must be defined');
     }
-    const newMockDispatch = _addMockDispatch(this[_kDispatches], this[_kDispatchKey], {
+    const newMockDispatch = addMockDispatch(this[kDispatches], this[kDispatchKey], {
       error
     }, {
-      ignoreTrailingSlash: this[_kIgnoreTrailingSlash]
+      ignoreTrailingSlash: this[kIgnoreTrailingSlash]
     });
     return new MockScope(newMockDispatch);
   }
@@ -187,9 +208,9 @@ export class MockInterceptor {
    */
   defaultReplyHeaders(headers) {
     if (typeof headers === 'undefined') {
-      throw new _InvalidArgumentError('headers must be defined');
+      throw new InvalidArgumentError('headers must be defined');
     }
-    this[_kDefaultHeaders] = headers;
+    this[kDefaultHeaders] = headers;
     return this;
   }
 
@@ -198,9 +219,9 @@ export class MockInterceptor {
    */
   defaultReplyTrailers(trailers) {
     if (typeof trailers === 'undefined') {
-      throw new _InvalidArgumentError('trailers must be defined');
+      throw new InvalidArgumentError('trailers must be defined');
     }
-    this[_kDefaultTrailers] = trailers;
+    this[kDefaultTrailers] = trailers;
     return this;
   }
 
@@ -208,7 +229,7 @@ export class MockInterceptor {
    * Set reply content length header for replies on the interceptor
    */
   replyContentLength() {
-    this[_kContentLength] = true;
+    this[kContentLength] = true;
     return this;
   }
 }

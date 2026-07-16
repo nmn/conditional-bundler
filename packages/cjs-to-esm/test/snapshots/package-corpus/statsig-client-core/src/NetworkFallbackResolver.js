@@ -1,7 +1,7 @@
-import { _fetchTxtRecords } from "./DnsTxtQuery";
-import { _DJB2 as _DJB } from "./Hashing";
-import { Log as _Log } from "./Log";
-import { Storage as _Storage } from "./StorageProvider";
+import DnsTxtQuery_1 from "./DnsTxtQuery";
+import Hashing_1 from "./Hashing";
+import Log_1 from "./Log";
+import StorageProvider_1 from "./StorageProvider";
 var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function (resolve) {
@@ -130,7 +130,7 @@ export class NetworkFallbackResolver {
       }
       this._dnsQueryCooldowns[urlConfig.endpoint] = Date.now() + COOLDOWN_TIME_MS;
       const result = [];
-      const records = yield (0, _fetchTxtRecords)((_a = this._networkOverrideFunc) !== null && _a !== void 0 ? _a : fetch);
+      const records = yield (0, DnsTxtQuery_1._fetchTxtRecords)((_a = this._networkOverrideFunc) !== null && _a !== void 0 ? _a : fetch);
       const path = _extractPathFromUrl(urlConfig.defaultUrl);
       for (const record of records) {
         if (!record.startsWith(urlConfig.endpointDnsKey + '=')) {
@@ -172,26 +172,26 @@ export function _isDomainFailure(errorMsg, timedOut) {
   return timedOut || lowerErrorMsg.includes('uncaught exception') || lowerErrorMsg.includes('failed to fetch') || lowerErrorMsg.includes('networkerror when attempting to fetch resource');
 }
 function _getFallbackInfoStorageKey(sdkKey) {
-  return `statsig.network_fallback.${(0, _DJB)(sdkKey)}`;
+  return `statsig.network_fallback.${(0, Hashing_1._DJB2)(sdkKey)}`;
 }
 function _tryWriteFallbackInfoToCache(sdkKey, info) {
   const hashKey = _getFallbackInfoStorageKey(sdkKey);
   if (!info || Object.keys(info).length === 0) {
-    _Storage.removeItem(hashKey);
+    StorageProvider_1.Storage.removeItem(hashKey);
     return;
   }
-  _Storage.setItem(hashKey, JSON.stringify(info));
+  StorageProvider_1.Storage.setItem(hashKey, JSON.stringify(info));
 }
 function _readFallbackInfoFromCache(sdkKey) {
   const hashKey = _getFallbackInfoStorageKey(sdkKey);
-  const data = _Storage.getItem(hashKey);
+  const data = StorageProvider_1.Storage.getItem(hashKey);
   if (!data) {
     return null;
   }
   try {
     return JSON.parse(data);
   } catch (_a) {
-    _Log.error('Failed to parse FallbackInfo');
+    Log_1.Log.error('Failed to parse FallbackInfo');
     return null;
   }
 }

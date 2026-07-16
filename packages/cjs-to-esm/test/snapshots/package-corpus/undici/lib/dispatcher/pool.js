@@ -1,16 +1,31 @@
-import { PoolBase as _PoolBase, kClients as _kClients, kNeedDrain as _kNeedDrain, kAddClient as _kAddClient, kGetDispatcher as _kGetDispatcher, kHasDispatcher as _kHasDispatcher, kRemoveClient as _kRemoveClient } from "./pool-base";
+import _cjs_import from "./pool-base";
 import Client from "./client";
-import { InvalidArgumentError as _InvalidArgumentError } from "../core/errors";
-import { parseOrigin as _parseOrigin, deepClone as _deepClone } from "../core/util";
-import { kUrl as _kUrl } from "../core/symbols";
+import _cjs_import2 from "../core/errors";
+import util from "../core/util";
+import _cjs_import3 from "../core/symbols";
 import buildConnector from "../core/connect";
+const {
+  PoolBase,
+  kClients,
+  kNeedDrain,
+  kAddClient,
+  kGetDispatcher,
+  kHasDispatcher,
+  kRemoveClient
+} = _cjs_import;
+const {
+  InvalidArgumentError
+} = _cjs_import2;
+const {
+  kUrl
+} = _cjs_import3;
 const kOptions = Symbol('options');
 const kConnections = Symbol('connections');
 const kFactory = Symbol('factory');
 function defaultFactory(origin, opts) {
   return new Client(origin, opts);
 }
-class Pool extends _PoolBase {
+class Pool extends PoolBase {
   constructor(origin, {
     connections,
     factory = defaultFactory,
@@ -27,13 +42,13 @@ class Pool extends _PoolBase {
     ...options
   } = {}) {
     if (connections != null && (!Number.isFinite(connections) || connections < 0)) {
-      throw new _InvalidArgumentError('invalid connections');
+      throw new InvalidArgumentError('invalid connections');
     }
     if (typeof factory !== 'function') {
-      throw new _InvalidArgumentError('factory must be a function.');
+      throw new InvalidArgumentError('factory must be a function.');
     }
     if (connect != null && typeof connect !== 'function' && typeof connect !== 'object') {
-      throw new _InvalidArgumentError('connect must be a function or an object');
+      throw new InvalidArgumentError('connect must be a function or an object');
     }
     if (typeof connect !== 'function') {
       connect = buildConnector({
@@ -52,9 +67,9 @@ class Pool extends _PoolBase {
     }
     super(options);
     this[kConnections] = connections || null;
-    this[_kUrl] = _parseOrigin(origin);
+    this[kUrl] = util.parseOrigin(origin);
     this[kOptions] = {
-      ..._deepClone(options),
+      ...util.deepClone(options),
       connect,
       allowH2,
       useH2c,
@@ -78,46 +93,46 @@ class Pool extends _PoolBase {
       for (const target of targets) {
         // Do not use kRemoveClient here, as it will close the client,
         // but the client cannot be closed in this state.
-        const idx = this[_kClients].indexOf(target);
+        const idx = this[kClients].indexOf(target);
         if (idx !== -1) {
-          this[_kClients].splice(idx, 1);
+          this[kClients].splice(idx, 1);
         }
       }
     });
   }
-  [_kGetDispatcher]() {
+  [kGetDispatcher]() {
     const clientTtlOption = this[kOptions].clientTtl;
-    for (let i = 0; i < this[_kClients].length; i++) {
-      const client = this[_kClients][i];
+    for (let i = 0; i < this[kClients].length; i++) {
+      const client = this[kClients][i];
 
       // check ttl of client and if it's stale, remove it from the pool
       if (clientTtlOption != null && clientTtlOption > 0 && client.ttl && Date.now() - client.ttl > clientTtlOption) {
-        this[_kRemoveClient](client);
+        this[kRemoveClient](client);
         i--;
-      } else if (!client[_kNeedDrain]) {
+      } else if (!client[kNeedDrain]) {
         return client;
       }
     }
-    if (!this[kConnections] || this[_kClients].length < this[kConnections]) {
-      const dispatcher = this[kFactory](this[_kUrl], this[kOptions]);
-      this[_kAddClient](dispatcher);
+    if (!this[kConnections] || this[kClients].length < this[kConnections]) {
+      const dispatcher = this[kFactory](this[kUrl], this[kOptions]);
+      this[kAddClient](dispatcher);
       return dispatcher;
     }
   }
-  [_kHasDispatcher]() {
+  [kHasDispatcher]() {
     const clientTtlOption = this[kOptions].clientTtl;
-    for (let i = 0; i < this[_kClients].length; i++) {
-      const client = this[_kClients][i];
+    for (let i = 0; i < this[kClients].length; i++) {
+      const client = this[kClients][i];
       if (clientTtlOption != null && clientTtlOption > 0 && client.ttl && Date.now() - client.ttl > clientTtlOption) {
-        this[_kRemoveClient](client);
+        this[kRemoveClient](client);
         i--;
-      } else if (!client[_kNeedDrain]) {
+      } else if (!client[kNeedDrain]) {
         return true;
       }
     }
-    if (!this[kConnections] || this[_kClients].length < this[kConnections]) {
-      const dispatcher = this[kFactory](this[_kUrl], this[kOptions]);
-      this[_kAddClient](dispatcher);
+    if (!this[kConnections] || this[kClients].length < this[kConnections]) {
+      const dispatcher = this[kFactory](this[kUrl], this[kOptions]);
+      this[kAddClient](dispatcher);
       return true;
     }
     return false;

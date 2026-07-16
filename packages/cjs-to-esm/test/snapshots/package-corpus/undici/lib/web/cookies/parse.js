@@ -1,7 +1,17 @@
-import { collectASequenceOfCodePointsFast as _collectASequenceOfCodePointsFast } from "../infra";
-import { maxNameValuePairSize as _maxNameValuePairSize, maxAttributeValueSize as _maxAttributeValueSize } from "./constants";
-import { isCTLExcludingHtab as _isCTLExcludingHtab } from "./util";
+import _cjs_import from "../infra";
+import _cjs_import2 from "./constants";
+import _cjs_import3 from "./util";
 import * as assert from "node:assert";
+const {
+  collectASequenceOfCodePointsFast
+} = _cjs_import;
+const {
+  maxNameValuePairSize,
+  maxAttributeValueSize
+} = _cjs_import2;
+const {
+  isCTLExcludingHtab
+} = _cjs_import3;
 /**
  * @description Parses the field-value attributes of a set-cookie header string.
  * @see https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-rfc6265bis#section-5.4
@@ -12,7 +22,7 @@ function parseSetCookie(header) {
   // 1. If the set-cookie-string contains a %x00-08 / %x0A-1F / %x7F
   //    character (CTL characters excluding HTAB): Abort these steps and
   //    ignore the set-cookie-string entirely.
-  if (_isCTLExcludingHtab(header)) {
+  if (isCTLExcludingHtab(header)) {
     return null;
   }
   let nameValuePair = '';
@@ -29,7 +39,7 @@ function parseSetCookie(header) {
     const position = {
       position: 0
     };
-    nameValuePair = _collectASequenceOfCodePointsFast(';', header, position);
+    nameValuePair = collectASequenceOfCodePointsFast(';', header, position);
     unparsedAttributes = header.slice(position.position);
   } else {
     // Otherwise:
@@ -53,7 +63,7 @@ function parseSetCookie(header) {
     const position = {
       position: 0
     };
-    name = _collectASequenceOfCodePointsFast('=', nameValuePair, position);
+    name = collectASequenceOfCodePointsFast('=', nameValuePair, position);
     value = nameValuePair.slice(position.position + 1);
   }
 
@@ -65,7 +75,7 @@ function parseSetCookie(header) {
   // 5. If the sum of the lengths of the name string and the value string
   //    is more than 4096 octets, abort these steps and ignore the set-
   //    cookie-string entirely.
-  if (name.length + value.length > _maxNameValuePairSize) {
+  if (name.length + value.length > maxNameValuePairSize) {
     return null;
   }
 
@@ -106,7 +116,7 @@ function parseUnparsedAttributes(unparsedAttributes, cookieAttributeList = {}) {
   if (unparsedAttributes.includes(';')) {
     // 1. Consume the characters of the unparsed-attributes up to, but
     //    not including, the first %x3B (";") character.
-    cookieAv = _collectASequenceOfCodePointsFast(';', unparsedAttributes, {
+    cookieAv = collectASequenceOfCodePointsFast(';', unparsedAttributes, {
       position: 0
     });
     unparsedAttributes = unparsedAttributes.slice(cookieAv.length);
@@ -133,7 +143,7 @@ function parseUnparsedAttributes(unparsedAttributes, cookieAttributeList = {}) {
     const position = {
       position: 0
     };
-    attributeName = _collectASequenceOfCodePointsFast('=', cookieAv, position);
+    attributeName = collectASequenceOfCodePointsFast('=', cookieAv, position);
     attributeValue = cookieAv.slice(position.position + 1);
   } else {
     // Otherwise:
@@ -150,7 +160,7 @@ function parseUnparsedAttributes(unparsedAttributes, cookieAttributeList = {}) {
 
   // 6. If the attribute-value is longer than 1024 octets, ignore the
   //    cookie-av string and return to Step 1 of this algorithm.
-  if (attributeValue.length > _maxAttributeValueSize) {
+  if (attributeValue.length > maxAttributeValueSize) {
     return parseUnparsedAttributes(unparsedAttributes, cookieAttributeList);
   }
 

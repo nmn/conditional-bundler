@@ -1,9 +1,9 @@
-import { aTypedArray as _aTypedArray, getTypedArrayConstructor as _getTypedArrayConstructor, exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
 import fails from "../internals/fails";
 import arraySlice from "../internals/array-slice";
-var aTypedArray = _aTypedArray;
-var getTypedArrayConstructor = _getTypedArrayConstructor;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var getTypedArrayConstructor = ArrayBufferViewCore.getTypedArrayConstructor;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
 var FORCED = fails(function () {
   // eslint-disable-next-line es/no-typed-arrays -- required for testing
   new Int8Array(1).slice();

@@ -1,5 +1,5 @@
-import { NetworkCore as _NetworkCore, UrlConfiguration as _UrlConfiguration, Endpoint as _Endpoint, _typedJsonParse } from "@statsig/client-core";
-import { _resolveDeltasResponse } from "./EvaluationResponseDeltas";
+import client_core_1 from "@statsig/client-core";
+import EvaluationResponseDeltas_1 from "./EvaluationResponseDeltas";
 var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function (resolve) {
@@ -27,17 +27,17 @@ var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, gene
     step((generator = generator.apply(thisArg, _arguments || [])).next());
   });
 };
-class StatsigNetwork extends _NetworkCore {
+class StatsigNetwork extends client_core_1.NetworkCore {
   constructor(options, emitter) {
     super(options, emitter);
     const config = options === null || options === void 0 ? void 0 : options.networkConfig;
     this._option = options;
-    this._initializeUrlConfig = new _UrlConfiguration(_Endpoint._initialize, config === null || config === void 0 ? void 0 : config.initializeUrl, config === null || config === void 0 ? void 0 : config.api, config === null || config === void 0 ? void 0 : config.initializeFallbackUrls);
+    this._initializeUrlConfig = new client_core_1.UrlConfiguration(client_core_1.Endpoint._initialize, config === null || config === void 0 ? void 0 : config.initializeUrl, config === null || config === void 0 ? void 0 : config.api, config === null || config === void 0 ? void 0 : config.initializeFallbackUrls);
   }
   fetchEvaluations(sdkKey, current, priority, user, isCacheValidFor204) {
     return __awaiter(this, void 0, void 0, function* () {
       var _a, _b, _c, _d, _e, _f;
-      const cache = current ? (0, _typedJsonParse)(current, 'has_updates', 'InitializeResponse') : null;
+      const cache = current ? (0, client_core_1._typedJsonParse)(current, 'has_updates', 'InitializeResponse') : null;
       let data = {
         user,
         hash: (_c = (_b = (_a = this._option) === null || _a === void 0 ? void 0 : _a.networkConfig) === null || _b === void 0 ? void 0 : _b.initializeHashAlgorithm) !== null && _c !== void 0 ? _c : 'djb2',
@@ -77,7 +77,7 @@ class StatsigNetwork extends _NetworkCore {
       if ((cache === null || cache === void 0 ? void 0 : cache.has_updates) !== true || ((_b = response.body) === null || _b === void 0 ? void 0 : _b.includes('"is_delta":true')) !== true || data.deltasResponseRequested !== true) {
         return response.body;
       }
-      const result = (0, _resolveDeltasResponse)(cache, response.body);
+      const result = (0, EvaluationResponseDeltas_1._resolveDeltasResponse)(cache, response.body);
       if (typeof result === 'string') {
         return result;
       }

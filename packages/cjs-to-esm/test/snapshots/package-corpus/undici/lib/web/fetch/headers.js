@@ -1,9 +1,23 @@
-import { kConstruct as _kConstruct } from "../../core/symbols";
-import { kEnumerableProperty as _kEnumerableProperty } from "../../core/util";
-import { iteratorMixin as _iteratorMixin, isValidHeaderName as _isValidHeaderName, isValidHeaderValue as _isValidHeaderValue } from "./util";
-import { webidl as _webidl } from "../webidl";
+import _cjs_import from "../../core/symbols";
+import _cjs_import2 from "../../core/util";
+import _cjs_import3 from "./util";
+import _cjs_import4 from "../webidl";
 import * as assert from "node:assert";
 import * as util from "node:util";
+const {
+  kConstruct
+} = _cjs_import;
+const {
+  kEnumerableProperty
+} = _cjs_import2;
+const {
+  iteratorMixin,
+  isValidHeaderName,
+  isValidHeaderValue
+} = _cjs_import3;
+const {
+  webidl
+} = _cjs_import4;
 /**
  * @param {number} code
  * @returns {code is (0x0a | 0x0d | 0x09 | 0x20)}
@@ -42,7 +56,7 @@ function fill(headers, object) {
       const header = object[i];
       // 1. If header does not contain exactly two items, then throw a TypeError.
       if (header.length !== 2) {
-        throw _webidl.errors.exception({
+        throw webidl.errors.exception({
           header: 'Headers constructor',
           message: `expected name/value pair to be length 2, found ${header.length}.`
         });
@@ -61,7 +75,7 @@ function fill(headers, object) {
       appendHeader(headers, keys[i], object[keys[i]]);
     }
   } else {
-    throw _webidl.errors.conversionFailed({
+    throw webidl.errors.conversionFailed({
       prefix: 'Headers constructor',
       argument: 'Argument 1',
       types: ['sequence<sequence<ByteString>>', 'record<ByteString, ByteString>']
@@ -81,14 +95,14 @@ function appendHeader(headers, name, value) {
 
   // 2. If name is not a header name or value is not a
   //    header value, then throw a TypeError.
-  if (!_isValidHeaderName(name)) {
-    throw _webidl.errors.invalidArgument({
+  if (!isValidHeaderName(name)) {
+    throw webidl.errors.invalidArgument({
       prefix: 'Headers.append',
       value: name,
       type: 'header name'
     });
-  } else if (!_isValidHeaderValue(value)) {
-    throw _webidl.errors.invalidArgument({
+  } else if (!isValidHeaderValue(value)) {
+    throw webidl.errors.invalidArgument({
       prefix: 'Headers.append',
       value,
       type: 'header value'
@@ -430,8 +444,8 @@ class Headers {
    * @returns
    */
   constructor(init = undefined) {
-    _webidl.util.markAsUncloneable(this);
-    if (init === _kConstruct) {
+    webidl.util.markAsUncloneable(this);
+    if (init === kConstruct) {
       return;
     }
     this.#headersList = new HeadersList();
@@ -443,31 +457,31 @@ class Headers {
 
     // 2. If init is given, then fill this with init.
     if (init !== undefined) {
-      init = _webidl.converters.HeadersInit(init, 'Headers constructor', 'init');
+      init = webidl.converters.HeadersInit(init, 'Headers constructor', 'init');
       fill(this, init);
     }
   }
 
   // https://fetch.spec.whatwg.org/#dom-headers-append
   append(name, value) {
-    _webidl.brandCheck(this, Headers);
-    _webidl.argumentLengthCheck(arguments, 2, 'Headers.append');
+    webidl.brandCheck(this, Headers);
+    webidl.argumentLengthCheck(arguments, 2, 'Headers.append');
     const prefix = 'Headers.append';
-    name = _webidl.converters.ByteString(name, prefix, 'name');
-    value = _webidl.converters.ByteString(value, prefix, 'value');
+    name = webidl.converters.ByteString(name, prefix, 'name');
+    value = webidl.converters.ByteString(value, prefix, 'value');
     return appendHeader(this, name, value);
   }
 
   // https://fetch.spec.whatwg.org/#dom-headers-delete
   delete(name) {
-    _webidl.brandCheck(this, Headers);
-    _webidl.argumentLengthCheck(arguments, 1, 'Headers.delete');
+    webidl.brandCheck(this, Headers);
+    webidl.argumentLengthCheck(arguments, 1, 'Headers.delete');
     const prefix = 'Headers.delete';
-    name = _webidl.converters.ByteString(name, prefix, 'name');
+    name = webidl.converters.ByteString(name, prefix, 'name');
 
     // 1. If name is not a header name, then throw a TypeError.
-    if (!_isValidHeaderName(name)) {
-      throw _webidl.errors.invalidArgument({
+    if (!isValidHeaderName(name)) {
+      throw webidl.errors.invalidArgument({
         prefix: 'Headers.delete',
         value: name,
         type: 'header name'
@@ -502,14 +516,14 @@ class Headers {
 
   // https://fetch.spec.whatwg.org/#dom-headers-get
   get(name) {
-    _webidl.brandCheck(this, Headers);
-    _webidl.argumentLengthCheck(arguments, 1, 'Headers.get');
+    webidl.brandCheck(this, Headers);
+    webidl.argumentLengthCheck(arguments, 1, 'Headers.get');
     const prefix = 'Headers.get';
-    name = _webidl.converters.ByteString(name, prefix, 'name');
+    name = webidl.converters.ByteString(name, prefix, 'name');
 
     // 1. If name is not a header name, then throw a TypeError.
-    if (!_isValidHeaderName(name)) {
-      throw _webidl.errors.invalidArgument({
+    if (!isValidHeaderName(name)) {
+      throw webidl.errors.invalidArgument({
         prefix,
         value: name,
         type: 'header name'
@@ -523,14 +537,14 @@ class Headers {
 
   // https://fetch.spec.whatwg.org/#dom-headers-has
   has(name) {
-    _webidl.brandCheck(this, Headers);
-    _webidl.argumentLengthCheck(arguments, 1, 'Headers.has');
+    webidl.brandCheck(this, Headers);
+    webidl.argumentLengthCheck(arguments, 1, 'Headers.has');
     const prefix = 'Headers.has';
-    name = _webidl.converters.ByteString(name, prefix, 'name');
+    name = webidl.converters.ByteString(name, prefix, 'name');
 
     // 1. If name is not a header name, then throw a TypeError.
-    if (!_isValidHeaderName(name)) {
-      throw _webidl.errors.invalidArgument({
+    if (!isValidHeaderName(name)) {
+      throw webidl.errors.invalidArgument({
         prefix,
         value: name,
         type: 'header name'
@@ -544,25 +558,25 @@ class Headers {
 
   // https://fetch.spec.whatwg.org/#dom-headers-set
   set(name, value) {
-    _webidl.brandCheck(this, Headers);
-    _webidl.argumentLengthCheck(arguments, 2, 'Headers.set');
+    webidl.brandCheck(this, Headers);
+    webidl.argumentLengthCheck(arguments, 2, 'Headers.set');
     const prefix = 'Headers.set';
-    name = _webidl.converters.ByteString(name, prefix, 'name');
-    value = _webidl.converters.ByteString(value, prefix, 'value');
+    name = webidl.converters.ByteString(name, prefix, 'name');
+    value = webidl.converters.ByteString(value, prefix, 'value');
 
     // 1. Normalize value.
     value = headerValueNormalize(value);
 
     // 2. If name is not a header name or value is not a
     //    header value, then throw a TypeError.
-    if (!_isValidHeaderName(name)) {
-      throw _webidl.errors.invalidArgument({
+    if (!isValidHeaderName(name)) {
+      throw webidl.errors.invalidArgument({
         prefix,
         value: name,
         type: 'header name'
       });
-    } else if (!_isValidHeaderValue(value)) {
-      throw _webidl.errors.invalidArgument({
+    } else if (!isValidHeaderValue(value)) {
+      throw webidl.errors.invalidArgument({
         prefix,
         value,
         type: 'header value'
@@ -590,7 +604,7 @@ class Headers {
 
   // https://fetch.spec.whatwg.org/#dom-headers-getsetcookie
   getSetCookie() {
-    _webidl.brandCheck(this, Headers);
+    webidl.brandCheck(this, Headers);
 
     // 1. If this’s header list does not contain `Set-Cookie`, then return « ».
     // 2. Return the values of all headers in this’s header list whose name is
@@ -638,14 +652,14 @@ Reflect.deleteProperty(Headers, 'getHeadersGuard');
 Reflect.deleteProperty(Headers, 'setHeadersGuard');
 Reflect.deleteProperty(Headers, 'getHeadersList');
 Reflect.deleteProperty(Headers, 'setHeadersList');
-_iteratorMixin('Headers', Headers, headersListSortAndCombine, 0, 1);
+iteratorMixin('Headers', Headers, headersListSortAndCombine, 0, 1);
 Object.defineProperties(Headers.prototype, {
-  append: _kEnumerableProperty,
-  delete: _kEnumerableProperty,
-  get: _kEnumerableProperty,
-  has: _kEnumerableProperty,
-  set: _kEnumerableProperty,
-  getSetCookie: _kEnumerableProperty,
+  append: kEnumerableProperty,
+  delete: kEnumerableProperty,
+  get: kEnumerableProperty,
+  has: kEnumerableProperty,
+  set: kEnumerableProperty,
+  getSetCookie: kEnumerableProperty,
   [Symbol.toStringTag]: {
     value: 'Headers',
     configurable: true
@@ -654,8 +668,8 @@ Object.defineProperties(Headers.prototype, {
     enumerable: false
   }
 });
-_webidl.converters.HeadersInit = function (V, prefix, argument) {
-  if (_webidl.util.Type(V) === _webidl.util.Types.OBJECT) {
+webidl.converters.HeadersInit = function (V, prefix, argument) {
+  if (webidl.util.Type(V) === webidl.util.Types.OBJECT) {
     const iterator = Reflect.get(V, Symbol.iterator);
 
     // A work-around to ensure we send the properly-cased Headers when V is a Headers object.
@@ -669,11 +683,11 @@ _webidl.converters.HeadersInit = function (V, prefix, argument) {
       }
     }
     if (typeof iterator === 'function') {
-      return _webidl.converters['sequence<sequence<ByteString>>'](V, prefix, argument, iterator.bind(V));
+      return webidl.converters['sequence<sequence<ByteString>>'](V, prefix, argument, iterator.bind(V));
     }
-    return _webidl.converters['record<ByteString, ByteString>'](V, prefix, argument);
+    return webidl.converters['record<ByteString, ByteString>'](V, prefix, argument);
   }
-  throw _webidl.errors.conversionFailed({
+  throw webidl.errors.conversionFailed({
     prefix: 'Headers constructor',
     argument: 'Argument 1',
     types: ['sequence<sequence<ByteString>>', 'record<ByteString, ByteString>']

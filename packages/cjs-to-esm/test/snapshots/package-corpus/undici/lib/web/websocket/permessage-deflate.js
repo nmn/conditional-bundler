@@ -1,10 +1,16 @@
 import * as _cjs_import from "node:zlib";
-import { isValidClientWindowBits as _isValidClientWindowBits } from "./util";
-import { MessageSizeExceededError as _MessageSizeExceededError } from "../../core/errors";
+import _cjs_import2 from "./util";
+import _cjs_import3 from "../../core/errors";
 const {
   createInflateRaw,
   Z_DEFAULT_WINDOWBITS
 } = _cjs_import;
+const {
+  isValidClientWindowBits
+} = _cjs_import2;
+const {
+  MessageSizeExceededError
+} = _cjs_import3;
 const tail = Buffer.from([0x00, 0x00, 0xff, 0xff]);
 const kBuffer = Symbol('kBuffer');
 const kLength = Symbol('kLength');
@@ -38,7 +44,7 @@ class PerMessageDeflate {
       let windowBits = Z_DEFAULT_WINDOWBITS;
       if (this.#options.serverMaxWindowBits) {
         // empty values default to Z_DEFAULT_WINDOWBITS
-        if (!_isValidClientWindowBits(this.#options.serverMaxWindowBits)) {
+        if (!isValidClientWindowBits(this.#options.serverMaxWindowBits)) {
           callback(new Error('Invalid server_max_window_bits'));
           return;
         }
@@ -57,7 +63,7 @@ class PerMessageDeflate {
       this.#inflate.on('data', data => {
         this.#inflate[kLength] += data.length;
         if (this.#maxPayloadSize > 0 && this.#inflate[kLength] > this.#maxPayloadSize) {
-          callback(new _MessageSizeExceededError());
+          callback(new MessageSizeExceededError());
           this.#inflate.removeAllListeners();
           this.#inflate = null;
           return;

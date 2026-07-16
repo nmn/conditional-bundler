@@ -3,7 +3,7 @@ import {
   classifyRscDevChange,
 } from "../dist/dev/rsc-server.js";
 import { resolveConditionalPatch } from "../dist/dev/conditional-assets.js";
-import { createPatch } from "../dist/dev/server.js";
+import { createPatch, HmrUpdateStore } from "../dist/dev/server.js";
 
 test("resolves conditional HMR records from environment values", async () => {
   const previous = process.env.DEV;
@@ -39,6 +39,31 @@ test("resolves conditional HMR records from environment values", async () => {
   }
 });
 
+test("publishes opaque HMR update resources without putting code in messages", async () => {
+  const store = new HmrUpdateStore();
+  const patch = {
+    type: "patch",
+    updates: [update("client:/app/src/client.jsx")],
+    changedBundles: ["client:/app/src/client.jsx"],
+  };
+
+  const message = await store.publish(patch);
+  expect(message.updates).toEqual([
+    {
+      bundleKey: "client:/app/src/client.jsx",
+      url: expect.stringMatching(
+        /^\/__bundler_hmr_updates\/1\/[a-f0-9]{24}\.js$/,
+      ),
+    },
+  ]);
+  expect(JSON.stringify(message)).not.toContain("void 0");
+  expect(message.updates[0].url).not.toContain("app/src");
+  expect(store.read(message.updates[0].url)).toContain(
+    "__BUNDLER_HMR__.register",
+  );
+  expect(store.read("/__bundler_hmr_updates/1/missing.js")).toBeNull();
+});
+
 test("classifies pure client bundle edits as patchable", () => {
   const previous = fakeBuild([
     bundle("client", "/app/src/client.jsx", "client.old.js", [
@@ -60,7 +85,7 @@ test("classifies pure client bundle edits as patchable", () => {
   ]);
   const patch = {
     type: "patch",
-    records: ["cell"],
+    updates: [update("client:/app/src/client.jsx")],
     changedBundles: ["client:/app/src/client.jsx"],
   };
 
@@ -99,7 +124,7 @@ test("classifies RSC bundle edits as reloads", () => {
       next,
       patch: {
         type: "patch",
-        records: ["cell"],
+        updates: [update("rsc:/app/src/server.jsx")],
         changedBundles: ["rsc:/app/src/server.jsx"],
       },
       clientEntryId: "client",
@@ -133,7 +158,7 @@ test("keeps client-only island edits patchable when client entry output changes"
   ]);
   const patch = {
     type: "patch",
-    records: ["cell"],
+    updates: [update("client:/app/src/island.jsx")],
     changedBundles: ["client:/app/src/island.jsx"],
   };
 
@@ -171,7 +196,7 @@ test("keeps client reference edits patchable when the module has an RSC stub", (
   ]);
   const patch = {
     type: "patch",
-    records: ["cell"],
+    updates: [update("client:/app/src/client.jsx")],
     changedBundles: ["client:/app/src/client.jsx"],
   };
 
@@ -184,6 +209,40 @@ test("keeps client reference edits patchable when the module has an RSC stub", (
       serverEntryId: "server",
     }),
   ).toEqual({ type: "patch", patch });
+});
+
+test("ignores generated RSC manifest churn and keeps client updates granular", () => {
+  const entryId = "/app/src/island.jsx";
+  const key = `client:${entryId}`;
+  const previous = fakeBuild([
+    bundle("client", entryId, "island.old.js", [entryId]),
+  ]);
+  const next = fakeBuild([
+    bundle("client", entryId, "island.new.js", [entryId]),
+  ]);
+  previous.hmr = hmrState(key, "old-hash");
+  next.hmr = hmrState(key, "new-hash");
+  previous.manifest.emittedFiles = [
+    manifestAsset("rsc-client-manifest.json", "old-manifest"),
+  ];
+  next.manifest.emittedFiles = [
+    manifestAsset("rsc-client-manifest.json", "new-manifest"),
+  ];
+
+  expect(createPatch(previous, next)).toBeNull();
+  expect(
+    createPatch(previous, next, { ignoreManifestResources: true }),
+  ).toEqual({
+    type: "patch",
+    updates: [
+      {
+        bundleKey: key,
+        cell: expect.objectContaining({ id: `${key}:cell`, hash: "new-hash" }),
+      },
+    ],
+    changedBundles: [key],
+    styles: [],
+  });
 });
 
 test("classifies output-only changes as reloads", () => {
@@ -202,7 +261,7 @@ test("classifies output-only changes as reloads", () => {
     classifyRscDevChange({
       previous,
       next,
-      patch: { type: "patch", records: [], changedBundles: [] },
+      patch: { type: "patch", updates: [], changedBundles: [] },
       clientEntryId: "client",
       serverEntryId: "server",
     }),
@@ -223,8 +282,10 @@ test("adds dynamic imports for changed client chunks but not the client entry", 
   ]);
   const patch = {
     type: "patch",
-    records: ["client cell", "island cell"],
-    recordBundles: ["client:/app/src/client.jsx", "client:/app/src/island.jsx"],
+    updates: [
+      update("client:/app/src/client.jsx"),
+      update("client:/app/src/island.jsx"),
+    ],
     changedBundles: [
       "client:/app/src/client.jsx",
       "client:/app/src/island.jsx",
@@ -233,14 +294,11 @@ test("adds dynamic imports for changed client chunks but not the client entry", 
 
   expect(addClientPatchImports(patch, build, "client", 7)).toEqual({
     ...patch,
-    records: [
-      "client cell",
-      'Object.assign(globalThis.__BUNDLER_RSC_CHUNKS__ ??= {}, {"/app/src/island.jsx":"island.new.js"});',
-    ],
-    recordBundles: undefined,
+    updates: [patch.updates[0]],
     imports: [
       "/assets/island.new.js?hmr=island.new.js&rsc-id=%2Fapp%2Fsrc%2Fisland.jsx&v=7",
     ],
+    rscChunks: { "/app/src/island.jsx": "island.new.js" },
   });
 });
 
@@ -255,8 +313,8 @@ test("creates style-only HMR patches for changed CSS assets", () => {
       "/app/src/client.jsx",
     ]),
   ]);
-  previous.manifest.metadata = fakeHmrMetadata();
-  next.manifest.metadata = fakeHmrMetadata();
+  previous.hmr = fakeHmrState();
+  next.hmr = fakeHmrState();
   previous.manifest.assets = [
     styleAsset("client:/app/src/client.jsx", "client.old.css"),
   ];
@@ -266,7 +324,7 @@ test("creates style-only HMR patches for changed CSS assets", () => {
 
   expect(createPatch(previous, next)).toEqual({
     type: "patch",
-    records: [],
+    updates: [],
     changedBundles: [],
     styles: [
       "/assets/client.new.css?hmr=client.new.css&key=client%3A%2Fapp%2Fsrc%2Fclient.jsx",
@@ -287,18 +345,53 @@ function fakeBuild(bundles) {
   };
 }
 
-function fakeHmrMetadata() {
+function fakeHmrState() {
   return {
-    hmr: {
-      bundles: {
-        "client:/app/src/client.jsx": {
-          envId: "client",
-          entryId: "/app/src/client.jsx",
-          reactRefresh: true,
-          symbols: [],
-          cells: [],
-        },
+    bundles: {
+      "client:/app/src/client.jsx": {
+        envId: "client",
+        entryId: "/app/src/client.jsx",
+        reactRefresh: true,
+        symbols: [],
+        cells: [],
       },
+    },
+  };
+}
+
+function hmrState(bundleKey, hash) {
+  return {
+    bundles: {
+      [bundleKey]: {
+        envId: "client",
+        entryId: bundleKey.slice("client:".length),
+        reactRefresh: true,
+        symbols: ["island_Component"],
+        cells: [
+          {
+            id: `${bundleKey}:cell`,
+            fileId: `${bundleKey}:file`,
+            symbols: ["island_Component"],
+            deps: [],
+            hash,
+            code: "island_Component = function Component() {};",
+          },
+        ],
+      },
+    },
+  };
+}
+
+function update(bundleKey) {
+  return {
+    bundleKey,
+    cell: {
+      id: `${bundleKey}:cell`,
+      fileId: `${bundleKey}:file`,
+      symbols: [],
+      deps: [],
+      hash: "hash",
+      code: "void 0;",
     },
   };
 }
@@ -309,6 +402,15 @@ function styleAsset(bundleKey, fileName) {
     type: "style",
     contentType: "text/css; charset=utf-8",
     bundleKey,
+  };
+}
+
+function manifestAsset(fileName, contentHash) {
+  return {
+    fileName,
+    type: "manifest",
+    contentType: "application/json; charset=utf-8",
+    contentHash,
   };
 }
 

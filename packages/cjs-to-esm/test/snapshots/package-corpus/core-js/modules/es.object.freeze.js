@@ -2,8 +2,8 @@ import $ from "../internals/export";
 import FREEZING from "../internals/freezing";
 import fails from "../internals/fails";
 import isObject from "../internals/is-object";
-import { onFreeze as _onFreeze } from "../internals/internal-metadata";
-var onFreeze = _onFreeze;
+import _cjs_import from "../internals/internal-metadata";
+var onFreeze = _cjs_import.onFreeze;
 
 // eslint-disable-next-line es/no-object-freeze -- safe
 var $freeze = Object.freeze;

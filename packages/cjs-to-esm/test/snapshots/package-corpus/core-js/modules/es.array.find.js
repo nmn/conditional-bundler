@@ -1,7 +1,7 @@
 import $ from "../internals/export";
-import { find as _find } from "../internals/array-iteration";
+import _cjs_import from "../internals/array-iteration";
 import addToUnscopables from "../internals/add-to-unscopables";
-var $find = _find;
+var $find = _cjs_import.find;
 var FIND = 'find';
 var SKIPS_HOLES = true;
 

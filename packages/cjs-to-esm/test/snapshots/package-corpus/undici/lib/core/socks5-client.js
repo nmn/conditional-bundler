@@ -1,8 +1,8 @@
 import * as _cjs_import from "node:events";
 import * as _cjs_import2 from "node:buffer";
-import { InvalidArgumentError as _InvalidArgumentError, Socks5ProxyError as _Socks5ProxyError } from "./errors";
-import * as _cjs_import3 from "node:util";
-import { parseAddress as _parseAddress } from "./socks5-utils";
+import _cjs_import3 from "./errors";
+import * as _cjs_import4 from "node:util";
+import _cjs_import5 from "./socks5-utils";
 const {
   EventEmitter
 } = _cjs_import;
@@ -10,8 +10,15 @@ const {
   Buffer
 } = _cjs_import2;
 const {
-  debuglog
+  InvalidArgumentError,
+  Socks5ProxyError
 } = _cjs_import3;
+const {
+  debuglog
+} = _cjs_import4;
+const {
+  parseAddress
+} = _cjs_import5;
 const debug = debuglog('undici:socks5');
 const EMPTY_BUFFER = Buffer.alloc(0);
 
@@ -73,7 +80,7 @@ class Socks5Client extends EventEmitter {
   constructor(socket, options = {}) {
     super();
     if (!socket) {
-      throw new _InvalidArgumentError('socket is required');
+      throw new InvalidArgumentError('socket is required');
     }
     this.socket = socket;
     this.options = options;
@@ -156,7 +163,7 @@ class Socks5Client extends EventEmitter {
    */
   handshake() {
     if (this.state !== STATES.INITIAL) {
-      throw new _InvalidArgumentError('Handshake already started');
+      throw new InvalidArgumentError('Handshake already started');
     }
     debug('starting handshake with', this.authMethods.length, 'auth methods');
     this.state = STATES.HANDSHAKING;
@@ -186,10 +193,10 @@ class Socks5Client extends EventEmitter {
     const version = this.buffer[0];
     const method = this.buffer[1];
     if (version !== SOCKS_VERSION) {
-      throw new _Socks5ProxyError(`Invalid SOCKS version: ${version}`, 'UND_ERR_SOCKS5_VERSION');
+      throw new Socks5ProxyError(`Invalid SOCKS version: ${version}`, 'UND_ERR_SOCKS5_VERSION');
     }
     if (method === AUTH_METHODS.NO_ACCEPTABLE) {
-      throw new _Socks5ProxyError('No acceptable authentication method', 'UND_ERR_SOCKS5_AUTH_REJECTED');
+      throw new Socks5ProxyError('No acceptable authentication method', 'UND_ERR_SOCKS5_AUTH_REJECTED');
     }
     this.buffer = this.buffer.subarray(2);
     debug('server selected auth method', method);
@@ -199,7 +206,7 @@ class Socks5Client extends EventEmitter {
       this.state = STATES.AUTHENTICATING;
       this.sendAuthRequest();
     } else {
-      throw new _Socks5ProxyError(`Unsupported authentication method: ${method}`, 'UND_ERR_SOCKS5_AUTH_METHOD');
+      throw new Socks5ProxyError(`Unsupported authentication method: ${method}`, 'UND_ERR_SOCKS5_AUTH_METHOD');
     }
   }
 
@@ -212,7 +219,7 @@ class Socks5Client extends EventEmitter {
       password
     } = this.options;
     if (!username || !password) {
-      throw new _InvalidArgumentError('Username and password required for authentication');
+      throw new InvalidArgumentError('Username and password required for authentication');
     }
     debug('sending username/password auth');
 
@@ -225,7 +232,7 @@ class Socks5Client extends EventEmitter {
     const usernameBuffer = Buffer.from(username);
     const passwordBuffer = Buffer.from(password);
     if (usernameBuffer.length > 255 || passwordBuffer.length > 255) {
-      throw new _InvalidArgumentError('Username or password too long');
+      throw new InvalidArgumentError('Username or password too long');
     }
     const request = Buffer.alloc(3 + usernameBuffer.length + passwordBuffer.length);
     request[0] = 0x01; // Sub-negotiation version
@@ -246,10 +253,10 @@ class Socks5Client extends EventEmitter {
     const version = this.buffer[0];
     const status = this.buffer[1];
     if (version !== 0x01) {
-      throw new _Socks5ProxyError(`Invalid auth sub-negotiation version: ${version}`, 'UND_ERR_SOCKS5_AUTH_VERSION');
+      throw new Socks5ProxyError(`Invalid auth sub-negotiation version: ${version}`, 'UND_ERR_SOCKS5_AUTH_VERSION');
     }
     if (status !== 0x00) {
-      throw new _Socks5ProxyError('Authentication failed', 'UND_ERR_SOCKS5_AUTH_FAILED');
+      throw new Socks5ProxyError('Authentication failed', 'UND_ERR_SOCKS5_AUTH_FAILED');
     }
     this.buffer = this.buffer.subarray(2);
     debug('authentication successful');
@@ -263,10 +270,10 @@ class Socks5Client extends EventEmitter {
    */
   connect(address, port) {
     if (this.state === STATES.CONNECTING || this.state === STATES.CONNECTED) {
-      throw new _InvalidArgumentError('Connection already in progress');
+      throw new InvalidArgumentError('Connection already in progress');
     }
     if (this.state !== STATES.AUTHENTICATED) {
-      throw new _InvalidArgumentError('Client must be authenticated before CONNECT');
+      throw new InvalidArgumentError('Client must be authenticated before CONNECT');
     }
     debug('connecting to', address, port);
     this.state = STATES.CONNECTING;
@@ -282,7 +289,7 @@ class Socks5Client extends EventEmitter {
     const {
       type: addressType,
       buffer: addressBuffer
-    } = _parseAddress(address);
+    } = parseAddress(address);
 
     // Build request
     // +----+-----+-------+------+----------+----------+
@@ -311,7 +318,7 @@ class Socks5Client extends EventEmitter {
     const reply = this.buffer[1];
     const addressType = this.buffer[3];
     if (version !== SOCKS_VERSION) {
-      throw new _Socks5ProxyError(`Invalid SOCKS version in reply: ${version}`, 'UND_ERR_SOCKS5_REPLY_VERSION');
+      throw new Socks5ProxyError(`Invalid SOCKS version in reply: ${version}`, 'UND_ERR_SOCKS5_REPLY_VERSION');
     }
 
     // Calculate the expected response length
@@ -326,14 +333,14 @@ class Socks5Client extends EventEmitter {
     } else if (addressType === ADDRESS_TYPES.IPV6) {
       responseLength += 16 + 2; // IPv6 + port
     } else {
-      throw new _Socks5ProxyError(`Invalid address type in reply: ${addressType}`, 'UND_ERR_SOCKS5_ADDR_TYPE');
+      throw new Socks5ProxyError(`Invalid address type in reply: ${addressType}`, 'UND_ERR_SOCKS5_ADDR_TYPE');
     }
     if (this.buffer.length < responseLength) {
       return; // Not enough data for full response
     }
     if (reply !== REPLY_CODES.SUCCEEDED) {
       const errorMessage = this.getReplyErrorMessage(reply);
-      throw new _Socks5ProxyError(`SOCKS5 connection failed: ${errorMessage}`, `UND_ERR_SOCKS5_REPLY_${reply}`);
+      throw new Socks5ProxyError(`SOCKS5 connection failed: ${errorMessage}`, `UND_ERR_SOCKS5_REPLY_${reply}`);
     }
 
     // Parse bound address and port

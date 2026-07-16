@@ -1,9 +1,9 @@
-import { IteratorPrototype as _IteratorPrototype } from "../internals/iterators-core";
+import _cjs_import from "../internals/iterators-core";
 import create from "../internals/object-create";
 import createPropertyDescriptor from "../internals/create-property-descriptor";
 import setToStringTag from "../internals/set-to-string-tag";
 import Iterators from "../internals/iterators";
-var IteratorPrototype = _IteratorPrototype;
+var IteratorPrototype = _cjs_import.IteratorPrototype;
 var returnThis = function () {
   return this;
 };

@@ -1,8 +1,8 @@
-import { StatsigClientBase as _StatsigClientBase, _getStatsigGlobal, Log as _Log, _isServerEnv, SDKType as _SDKType, MemoPrefix as _MemoPrefix, getUUID as _getUUID, PrecomputedEvaluationsContextHandle as _PrecomputedEvaluationsContextHandle, createUpdateDetails as _createUpdateDetails, Diagnostics as _Diagnostics, UPDATE_DETAIL_ERROR_MESSAGES as _UPDATE_DETAIL_ERROR_MESSAGES, _cloneObject, StatsigSession as _StatsigSession, StableID as _StableID, Storage as _Storage, _normalizeUser, _makeFeatureGate, _createGateExposure, _makeDynamicConfig, _createConfigExposure, _makeExperiment, _mapExposures, _makeLayer, _mergeOverride, _createLayerParameterExposure, _getUnitIDFromUser } from "@statsig/client-core";
+import client_core_1 from "@statsig/client-core";
 import EvaluationStore_1 from "./EvaluationStore";
 import Network_1 from "./Network";
-import { _makeParamStoreGetter } from "./ParamStoreGetterFactory";
-import { StatsigEvaluationsDataAdapter as _StatsigEvaluationsDataAdapter } from "./StatsigEvaluationsDataAdapter";
+import ParamStoreGetterFactory_1 from "./ParamStoreGetterFactory";
+import StatsigEvaluationsDataAdapter_1 from "./StatsigEvaluationsDataAdapter";
 var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function (resolve) {
@@ -30,7 +30,7 @@ var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, gene
     step((generator = generator.apply(thisArg, _arguments || [])).next());
   });
 };
-class StatsigClient extends _StatsigClientBase {
+class StatsigClient extends client_core_1.StatsigClientBase {
   /**
    * Retrieves an instance of the StatsigClient based on the provided SDK key.
    *  If no SDK key is provided, the method returns the most recently created instance of the StatsigClient.
@@ -41,11 +41,11 @@ class StatsigClient extends _StatsigClientBase {
    * @returns {StatsigClient} Returns the StatsigClient instance associated with the given SDK key, creating a new one if needed.
    */
   static instance(sdkKey) {
-    const instance = (0, _getStatsigGlobal)().instance(sdkKey);
+    const instance = (0, client_core_1._getStatsigGlobal)().instance(sdkKey);
     if (instance instanceof StatsigClient) {
       return instance;
     }
-    _Log.warn((0, _isServerEnv)() ? 'StatsigClient.instance is not supported in server environments' : 'Unable to find StatsigClient instance');
+    client_core_1.Log.warn((0, client_core_1._isServerEnv)() ? 'StatsigClient.instance is not supported in server environments' : 'Unable to find StatsigClient instance');
     return new StatsigClient(sdkKey !== null && sdkKey !== void 0 ? sdkKey : '', {});
   }
   /**
@@ -57,11 +57,11 @@ class StatsigClient extends _StatsigClientBase {
    */
   constructor(sdkKey, user, options = null) {
     var _a, _b;
-    _SDKType._setClientType(sdkKey, 'javascript-client');
+    client_core_1.SDKType._setClientType(sdkKey, 'javascript-client');
     const network = new Network_1.default(options, e => {
       this.$emt(e);
     });
-    super(sdkKey, (_a = options === null || options === void 0 ? void 0 : options.dataAdapter) !== null && _a !== void 0 ? _a : new _StatsigEvaluationsDataAdapter(), network, options);
+    super(sdkKey, (_a = options === null || options === void 0 ? void 0 : options.dataAdapter) !== null && _a !== void 0 ? _a : new StatsigEvaluationsDataAdapter_1.StatsigEvaluationsDataAdapter(), network, options);
     this._possibleFirstTouchMetadata = {};
     /**
      * Retrieves the value of a feature gate for the current user, represented as a {@link FeatureGate} object.
@@ -70,7 +70,7 @@ class StatsigClient extends _StatsigClientBase {
      * @param {FeatureGateEvaluationOptions} [options] - Optional. Additional options to customize the method call.
      * @returns {FeatureGate} - The {@link FeatureGate} object representing the gate's current evaluation results for the user.
      */
-    this.getFeatureGate = this._memoize(_MemoPrefix._gate, this._getFeatureGateImpl.bind(this));
+    this.getFeatureGate = this._memoize(client_core_1.MemoPrefix._gate, this._getFeatureGateImpl.bind(this));
     /**
      * Retrieves the value of a dynamic config for the current user.
      *
@@ -78,7 +78,7 @@ class StatsigClient extends _StatsigClientBase {
      * @param {DynamicConfigEvaluationOptions} [options] - Optional. Additional options to customize the method call.
      * @returns {DynamicConfig} - The {@link DynamicConfig} object representing the dynamic configs's current evaluation results for the user.
      */
-    this.getDynamicConfig = this._memoize(_MemoPrefix._dynamicConfig, this._getDynamicConfigImpl.bind(this));
+    this.getDynamicConfig = this._memoize(client_core_1.MemoPrefix._dynamicConfig, this._getDynamicConfigImpl.bind(this));
     /**
      * Retrieves the value of a experiment for the current user.
      *
@@ -86,14 +86,14 @@ class StatsigClient extends _StatsigClientBase {
      * @param {ExperimentEvaluationOptions} [options] - Optional. Additional options to customize the method call.
      * @returns {Experiment} - The {@link Experiment} object representing the experiments's current evaluation results for the user.
      */
-    this.getExperiment = this._memoize(_MemoPrefix._experiment, this._getExperimentImpl.bind(this));
+    this.getExperiment = this._memoize(client_core_1.MemoPrefix._experiment, this._getExperimentImpl.bind(this));
     /**
      * Retrieves the list of all Dynamic Configs and Experiments for the current user.
      *
      * @returns {string[]} The list of all Dynamic Config and Experiment names for the current user. Note - these will be hashed unless you've disabled hashing.
      * This is intended to be used for debugging.
      */
-    this.getConfigList = this._memoize(_MemoPrefix._configList, this._getConfigListImpl.bind(this));
+    this.getConfigList = this._memoize(client_core_1.MemoPrefix._configList, this._getConfigListImpl.bind(this));
     /**
      * Retrieves the value of a layer for the current user.
      *
@@ -101,7 +101,7 @@ class StatsigClient extends _StatsigClientBase {
      * @param {LayerEvaluationOptions} [options] - Optional. Additional options to customize the method call.
      * @returns {Layer} - The {@link Layer} object representing the layers's current evaluation results for the user.
      */
-    this.getLayer = this._memoize(_MemoPrefix._layer, this._getLayerImpl.bind(this));
+    this.getLayer = this._memoize(client_core_1.MemoPrefix._layer, this._getLayerImpl.bind(this));
     /**
      * Retrieves the value of a parameter store for the current user.
      *
@@ -109,12 +109,12 @@ class StatsigClient extends _StatsigClientBase {
      * @param {ParameterStoreEvaluationOptions} [options] - Optional. Additional options to customize the method call.
      * @returns {ParameterStore} - The {@link ParameterStore} object representing the parameter store's current mappings for the user.
      */
-    this.getParameterStore = this._memoize(_MemoPrefix._paramStore, this._getParameterStoreImpl.bind(this));
+    this.getParameterStore = this._memoize(client_core_1.MemoPrefix._paramStore, this._getParameterStoreImpl.bind(this));
     this._store = new EvaluationStore_1.default(sdkKey, options !== null && options !== void 0 ? options : null);
     this._network = network;
     this._user = this._configureUser(user, options);
-    this._sdkInstanceID = (0, _getUUID)();
-    this._contextHandle = new _PrecomputedEvaluationsContextHandle(sdkKey, () => this._options, () => this._errorBoundary, () => this._store.getValues(), () => this._user, () => this._sdkInstanceID);
+    this._sdkInstanceID = (0, client_core_1.getUUID)();
+    this._contextHandle = new client_core_1.PrecomputedEvaluationsContextHandle(sdkKey, () => this._options, () => this._errorBoundary, () => this._store.getValues(), () => this._user, () => this._sdkInstanceID);
     const plugins = (_b = options === null || options === void 0 ? void 0 : options.plugins) !== null && _b !== void 0 ? _b : [];
     for (const plugin of plugins) {
       plugin.bind(this);
@@ -130,7 +130,7 @@ class StatsigClient extends _StatsigClientBase {
   initializeSync(options) {
     var _a;
     if (this.loadingStatus !== 'Uninitialized') {
-      return (0, _createUpdateDetails)(true, this._store.getSource(), -1, null, null, ['MultipleInitializations', ...((_a = this._store.getWarnings()) !== null && _a !== void 0 ? _a : [])]);
+      return (0, client_core_1.createUpdateDetails)(true, this._store.getSource(), -1, null, null, ['MultipleInitializations', ...((_a = this._store.getWarnings()) !== null && _a !== void 0 ? _a : [])]);
     }
     this._logger.start();
     return this.updateUserSync(this._user, options);
@@ -183,10 +183,10 @@ class StatsigClient extends _StatsigClientBase {
     this._finalizeUpdate(result);
     const disable = options === null || options === void 0 ? void 0 : options.disableBackgroundCacheRefresh;
     if (disable === true || disable == null && (result === null || result === void 0 ? void 0 : result.source) === 'Bootstrap') {
-      return (0, _createUpdateDetails)(true, this._store.getSource(), performance.now() - startTime, this._errorBoundary.getLastSeenErrorAndReset(), this._network.getLastUsedInitUrlAndReset(), warnings);
+      return (0, client_core_1.createUpdateDetails)(true, this._store.getSource(), performance.now() - startTime, this._errorBoundary.getLastSeenErrorAndReset(), this._network.getLastUsedInitUrlAndReset(), warnings);
     }
     this._runPostUpdate(result !== null && result !== void 0 ? result : null, this._user);
-    return (0, _createUpdateDetails)(true, this._store.getSource(), performance.now() - startTime, this._errorBoundary.getLastSeenErrorAndReset(), this._network.getLastUsedInitUrlAndReset(), warnings);
+    return (0, client_core_1.createUpdateDetails)(true, this._store.getSource(), performance.now() - startTime, this._errorBoundary.getLastSeenErrorAndReset(), this._network.getLastUsedInitUrlAndReset(), warnings);
   }
   /**
    * Asynchronously updates the user in the Statsig client by initially using cached values and then fetching the latest values from the network.
@@ -214,33 +214,33 @@ class StatsigClient extends _StatsigClientBase {
     return __awaiter(this, void 0, void 0, function* () {
       this._resetForUser(user);
       const initiator = this._user;
-      _Diagnostics._markInitOverallStart(this._sdkKey);
+      client_core_1.Diagnostics._markInitOverallStart(this._sdkKey);
       let result = this.dataAdapter.getDataSync(initiator);
       this._store.setValues(result, this._user);
       this._setStatus('Loading', result);
       result = yield this.dataAdapter.getDataAsync(result, initiator, options);
       // ensure the user hasn't changed while we were waiting
       if (initiator !== this._user) {
-        return (0, _createUpdateDetails)(false, this._store.getSource(), -1, new Error('User changed during update'), this._network.getLastUsedInitUrlAndReset());
+        return (0, client_core_1.createUpdateDetails)(false, this._store.getSource(), -1, new Error('User changed during update'), this._network.getLastUsedInitUrlAndReset());
       }
       let isUsingNetworkValues = false;
       if (result != null) {
-        _Diagnostics._markInitProcessStart(this._sdkKey);
+        client_core_1.Diagnostics._markInitProcessStart(this._sdkKey);
         isUsingNetworkValues = this._store.setValues(result, this._user);
-        _Diagnostics._markInitProcessEnd(this._sdkKey, {
+        client_core_1.Diagnostics._markInitProcessEnd(this._sdkKey, {
           success: isUsingNetworkValues
         });
       }
       this._finalizeUpdate(result);
       if (!isUsingNetworkValues) {
-        this._errorBoundary.attachErrorIfNoneExists(_UPDATE_DETAIL_ERROR_MESSAGES.NO_NETWORK_DATA);
+        this._errorBoundary.attachErrorIfNoneExists(client_core_1.UPDATE_DETAIL_ERROR_MESSAGES.NO_NETWORK_DATA);
         this.$emt({
           name: 'initialization_failure'
         });
       }
-      _Diagnostics._markInitOverallEnd(this._sdkKey, isUsingNetworkValues, this._store.getCurrentSourceDetails());
-      const initDuration = _Diagnostics._enqueueDiagnosticsEvent(this._user, this._logger, this._sdkKey, this._options);
-      return (0, _createUpdateDetails)(isUsingNetworkValues, this._store.getSource(), initDuration, this._errorBoundary.getLastSeenErrorAndReset(), this._network.getLastUsedInitUrlAndReset(), this._store.getWarnings());
+      client_core_1.Diagnostics._markInitOverallEnd(this._sdkKey, isUsingNetworkValues, this._store.getCurrentSourceDetails());
+      const initDuration = client_core_1.Diagnostics._enqueueDiagnosticsEvent(this._user, this._logger, this._sdkKey, this._options);
+      return (0, client_core_1.createUpdateDetails)(isUsingNetworkValues, this._store.getSource(), initDuration, this._errorBoundary.getLastSeenErrorAndReset(), this._network.getLastUsedInitUrlAndReset(), this._store.getWarnings());
     });
   }
   /**
@@ -249,9 +249,9 @@ class StatsigClient extends _StatsigClientBase {
    * @returns {PrecomputedEvaluationsContext} The current synchronous context for the this StatsigClient instance.
    */
   getContext() {
-    let user = (0, _cloneObject)('StatsigUser', this._user);
+    let user = (0, client_core_1._cloneObject)('StatsigUser', this._user);
     if (user == null) {
-      _Log.error('Failed to clone user');
+      client_core_1.Log.error('Failed to clone user');
       user = {};
     }
     return {
@@ -260,8 +260,8 @@ class StatsigClient extends _StatsigClientBase {
       values: this._store.getValues(),
       user,
       errorBoundary: this._errorBoundary,
-      session: _StatsigSession.get(this._sdkKey),
-      stableID: _StableID.get(this._sdkKey),
+      session: client_core_1.StatsigSession.get(this._sdkKey),
+      stableID: client_core_1.StableID.get(this._sdkKey),
       sdkInstanceID: this._sdkInstanceID
     };
   }
@@ -323,8 +323,8 @@ class StatsigClient extends _StatsigClientBase {
   }
   _initializeAsyncImpl(options) {
     return __awaiter(this, void 0, void 0, function* () {
-      if (!_Storage.isReady()) {
-        yield _Storage.isReadyResolver();
+      if (!client_core_1.Storage.isReady()) {
+        yield client_core_1.Storage.isReadyResolver();
       }
       this._logger.start();
       return this.updateUserAsync(this._user, options);
@@ -332,7 +332,7 @@ class StatsigClient extends _StatsigClientBase {
   }
   _createErrorUpdateDetails(error, startTime) {
     var _a;
-    return (0, _createUpdateDetails)(false, this._store.getSource(), performance.now() - startTime, error, null, [...((_a = this._store.getWarnings()) !== null && _a !== void 0 ? _a : [])]);
+    return (0, client_core_1.createUpdateDetails)(false, this._store.getSource(), performance.now() - startTime, error, null, [...((_a = this._store.getWarnings()) !== null && _a !== void 0 ? _a : [])]);
   }
   _finalizeUpdate(values) {
     this._store.finalize();
@@ -342,7 +342,7 @@ class StatsigClient extends _StatsigClientBase {
     this.dataAdapter.getDataAsync(current, user, {
       priority: 'low'
     }).catch(err => {
-      _Log.error('An error occurred after update.', err);
+      client_core_1.Log.error('An error occurred after update.', err);
     });
   }
   _resetForUser(user) {
@@ -352,14 +352,14 @@ class StatsigClient extends _StatsigClientBase {
   }
   _configureUser(originalUser, options) {
     var _a, _b, _c;
-    const user = (0, _normalizeUser)(originalUser, options);
+    const user = (0, client_core_1._normalizeUser)(originalUser, options);
     const stableIdOverride = (_a = user.customIDs) === null || _a === void 0 ? void 0 : _a.stableID;
     if (stableIdOverride) {
       const readyPromise = (_c = (_b = this.storageProvider).isReadyResolver) === null || _c === void 0 ? void 0 : _c.call(_b);
       if (readyPromise) {
-        readyPromise.then(() => _StableID.setOverride(stableIdOverride, this._sdkKey), () => _StableID.setOverride(stableIdOverride, this._sdkKey));
+        readyPromise.then(() => client_core_1.StableID.setOverride(stableIdOverride, this._sdkKey), () => client_core_1.StableID.setOverride(stableIdOverride, this._sdkKey));
       } else {
-        _StableID.setOverride(stableIdOverride, this._sdkKey);
+        client_core_1.StableID.setOverride(stableIdOverride, this._sdkKey);
       }
     }
     // Only attach first touch metadata if it's not empty
@@ -376,10 +376,10 @@ class StatsigClient extends _StatsigClientBase {
     } = this._store.getGate(name);
     this._checkUserHasIdForEvaluation(evaluation === null || evaluation === void 0 ? void 0 : evaluation.id_type, name, 'Gate');
     this._checkInitializationStatus(details.reason);
-    const gate = (0, _makeFeatureGate)(name, details, evaluation);
+    const gate = (0, client_core_1._makeFeatureGate)(name, details, evaluation);
     const overridden = (_b = (_a = this.overrideAdapter) === null || _a === void 0 ? void 0 : _a.getGateOverride) === null || _b === void 0 ? void 0 : _b.call(_a, gate, this._user, options);
     const result = overridden !== null && overridden !== void 0 ? overridden : gate;
-    this._enqueueExposure(name, (0, _createGateExposure)(this._user, result, this._store.getExposureMapping()), options);
+    this._enqueueExposure(name, (0, client_core_1._createGateExposure)(this._user, result, this._store.getExposureMapping()), options);
     this.$emt({
       name: 'gate_evaluation',
       gate: result
@@ -394,10 +394,10 @@ class StatsigClient extends _StatsigClientBase {
     } = this._store.getConfig(name);
     this._checkUserHasIdForEvaluation(evaluation === null || evaluation === void 0 ? void 0 : evaluation.id_type, name, 'Dynamic config');
     this._checkInitializationStatus(details.reason);
-    const config = (0, _makeDynamicConfig)(name, details, evaluation);
+    const config = (0, client_core_1._makeDynamicConfig)(name, details, evaluation);
     const overridden = (_b = (_a = this.overrideAdapter) === null || _a === void 0 ? void 0 : _a.getDynamicConfigOverride) === null || _b === void 0 ? void 0 : _b.call(_a, config, this._user, options);
     const result = overridden !== null && overridden !== void 0 ? overridden : config;
-    this._enqueueExposure(name, (0, _createConfigExposure)(this._user, result, this._store.getExposureMapping()), options);
+    this._enqueueExposure(name, (0, client_core_1._createConfigExposure)(this._user, result, this._store.getExposureMapping()), options);
     this.$emt({
       name: 'dynamic_config_evaluation',
       dynamicConfig: result
@@ -412,13 +412,13 @@ class StatsigClient extends _StatsigClientBase {
     } = this._store.getConfig(name);
     this._checkUserHasIdForEvaluation(evaluation === null || evaluation === void 0 ? void 0 : evaluation.id_type, name, 'Experiment');
     this._checkInitializationStatus(details.reason);
-    const experiment = (0, _makeExperiment)(name, details, evaluation);
+    const experiment = (0, client_core_1._makeExperiment)(name, details, evaluation);
     if (experiment.__evaluation != null) {
-      experiment.__evaluation.secondary_exposures = (0, _mapExposures)((_b = (_a = experiment.__evaluation) === null || _a === void 0 ? void 0 : _a.secondary_exposures) !== null && _b !== void 0 ? _b : [], this._store.getExposureMapping());
+      experiment.__evaluation.secondary_exposures = (0, client_core_1._mapExposures)((_b = (_a = experiment.__evaluation) === null || _a === void 0 ? void 0 : _a.secondary_exposures) !== null && _b !== void 0 ? _b : [], this._store.getExposureMapping());
     }
     const overridden = (_d = (_c = this.overrideAdapter) === null || _c === void 0 ? void 0 : _c.getExperimentOverride) === null || _d === void 0 ? void 0 : _d.call(_c, experiment, this._user, options);
     const result = overridden !== null && overridden !== void 0 ? overridden : experiment;
-    this._enqueueExposure(name, (0, _createConfigExposure)(this._user, result, this._store.getExposureMapping()), options);
+    this._enqueueExposure(name, (0, client_core_1._createConfigExposure)(this._user, result, this._store.getExposureMapping()), options);
     this.$emt({
       name: 'experiment_evaluation',
       experiment: result
@@ -434,16 +434,16 @@ class StatsigClient extends _StatsigClientBase {
       result: evaluation,
       details
     } = this._store.getLayer(name);
-    const layer = (0, _makeLayer)(name, details, evaluation);
+    const layer = (0, client_core_1._makeLayer)(name, details, evaluation);
     const overridden = (_b = (_a = this.overrideAdapter) === null || _a === void 0 ? void 0 : _a.getLayerOverride) === null || _b === void 0 ? void 0 : _b.call(_a, layer, this._user, options);
     if (options === null || options === void 0 ? void 0 : options.disableExposureLog) {
       this._logger.incrementNonExposureCount(name);
     }
-    const result = (0, _mergeOverride)(layer, overridden, (_c = overridden === null || overridden === void 0 ? void 0 : overridden.__value) !== null && _c !== void 0 ? _c : layer.__value, param => {
+    const result = (0, client_core_1._mergeOverride)(layer, overridden, (_c = overridden === null || overridden === void 0 ? void 0 : overridden.__value) !== null && _c !== void 0 ? _c : layer.__value, param => {
       if (options === null || options === void 0 ? void 0 : options.disableExposureLog) {
         return;
       }
-      this._enqueueExposure(name, (0, _createLayerParameterExposure)(this._user, result, param, this._store.getExposureMapping()), options);
+      this._enqueueExposure(name, (0, client_core_1._createLayerParameterExposure)(this._user, result, param, this._store.getExposureMapping()), options);
     });
     this.$emt({
       name: 'layer_evaluation',
@@ -462,13 +462,13 @@ class StatsigClient extends _StatsigClientBase {
       name,
       details: details,
       __configuration: configuration,
-      get: (0, _makeParamStoreGetter)(this, configuration, options)
+      get: (0, ParamStoreGetterFactory_1._makeParamStoreGetter)(this, configuration, options)
     };
     const overridden = (_b = (_a = this.overrideAdapter) === null || _a === void 0 ? void 0 : _a.getParamStoreOverride) === null || _b === void 0 ? void 0 : _b.call(_a, paramStore, options);
     if (overridden != null) {
       paramStore.__configuration = overridden.config;
       paramStore.details = overridden.details;
-      paramStore.get = (0, _makeParamStoreGetter)(this, overridden.config, options);
+      paramStore.get = (0, ParamStoreGetterFactory_1._makeParamStoreGetter)(this, overridden.config, options);
     }
     return paramStore;
   }
@@ -476,13 +476,13 @@ class StatsigClient extends _StatsigClientBase {
     if (!idType) {
       return;
     }
-    if (!(0, _getUnitIDFromUser)(this._user, idType)) {
-      _Log.warn(`The user does not have the required id_type "${idType}" for ${type} "${name}"`);
+    if (!(0, client_core_1._getUnitIDFromUser)(this._user, idType)) {
+      client_core_1.Log.warn(`The user does not have the required id_type "${idType}" for ${type} "${name}"`);
     }
   }
   _checkInitializationStatus(reason) {
     if (reason === 'Uninitialized' || reason.startsWith('Loading')) {
-      _Log.warn(`SDK initialization has not completed. Reason: ${reason}`);
+      client_core_1.Log.warn(`SDK initialization has not completed. Reason: ${reason}`);
     }
   }
 }

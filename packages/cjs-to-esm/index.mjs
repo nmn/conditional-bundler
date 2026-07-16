@@ -1,9 +1,7 @@
-import { builtinModules, createRequire } from "node:module";
+import { builtinModules } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
-import { parse } from "@babel/parser";
-
-export const CJS_VIRTUAL_PREFIX = "virtual:cjs-to-esm:";
+import crypto from "node:crypto";
 
 const packageIdentityCache = new Map();
 
@@ -14,12 +12,11 @@ const builtinRequests = new Set(
 export default function cjsToEsmBabelPlugin(api, options = {}) {
   api.assertVersion(7);
   const t = api.types;
-  const virtualPrefix = options.virtualPrefix ?? CJS_VIRTUAL_PREFIX;
 
   return {
     name: "cjs-to-esm",
     parserOverride(code, parserOptions, parseSource) {
-      if (!isCjsVirtualId(options.id, virtualPrefix)) {
+      if (options.format !== "commonjs") {
         return parseSource(code, parserOptions);
       }
       return parseSource(code, {
@@ -31,30 +28,31 @@ export default function cjsToEsmBabelPlugin(api, options = {}) {
     visitor: {
       Program(programPath, state) {
         const pluginOptions = state.opts ?? options;
-        const id = pluginOptions.id;
-        if (!isCjsVirtualId(id, virtualPrefix)) {
+        if (pluginOptions.format !== "commonjs") {
           return;
         }
 
-        const decoded = decodeCjsVirtualId(id, virtualPrefix);
-        const filePath = pluginOptions.filePath ?? decoded.filePath;
-        const envId = decoded.envId ?? pluginOptions.envId ?? "default";
-        const nodeEnv =
-          decoded.mode ??
-          pluginOptions.nodeEnv ??
-          pluginOptions.mode ??
-          process.env.NODE_ENV ??
-          process.env.BUNDLER_MODE ??
-          "development";
+        const filePath = pluginOptions.filePath;
+        const envId =
+          pluginOptions.reactCjsEnv ?? pluginOptions.envId ?? "default";
+        const nodeEnv = pluginOptions.nodeEnv ?? pluginOptions.mode;
+        if (typeof nodeEnv !== "string" || nodeEnv.length === 0) {
+          throw new Error(
+            "cjs-to-esm requires an explicit build mode from the bundler coordinator.",
+          );
+        }
         const mode = nodeEnv === "production" ? "production" : "development";
         const context = {
           t,
           filePath,
-          moduleIdentity: createCjsModuleIdentity(filePath, pluginOptions.pkg),
+          moduleIdentity:
+            pluginOptions.moduleIdentity ??
+            createCjsModuleIdentity(filePath, pluginOptions.pkg),
           envId,
           mode,
           nodeEnv,
-          virtualPrefix,
+          linkReferences: [],
+          linkModulePaths: pluginOptions.linkModulePaths === true,
         };
 
         const strategy = pluginOptions.strategy ?? "auto";
@@ -88,6 +86,14 @@ export default function cjsToEsmBabelPlugin(api, options = {}) {
             ? { fallbackReason: transformed.fallbackReason }
             : {}),
         };
+        if (context.linkReferences.length > 0) {
+          const existing =
+            state.file.metadata.conditionalBundlerLinkReferences ?? [];
+          state.file.metadata.conditionalBundlerLinkReferences = [
+            ...existing,
+            ...context.linkReferences,
+          ];
+        }
       },
     },
   };
@@ -97,51 +103,6 @@ export { cjsToEsmBabelPlugin };
 
 export function isNodeBuiltin(request) {
   return builtinRequests.has(request);
-}
-
-export function isCjsVirtualId(id, virtualPrefix = CJS_VIRTUAL_PREFIX) {
-  return typeof id === "string" && id.startsWith(virtualPrefix);
-}
-
-export function encodeCjsVirtualId(
-  envId,
-  filePath,
-  virtualPrefix = CJS_VIRTUAL_PREFIX,
-  mode,
-) {
-  const modeSegment = mode ? `${encodeURIComponent(mode)}:` : "";
-  return `${virtualPrefix}${encodeURIComponent(envId)}:${modeSegment}${Buffer.from(
-    filePath,
-  ).toString("base64url")}`;
-}
-
-export function decodeCjsVirtualId(id, virtualPrefix = CJS_VIRTUAL_PREFIX) {
-  if (!isCjsVirtualId(id, virtualPrefix)) {
-    throw new Error(`Invalid CJS virtual module id '${String(id)}'.`);
-  }
-  const payload = id.slice(virtualPrefix.length);
-  const separator = payload.indexOf(":");
-  if (separator === -1) {
-    return {
-      envId: undefined,
-      filePath: Buffer.from(payload, "base64url").toString("utf8"),
-    };
-  }
-  const remainder = payload.slice(separator + 1);
-  const modeSeparator = remainder.indexOf(":");
-  return modeSeparator === -1
-    ? {
-        envId: decodeURIComponent(payload.slice(0, separator)),
-        filePath: Buffer.from(remainder, "base64url").toString("utf8"),
-      }
-    : {
-        envId: decodeURIComponent(payload.slice(0, separator)),
-        mode: decodeURIComponent(remainder.slice(0, modeSeparator)),
-        filePath: Buffer.from(
-          remainder.slice(modeSeparator + 1),
-          "base64url",
-        ).toString("utf8"),
-      };
 }
 
 export function createCjsModuleIdentity(filePath, suppliedPackage) {
@@ -196,8 +157,6 @@ function toPosixPath(filePath) {
   return filePath.split(path.sep).join(path.posix.sep);
 }
 
-const dependencyExportCache = new Map();
-
 function isNodeEnvExpression(node, t) {
   return (
     t.isMemberExpression(node) &&
@@ -208,104 +167,6 @@ function isNodeEnvExpression(node, t) {
     t.isIdentifier(node.object.object, { name: "process" }) &&
     t.isIdentifier(node.object.property, { name: "env" })
   );
-}
-
-function resolveConditionalBranch(request, context) {
-  const dependency = resolveCjsDependency({
-    filePath: context.filePath,
-    request,
-  });
-  if (dependency.kind === "builtin") {
-    return null;
-  }
-  return {
-    filePath: dependency.filePath,
-    specifier: request,
-  };
-}
-
-function scanDependencyExports(dependency, context, active = new Set()) {
-  const filePath = dependency.filePath;
-  const cacheKey = `${context.envId}:${context.nodeEnv}:${filePath}`;
-  const cached = dependencyExportCache.get(cacheKey);
-  if (cached) {
-    return cached;
-  }
-  if (active.has(filePath) || path.extname(filePath) === ".json") {
-    return { names: new Set(), complete: false };
-  }
-  active.add(filePath);
-  const names = new Set();
-  let complete = true;
-  try {
-    const ast = parse(fs.readFileSync(filePath, "utf8"), {
-      sourceType: "script",
-      allowReturnOutsideFunction: true,
-    });
-    walkAst(ast.program, (node) => {
-      if (node.type === "AssignmentExpression") {
-        const target = readExportTargetNode(node.left, context.t);
-        if (target?.kind === "named") {
-          names.add(target.name);
-        } else if (
-          target?.kind === "default" &&
-          node.right.type === "ObjectExpression"
-        ) {
-          for (const property of node.right.properties) {
-            if (property.type !== "ObjectProperty" || property.computed) {
-              complete = false;
-              continue;
-            }
-            const name = readObjectPropertyName(property);
-            if (name) names.add(name);
-          }
-        } else if (target?.kind === "default") {
-          const request = readRequireRequest(node.right, context.t);
-          if (request) {
-            const child = resolveConditionalBranch(request, {
-              ...context,
-              filePath,
-            });
-            if (!child) {
-              complete = false;
-            } else {
-              const childExports = scanDependencyExports(
-                child,
-                context,
-                active,
-              );
-              complete &&= childExports.complete;
-              for (const name of childExports.names) names.add(name);
-            }
-          }
-        }
-      }
-      if (isExportsDefinePropertyNode(node, context.t)) {
-        const name = node.arguments[1].value;
-        if (name !== "__esModule") names.add(name);
-      }
-      const exportStarRequest = readExportStarRequestNode(node, context.t);
-      if (exportStarRequest) {
-        const child = resolveConditionalBranch(exportStarRequest, {
-          ...context,
-          filePath,
-        });
-        if (!child) {
-          complete = false;
-        } else {
-          const childExports = scanDependencyExports(child, context, active);
-          complete &&= childExports.complete;
-          for (const name of childExports.names) names.add(name);
-        }
-      }
-    });
-  } catch {
-    complete = false;
-  }
-  active.delete(filePath);
-  const result = { names, complete };
-  dependencyExportCache.set(cacheKey, result);
-  return result;
 }
 
 function walkAst(node, visit) {
@@ -810,10 +671,7 @@ function analyzeStaticCjs(programPath, context) {
           fail("dynamic-export");
           return;
         }
-        const dependency = resolveConditionalBranch(exportStarRequest, context);
-        const shape = dependency
-          ? scanDependencyExports(dependency, context)
-          : { complete: false, names: new Set() };
+        const shape = { complete: false, names: new Set() };
         if (!shape.complete) {
           fail("dynamic-reexport");
           return;
@@ -1011,10 +869,7 @@ function createStaticImportManager(programPath, context) {
   };
   const getRecord = (request) => {
     const resolved = resolve(request);
-    const key =
-      resolved.dependency.kind === "builtin"
-        ? resolved.dependency.request
-        : resolved.dependency.filePath;
+    const key = resolved.dependency.request;
     let record = records.get(key);
     if (!record) {
       record = {
@@ -1043,17 +898,9 @@ function createStaticImportManager(programPath, context) {
         preferred ?? programPath.scope.generateUidIdentifier("cjs_import");
       return record.default;
     },
-    ensureNamed(request, name) {
-      const record = getRecord(request);
-      if (record.dependency.kind === "builtin") return null;
-      const shape = scanDependencyExports(record.dependency, context);
-      if (!shape.names.has(name)) return null;
-      let local = record.named.get(name);
-      if (!local) {
-        local = programPath.scope.generateUidIdentifier(name);
-        record.named.set(name, local);
-      }
-      return local;
+    ensureNamed(request) {
+      getRecord(request);
+      return null;
     },
     build() {
       const declarations = [];
@@ -1285,12 +1132,8 @@ function createCompatibilityWrapper(programPath, context) {
   const originalBody = programPath.node.body;
   const originalDirectives = programPath.node.directives;
   const requires = collectCjsRequires(programPath, t);
-  const discoveredExports = scanDependencyExports({ filePath }, context);
   const namedExports = Array.from(
-    new Set([
-      ...collectCjsNamedExports(programPath, t),
-      ...discoveredExports.names,
-    ]),
+    new Set(collectCjsNamedExports(programPath, t)),
   ).sort();
   const imports = [];
   const switchCases = [];
@@ -1351,8 +1194,16 @@ function createCompatibilityWrapper(programPath, context) {
   const cacheKeyLiteral = t.stringLiteral(
     `${moduleIdentity}::env=${envId}::NODE_ENV=${nodeEnv}`,
   );
-  const fileLiteral = t.stringLiteral(moduleIdentity);
-  const directoryLiteral = t.stringLiteral(path.posix.dirname(moduleIdentity));
+  const usesFilename =
+    context.linkModulePaths && usesUnboundGlobal(programPath, "__filename");
+  const usesDirname =
+    context.linkModulePaths && usesUnboundGlobal(programPath, "__dirname");
+  const fileReference = usesFilename
+    ? createModulePathReference(context, "module-filename")
+    : null;
+  const directoryReference = usesDirname
+    ? createModulePathReference(context, "module-dirname")
+    : null;
   const moduleExports = () =>
     t.memberExpression(t.cloneNode(moduleId), t.identifier("exports"));
   const cacheCall = (method, args) =>
@@ -1379,8 +1230,16 @@ function createCompatibilityWrapper(programPath, context) {
       t.cloneNode(exportsId),
       t.cloneNode(requireId),
       t.cloneNode(processId),
-      t.cloneNode(fileLiteral),
-      t.cloneNode(directoryLiteral),
+      fileReference
+        ? t.identifier(fileReference.symbol)
+        : context.linkModulePaths
+          ? t.unaryExpression("void", t.numericLiteral(0))
+          : t.stringLiteral(moduleIdentity),
+      directoryReference
+        ? t.identifier(directoryReference.symbol)
+        : context.linkModulePaths
+          ? t.unaryExpression("void", t.numericLiteral(0))
+          : t.stringLiteral(path.posix.dirname(moduleIdentity)),
     ],
   );
 
@@ -1480,6 +1339,42 @@ function createCompatibilityWrapper(programPath, context) {
     );
   }
   return body;
+}
+
+function usesUnboundGlobal(programPath, name) {
+  let used = false;
+  programPath.traverse({
+    ReferencedIdentifier(identifierPath) {
+      if (
+        identifierPath.node.name === name &&
+        !identifierPath.scope.hasBinding(name)
+      ) {
+        used = true;
+        identifierPath.stop();
+      }
+    },
+  });
+  return used;
+}
+
+function createModulePathReference(context, kind) {
+  const ownerId = context.moduleIdentity;
+  const digest = crypto
+    .createHash("sha1")
+    .update(`${ownerId}\0${kind}`)
+    .digest("hex");
+  const short = BigInt(`0x${digest}`).toString(36).slice(0, 10);
+  const suffix = kind.slice("module-".length).replaceAll("-", "_");
+  const reference = {
+    id: `${ownerId}::${kind}`,
+    kind,
+    symbol: `__bundler_${short}_${suffix}`,
+    ownerId,
+  };
+  if (!context.linkReferences.some((item) => item.id === reference.id)) {
+    context.linkReferences.push(reference);
+  }
+  return reference;
 }
 
 function createConditionalWrapper(programPath, context) {
@@ -1584,7 +1479,7 @@ function createConditionalWrapper(programPath, context) {
   return [...imports, ...exports, ...defaultBody];
 }
 
-function resolveCjsDependency({ filePath, request }) {
+function resolveCjsDependency({ request }) {
   if (isNodeBuiltin(request)) {
     return {
       kind: "builtin",
@@ -1592,7 +1487,7 @@ function resolveCjsDependency({ filePath, request }) {
     };
   }
 
-  return { kind: "cjs", filePath: createRequire(filePath).resolve(request) };
+  return { kind: "cjs", request };
 }
 
 function encodeCjsDependencySpecifier(context, request) {

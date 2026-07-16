@@ -1,6 +1,6 @@
 import $ from "../internals/export";
 import uncurryThis from "../internals/function-uncurry-this";
-import { keys as _keys, toKey as _toKey } from "../internals/reflect-metadata";
+import ReflectMetadataModule from "../internals/reflect-metadata";
 import anObject from "../internals/an-object";
 import getPrototypeOf from "../internals/object-get-prototype-of";
 import $arrayUniqueBy from "../internals/array-unique-by";
@@ -8,8 +8,8 @@ import $arrayUniqueBy from "../internals/array-unique-by";
 
 var arrayUniqueBy = uncurryThis($arrayUniqueBy);
 var concat = uncurryThis([].concat);
-var ordinaryOwnMetadataKeys = _keys;
-var toMetadataKey = _toKey;
+var ordinaryOwnMetadataKeys = ReflectMetadataModule.keys;
+var toMetadataKey = ReflectMetadataModule.toKey;
 var ordinaryMetadataKeys = function (O, P) {
   var oKeys = ordinaryOwnMetadataKeys(O, P);
   var parent = getPrototypeOf(O);

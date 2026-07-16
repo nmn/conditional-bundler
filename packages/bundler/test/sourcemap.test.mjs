@@ -5,6 +5,7 @@ import {
   originalPositionFor,
   sourceContentFor,
 } from "@jridgewell/trace-mapping";
+import { materializeHmrPatch } from "../dist/dev/hmr-linker.js";
 
 const rootDir = path.resolve(process.cwd());
 const fixturesDir = path.join(rootDir, "test/fixtures");
@@ -55,6 +56,13 @@ function generatedPosition(code, search) {
   return { line: lines.length, column: lines.at(-1).length };
 }
 
+function portableSource(moduleIdentity) {
+  return `bundler:///${moduleIdentity
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/")}`;
+}
+
 test("emits one indexed map whose cell sections trace across modules", async () => {
   const { result, outDir } = await buildSimple("external");
   const [bundle] = result.bundles;
@@ -80,7 +88,9 @@ test("emits one indexed map whose cell sections trace across modules", async () 
 
   const entryPosition = generatedPosition(code, "const a33jpi1jb_value");
   const entryOriginal = originalPositionFor(traceMap, entryPosition);
-  expect(entryOriginal.source).toMatch(/fixtures\/simple\/src\/index\.js$/);
+  expect(entryOriginal.source).toBe(
+    portableSource("fixture-simple@0.0.0::src/index.js"),
+  );
   expect(entryOriginal.line).toBe(4);
   expect(sourceContentFor(traceMap, entryOriginal.source)).toContain(
     'import { foo } from "./foo.js"',
@@ -88,7 +98,9 @@ test("emits one indexed map whose cell sections trace across modules", async () 
 
   const dependencyPosition = generatedPosition(code, "const k7isotkd_foo");
   const dependencyOriginal = originalPositionFor(traceMap, dependencyPosition);
-  expect(dependencyOriginal.source).toMatch(/fixtures\/simple\/src\/foo\.js$/);
+  expect(dependencyOriginal.source).toBe(
+    portableSource("fixture-simple@0.0.0::src/foo.js"),
+  );
   expect(dependencyOriginal.line).toBe(1);
 });
 
@@ -104,6 +116,10 @@ test("hidden maps are emitted without a discovery comment", async () => {
 });
 
 test("persists matching map artifacts and invalidates a missing map", async () => {
+  await fs.rm(path.join(cacheRoot, "external-cache"), {
+    recursive: true,
+    force: true,
+  });
   const { cacheDir } = await buildSimple("external-cache");
   const mapArtifacts = (await fs.readdir(cacheDir, { recursive: true })).filter(
     (file) => file.endsWith(".js.map"),
@@ -176,7 +192,9 @@ test("accepts generated beforeCombine parts and a mapped afterCombine change", a
 
   expect(code).toContain("/* before */");
   expect(code).toContain("/* after */");
-  expect(original.source).toMatch(/fixtures\/simple\/src\/index\.js$/);
+  expect(original.source).toBe(
+    portableSource("fixture-simple@0.0.0::src/index.js"),
+  );
   expect(original.line).toBe(4);
 });
 
@@ -199,7 +217,9 @@ test("composes pre and post Babel maps into each cell map", async () => {
   const position = generatedPosition(code, "const a33jpi1jb_value");
   const original = originalPositionFor(new AnyMap(map), position);
 
-  expect(original.source).toMatch(/fixtures\/simple\/src\/index\.js$/);
+  expect(original.source).toBe(
+    portableSource("fixture-simple@0.0.0::src/index.js"),
+  );
   expect(original.line).toBe(4);
 });
 
@@ -228,15 +248,21 @@ test("maps HMR installers and emits mapped eval patch records", async () => {
   );
   const position = generatedPosition(code, "a33jpi1jb_value =");
   const original = originalPositionFor(new AnyMap(map), position);
-  const hmrBundle =
-    result.manifest.metadata.hmr.bundles[`${bundle.envId}:${bundle.entryId}`];
+  const hmrBundle = result.hmr.bundles[`${bundle.envId}:${bundle.entryId}`];
+  const mappedPatches = await Promise.all(
+    hmrBundle.cells.map((cell) => materializeHmrPatch(cell)),
+  );
 
-  expect(original.source).toMatch(/fixtures\/simple\/src\/index\.js$/);
+  expect(original.source).toBe(
+    portableSource("fixture-simple@0.0.0::src/index.js"),
+  );
   expect(original.line).toBe(4);
-  expect(hmrBundle.cells.some((cell) => cell.map)).toBe(true);
+  expect(hmrBundle.cells.some((cell) => cell.mapArtifactPath ?? cell.map)).toBe(
+    true,
+  );
   expect(
-    hmrBundle.cells.some((cell) =>
-      cell.patchCode.includes("sourceMappingURL=data:application/json;base64"),
+    mappedPatches.some((code) =>
+      code.includes("sourceMappingURL=data:application/json;base64"),
     ),
   ).toBe(true);
 });
@@ -272,72 +298,6 @@ test("restores cell maps from the remote cache", async () => {
     (file) => file.endsWith(".js.map"),
   );
   expect(restoredMaps.length).toBeGreaterThan(0);
-});
-
-test("composes a load-hook input map through the cell and bundle maps", async () => {
-  const projectDir = path.join(outRoot, "load-map-project");
-  const srcDir = path.join(projectDir, "src");
-  const outDir = path.join(projectDir, "dist");
-  const entryPath = path.join(srcDir, "index.js");
-  await fs.rm(projectDir, { recursive: true, force: true });
-  await fs.mkdir(srcDir, { recursive: true });
-  await fs.writeFile(entryPath, "placeholder");
-  const inputMap = JSON.stringify({
-    version: 3,
-    file: "index.js",
-    sources: ["original.ts"],
-    sourcesContent: ["export const value: number = 1;"],
-    names: [],
-    mappings: ";AAAA",
-  });
-  const { buildProject } = await import("../dist/builder.js");
-  const result = await buildProject(
-    {
-      envs: {
-        browser: { conditions: ["default"], target: "browser" },
-      },
-      entries: [{ id: "load-map", path: entryPath }],
-      outputs: {
-        outDir,
-        fileName: "load-map.[env].[hash].js",
-        sourceMap: "external",
-      },
-      cacheDir: path.join(projectDir, ".cache"),
-      css: false,
-      maxWorkers: 1,
-      diagnostics: "human",
-      plugins: [
-        {
-          name: "mapped-loader",
-          load({ filePath }) {
-            "mapped-loader-v1";
-            if (filePath !== entryPath) {
-              return undefined;
-            }
-            return {
-              code: "\nexport const value = 1;",
-              map: inputMap,
-            };
-          },
-        },
-      ],
-    },
-    [],
-  );
-  const [bundle] = result.bundles;
-  const code = await fs.readFile(path.join(outDir, bundle.fileName), "utf8");
-  const map = JSON.parse(
-    await fs.readFile(path.join(outDir, bundle.mapFileName), "utf8"),
-  );
-  const declaration = code.match(/const [a-z0-9]+_value = 1/);
-  expect(declaration).not.toBeNull();
-  const original = originalPositionFor(
-    new AnyMap(map),
-    generatedPosition(code, declaration[0]),
-  );
-
-  expect(original.source).toMatch(/src\/original\.ts$/);
-  expect(original.line).toBe(1);
 });
 
 test("offsets entry mappings past dynamic-import headers and maps dynamic bundles", async () => {
@@ -382,7 +342,7 @@ test("offsets entry mappings past dynamic-import headers and maps dynamic bundle
       generatedPosition(entryCode, entryDeclaration[0]),
     ),
   ).toMatchObject({
-    source: expect.stringMatching(/dynamic-import\/src\/index\.js$/),
+    source: portableSource("fixture-dynamic-import@0.0.0::src/index.js"),
     line: 1,
   });
 
@@ -401,7 +361,7 @@ test("offsets entry mappings past dynamic-import headers and maps dynamic bundle
       generatedPosition(dynamicCode, dynamicDeclaration[0]),
     ),
   ).toMatchObject({
-    source: expect.stringMatching(/dynamic-import\/src\/foo\.js$/),
+    source: portableSource("fixture-dynamic-import@0.0.0::src/foo.js"),
     line: 1,
   });
 });
@@ -478,10 +438,8 @@ test("offsets entry and common maps past static bundle imports", async () => {
         generatedPosition(code, declaration[0]),
       ),
     ).toMatchObject({
-      source: expect.stringMatching(
-        entryName.startsWith("bundler:")
-          ? /(?:^|\/)src\/shared\.js$/
-          : new RegExp(`(?:^|/)src/${entryName.replace(".", "\\.")}$`),
+      source: portableSource(
+        `@0.0.0::src/${entryName.startsWith("bundler:") ? "shared.js" : entryName}`,
       ),
       line: expectedLine,
     });

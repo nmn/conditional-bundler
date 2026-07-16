@@ -3,19 +3,59 @@ import path from "node:path";
 const pkgRoot = "/fixture";
 const defaultFilePath = path.posix.join(pkgRoot, "src/index.js");
 
+const fileTarget = (relativePath) => ({
+  kind: "file",
+  moduleId: `fixture@0.0.0::${relativePath}`,
+  canonicalPath: `fixture@0.0.0::${relativePath}`,
+});
+
 async function transform(code, filePath = defaultFilePath, root = pkgRoot) {
-  const { transformWithCore } = await import("../dist/transform/core.js");
+  const { scanImportRequests, transformWithCore } =
+    await import("../dist/transform/core.js");
+  const moduleIdentity = `fixture@0.0.0::${path.posix.relative(root, filePath)}`;
+  const input = {
+    code,
+    moduleIdentity,
+    canonicalPath: moduleIdentity,
+    realPath: filePath,
+    pkg: { name: "fixture", version: "0.0.0", root },
+    syntax: { jsx: false, ts: false },
+    envs: ["browser"],
+  };
   return transformWithCore(
     {
-      code,
-      realPath: filePath,
-      pkg: { name: "fixture", version: "0.0.0", root },
-      syntax: { jsx: false, ts: false },
-      envs: ["browser"],
+      ...input,
+      resolvedImports: resolveRequests(
+        scanImportRequests(input),
+        filePath,
+        root,
+      ),
     },
     {
       importAttrAllow: ["json"],
     },
+  );
+}
+
+function resolveRequests(requests, filePath, root) {
+  return Object.fromEntries(
+    requests.map(({ key, request }) => {
+      const relative = request.startsWith(".")
+        ? path.posix.relative(
+            root,
+            path.posix.resolve(path.posix.dirname(filePath), request),
+          )
+        : request;
+      const canonicalPath = `fixture@0.0.0::${relative}`;
+      return [
+        key,
+        {
+          target: { kind: "file", moduleId: canonicalPath, canonicalPath },
+          type: "javascript",
+          intent: "module",
+        },
+      ];
+    }),
   );
 }
 
@@ -52,12 +92,10 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           condition: "COND_A",
           elseRequest: "./fallback.js",
           elseSource: "src/fallback.js",
-          elseModuleId: "fixture@0.0.0::src/fallback.js",
-          elseExternal: false,
+          elseTarget: fileTarget("src/fallback.js"),
           request: "./feature.js",
           source: "src/feature.js",
-          moduleId: "fixture@0.0.0::src/feature.js",
-          external: false,
+          target: fileTarget("src/feature.js"),
         }),
       ],
       discoveredEntrypoints: ["src/lazy.js"],
@@ -66,8 +104,7 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           hashKey: "__IMPORT_a38syydlx",
           request: "./lazy.js",
           source: "src/lazy.js",
-          moduleId: "fixture@0.0.0::src/lazy.js",
-          external: false,
+          target: fileTarget("src/lazy.js"),
         }),
       ],
       exportRanges: [],
@@ -94,8 +131,7 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           kind: "value",
           request: "./dep.js",
           source: "src/dep.js",
-          moduleId: "fixture@0.0.0::src/dep.js",
-          external: false,
+          target: fileTarget("src/dep.js"),
           specifiers: [
             {
               imported: "default",
@@ -118,8 +154,7 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           namespaceUsage: "dynamic",
           request: "./ns.js",
           source: "src/ns.js",
-          moduleId: "fixture@0.0.0::src/ns.js",
-          external: false,
+          target: fileTarget("src/ns.js"),
           specifiers: [
             {
               imported: "*",
@@ -136,8 +171,7 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           kind: "value",
           request: "./feature.js",
           source: "src/feature.js",
-          moduleId: "fixture@0.0.0::src/feature.js",
-          external: false,
+          target: fileTarget("src/feature.js"),
           specifiers: [
             {
               imported: "pick",
@@ -153,8 +187,7 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           imported: "helper",
           request: "./helpers.js",
           source: "src/helpers.js",
-          moduleId: "fixture@0.0.0::src/helpers.js",
-          external: false,
+          target: fileTarget("src/helpers.js"),
           sourceOrder: 183,
         }),
       ],

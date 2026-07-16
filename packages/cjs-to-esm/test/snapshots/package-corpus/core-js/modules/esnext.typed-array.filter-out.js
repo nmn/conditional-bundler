@@ -1,11 +1,11 @@
-import { aTypedArray as _aTypedArray, exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
-import { filterReject as _filterReject } from "../internals/array-iteration";
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
+import _cjs_import from "../internals/array-iteration";
 import fromSameTypeAndList from "../internals/typed-array-from-same-type-and-list";
 // TODO: Remove from `core-js@4`
 
-var $filterReject = _filterReject;
-var aTypedArray = _aTypedArray;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+var $filterReject = _cjs_import.filterReject;
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
 
 // `%TypedArray%.prototype.filterOut` method
 // https://github.com/tc39/proposal-array-filtering

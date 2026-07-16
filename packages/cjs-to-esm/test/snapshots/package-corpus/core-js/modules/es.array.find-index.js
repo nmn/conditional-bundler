@@ -1,7 +1,7 @@
 import $ from "../internals/export";
-import { findIndex as _findIndex } from "../internals/array-iteration";
+import _cjs_import from "../internals/array-iteration";
 import addToUnscopables from "../internals/add-to-unscopables";
-var $findIndex = _findIndex;
+var $findIndex = _cjs_import.findIndex;
 var FIND_INDEX = 'findIndex';
 var SKIPS_HOLES = true;
 

@@ -1,14 +1,14 @@
-import { EventRetryConstants as _EventRetryConstants } from "./EventRetryConstants";
-import { EventSender as _EventSender } from "./EventSender";
-import { FlushInterval as _FlushInterval } from "./FlushInterval";
-import { FlushTypeValues as _FlushTypeValues } from "./FlushTypes";
-import { _DJB2 as _DJB } from "./Hashing";
-import { Log as _Log } from "./Log";
-import { RETRYABLE_CODES as _RETRYABLE_CODES } from "./NetworkCore";
-import { _isServerEnv } from "./SafeJs";
-import { StatsigSession as _StatsigSession } from "./SessionID";
-import { LoggingEnabledOption as _LoggingEnabledOption } from "./StatsigOptionsCommon";
-import { Storage as _Storage, _setObjectInStorage, _getObjectFromStorage } from "./StorageProvider";
+import EventRetryConstants_1 from "./EventRetryConstants";
+import EventSender_1 from "./EventSender";
+import FlushInterval_1 from "./FlushInterval";
+import FlushTypes_1 from "./FlushTypes";
+import Hashing_1 from "./Hashing";
+import Log_1 from "./Log";
+import NetworkCore_1 from "./NetworkCore";
+import SafeJs_1 from "./SafeJs";
+import SessionID_1 from "./SessionID";
+import StatsigOptionsCommon_1 from "./StatsigOptionsCommon";
+import StorageProvider_1 from "./StorageProvider";
 var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function (resolve) {
@@ -48,14 +48,14 @@ export class FlushCoordinator {
     this._creationTime = Date.now();
     this._isShuttingDown = false;
     this._storageKey = null;
-    this._flushInterval = new _FlushInterval();
+    this._flushInterval = new FlushInterval_1.FlushInterval();
     this._batchQueue = batchQueue;
     this._pendingEvents = pendingEvents;
     this._onPrepareFlush = onPrepareFlush;
     this._errorBoundary = errorBoundary;
     this._sdkKey = sdkKey;
     this._loggingEnabled = loggingEnabled;
-    this._eventSender = new _EventSender(sdkKey, network, emitter, logEventUrlConfig, options);
+    this._eventSender = new EventSender_1.EventSender(sdkKey, network, emitter, logEventUrlConfig, options);
   }
   setLoggingEnabled(loggingEnabled) {
     this._loggingEnabled = loggingEnabled;
@@ -83,7 +83,7 @@ export class FlushCoordinator {
       if (this._currentFlushPromise) {
         yield this._currentFlushPromise;
       }
-      this._currentFlushPromise = this._executeFlush(_FlushTypeValues.Manual).finally(() => {
+      this._currentFlushPromise = this._executeFlush(FlushTypes_1.FlushTypeValues.Manual).finally(() => {
         this._currentFlushPromise = null;
         this._scheduleNextFlush();
       });
@@ -97,8 +97,8 @@ export class FlushCoordinator {
       if (this._currentFlushPromise) {
         yield this._currentFlushPromise;
       }
-      this._currentFlushPromise = this._executeFlush(_FlushTypeValues.Shutdown).catch(error => {
-        _Log.error(`Error during shutdown flush: ${error}`);
+      this._currentFlushPromise = this._executeFlush(FlushTypes_1.FlushTypeValues.Shutdown).catch(error => {
+        Log_1.Log.error(`Error during shutdown flush: ${error}`);
       }).finally(() => {
         this._currentFlushPromise = null;
       });
@@ -126,15 +126,15 @@ export class FlushCoordinator {
     if (this._hasRunQuickFlush) {
       return;
     }
-    if (Date.now() - this._creationTime > _EventRetryConstants.QUICK_FLUSH_WINDOW_MS) {
+    if (Date.now() - this._creationTime > EventRetryConstants_1.EventRetryConstants.QUICK_FLUSH_WINDOW_MS) {
       return;
     }
     this._hasRunQuickFlush = true;
     setTimeout(() => {
       this.processManualFlush().catch(error => {
-        _Log.warn('Quick flush failed:', error);
+        Log_1.Log.warn('Quick flush failed:', error);
       });
-    }, _EventRetryConstants.QUICK_FLUSH_WINDOW_MS);
+    }, EventRetryConstants_1.EventRetryConstants.QUICK_FLUSH_WINDOW_MS);
   }
   _attemptScheduledFlush() {
     if (this._currentFlushPromise) {
@@ -150,14 +150,14 @@ export class FlushCoordinator {
     this._flushInterval.markFlushAttempt();
     let flushType;
     if (shouldFlushBySize) {
-      flushType = _FlushTypeValues.ScheduledFullBatch;
+      flushType = FlushTypes_1.FlushTypeValues.ScheduledFullBatch;
     } else {
-      flushType = _FlushTypeValues.ScheduledMaxTime;
+      flushType = FlushTypes_1.FlushTypeValues.ScheduledMaxTime;
     }
     this._currentFlushPromise = this._processNextBatch(flushType).then(() => {
       //This discards boolean result. Main goal here is to track completion
     }).catch(error => {
-      _Log.error('Error during scheduled flush:', error);
+      Log_1.Log.error('Error during scheduled flush:', error);
     }).finally(() => {
       this._currentFlushPromise = null;
       this._scheduleNextFlush();
@@ -171,7 +171,7 @@ export class FlushCoordinator {
       return;
     }
     this._currentFlushPromise = this._processLimitFlushInternal().catch(error => {
-      _Log.error(`Error during limit flush`, error);
+      Log_1.Log.error(`Error during limit flush`, error);
     }).finally(() => {
       this._currentFlushPromise = null;
       this._scheduleNextFlush();
@@ -179,12 +179,12 @@ export class FlushCoordinator {
   }
   _processLimitFlushInternal() {
     return __awaiter(this, void 0, void 0, function* () {
-      const success = yield this._processNextBatch(_FlushTypeValues.Limit);
+      const success = yield this._processNextBatch(FlushTypes_1.FlushTypeValues.Limit);
       if (!success) {
         return;
       }
       while (this._flushInterval.hasCompletelyRecoveredFromBackoff() && this.containsAtLeastOneFullBatch()) {
-        const success = yield this._processNextBatch(_FlushTypeValues.Limit);
+        const success = yield this._processNextBatch(FlushTypes_1.FlushTypeValues.Limit);
         if (!success) {
           break;
         }
@@ -199,13 +199,13 @@ export class FlushCoordinator {
     const cooldownDelay = Math.max(0, this._flushInterval.getTimeUntilNextFlush());
     this._cooldownTimer = setTimeout(() => {
       this._cooldownTimer = null;
-      _StatsigSession.checkForIdleSession(this._sdkKey);
+      SessionID_1.StatsigSession.checkForIdleSession(this._sdkKey);
       this._attemptScheduledFlush();
     }, cooldownDelay);
     const maxIntervalDelay = Math.max(0, this._flushInterval.getTimeTillMaxInterval());
     this._maxIntervalTimer = setTimeout(() => {
       this._maxIntervalTimer = null;
-      _StatsigSession.checkForIdleSession(this._sdkKey);
+      SessionID_1.StatsigSession.checkForIdleSession(this._sdkKey);
       this._attemptScheduledFlush();
     }, maxIntervalDelay);
   }
@@ -226,13 +226,13 @@ export class FlushCoordinator {
     }
     this._cooldownTimer = setTimeout(() => {
       this._cooldownTimer = null;
-      _StatsigSession.checkForIdleSession(this._sdkKey);
+      SessionID_1.StatsigSession.checkForIdleSession(this._sdkKey);
       this._attemptScheduledFlush();
-    }, _EventRetryConstants.TICK_INTERVAL_MS);
+    }, EventRetryConstants_1.EventRetryConstants.TICK_INTERVAL_MS);
     const maxIntervalDelay = Math.max(0, this._flushInterval.getTimeTillMaxInterval());
     this._maxIntervalTimer = setTimeout(() => {
       this._maxIntervalTimer = null;
-      _StatsigSession.checkForIdleSession(this._sdkKey);
+      SessionID_1.StatsigSession.checkForIdleSession(this._sdkKey);
       this._attemptScheduledFlush();
     }, maxIntervalDelay);
   }
@@ -248,7 +248,7 @@ export class FlushCoordinator {
   }
   _processOneBatch(batch, flushType) {
     return __awaiter(this, void 0, void 0, function* () {
-      if (this._loggingEnabled !== _LoggingEnabledOption.always && (0, _isServerEnv)()) {
+      if (this._loggingEnabled !== StatsigOptionsCommon_1.LoggingEnabledOption.always && (0, SafeJs_1._isServerEnv)()) {
         this._flushInterval.adjustForSuccess();
         return true;
       }
@@ -266,11 +266,11 @@ export class FlushCoordinator {
     this._onPrepareFlush();
     const droppedCount = this.convertPendingEventsToBatches();
     if (droppedCount > 0) {
-      _Log.warn(`Dropped ${droppedCount} events`);
+      Log_1.Log.warn(`Dropped ${droppedCount} events`);
       this._errorBoundary.logDroppedEvents(droppedCount, `Batch queue limit reached during batching`, {
         loggingInterval: this._flushInterval.getCurrentIntervalMs(),
         batchSize: this._batchQueue.batchSize(),
-        maxPendingBatches: _EventRetryConstants.MAX_PENDING_BATCHES,
+        maxPendingBatches: EventRetryConstants_1.EventRetryConstants.MAX_PENDING_BATCHES,
         flushType: flushType,
         retries: 'dropped before batching'
       });
@@ -287,7 +287,7 @@ export class FlushCoordinator {
     return this._batchQueue.createBatches(allEvents);
   }
   _isRetryableBatch(statusCode, failurePath) {
-    if (_RETRYABLE_CODES.has(statusCode)) {
+    if (NetworkCore_1.RETRYABLE_CODES.has(statusCode)) {
       return true;
     }
     if (statusCode === -1 && failurePath && RETRYABLE_NO_RESPONSE_FAILURE_PATHS.has(failurePath)) {
@@ -296,31 +296,31 @@ export class FlushCoordinator {
     return false;
   }
   _handleFailure(batch, flushType, statusCode, failurePath, failureErrorMessage, failureDiagnosticBucket, failureDiagnosticMetadata) {
-    if (flushType === _FlushTypeValues.Shutdown) {
-      _Log.warn(`${flushType} flush failed during shutdown. ` + `${batch.events.length} event(s) will be saved to storage for retry in next session.`);
+    if (flushType === FlushTypes_1.FlushTypeValues.Shutdown) {
+      Log_1.Log.warn(`${flushType} flush failed during shutdown. ` + `${batch.events.length} event(s) will be saved to storage for retry in next session.`);
       this._saveShutdownFailedEventsToStorage(batch.events);
       return;
     }
     if (!this._isRetryableBatch(statusCode, failurePath)) {
       const reason = `non-retryable error`;
-      _Log.warn(`${flushType} flush failed after ${batch.attempts} attempt(s). ` + `${batch.events.length} event(s) will be dropped. Non-retryable error: ${statusCode}`);
+      Log_1.Log.warn(`${flushType} flush failed after ${batch.attempts} attempt(s). ` + `${batch.events.length} event(s) will be dropped. Non-retryable error: ${statusCode}`);
       this._errorBoundary.logEventRequestFailure(batch.events.length, reason, flushType, statusCode, batch.attempts, failurePath, failureErrorMessage, failureDiagnosticBucket, failureDiagnosticMetadata);
       return;
     }
-    if (batch.attempts >= _EventRetryConstants.MAX_RETRY_ATTEMPTS) {
+    if (batch.attempts >= EventRetryConstants_1.EventRetryConstants.MAX_RETRY_ATTEMPTS) {
       const reason = `max retry attempts exceeded`;
-      _Log.warn(`${flushType} flush failed after ${batch.attempts} attempt(s). ` + `${batch.events.length} event(s) will be dropped.`);
+      Log_1.Log.warn(`${flushType} flush failed after ${batch.attempts} attempt(s). ` + `${batch.events.length} event(s) will be dropped.`);
       this._errorBoundary.logEventRequestFailure(batch.events.length, reason, flushType, statusCode, batch.attempts, failurePath, failureErrorMessage, failureDiagnosticBucket, failureDiagnosticMetadata);
       return;
     }
     batch.incrementAttempts();
     const droppedCount = this._batchQueue.requeueBatch(batch);
     if (droppedCount > 0) {
-      _Log.warn(`Failed to requeue batch : dropped ${droppedCount} events due to full queue`);
+      Log_1.Log.warn(`Failed to requeue batch : dropped ${droppedCount} events due to full queue`);
       this._errorBoundary.logDroppedEvents(droppedCount, `Batch queue limit reached during requeue`, {
         loggingInterval: this._flushInterval.getCurrentIntervalMs(),
         batchSize: this._batchQueue.batchSize(),
-        maxPendingBatches: _EventRetryConstants.MAX_PENDING_BATCHES,
+        maxPendingBatches: EventRetryConstants_1.EventRetryConstants.MAX_PENDING_BATCHES,
         flushType: flushType,
         retries: batch.attempts
       });
@@ -330,27 +330,27 @@ export class FlushCoordinator {
     return __awaiter(this, void 0, void 0, function* () {
       const storageKey = this._getStorageKey();
       try {
-        if (!_Storage.isReady()) {
-          yield _Storage.isReadyResolver();
+        if (!StorageProvider_1.Storage.isReady()) {
+          yield StorageProvider_1.Storage.isReadyResolver();
         }
         const events = this._getShutdownFailedEventsFromStorage(storageKey);
         if (events.length === 0) {
           return;
         }
-        _Log.debug(`Loading ${events.length} failed shutdown event(s) from storage for retry`);
-        _Storage.removeItem(storageKey);
+        Log_1.Log.debug(`Loading ${events.length} failed shutdown event(s) from storage for retry`);
+        StorageProvider_1.Storage.removeItem(storageKey);
         events.forEach(event => {
           this.addEvent(event);
         });
         yield this.processManualFlush();
       } catch (error) {
-        _Log.warn('Failed to load and retry failed shutdown events:', error);
+        Log_1.Log.warn('Failed to load and retry failed shutdown events:', error);
       }
     });
   }
   _getStorageKey() {
     if (!this._storageKey) {
-      this._storageKey = `statsig.failed_shutdown_events.${(0, _DJB)(this._sdkKey)}`;
+      this._storageKey = `statsig.failed_shutdown_events.${(0, Hashing_1._DJB2)(this._sdkKey)}`;
     }
     return this._storageKey;
   }
@@ -359,18 +359,18 @@ export class FlushCoordinator {
     try {
       const existingEvents = this._getShutdownFailedEventsFromStorage(storageKey);
       let allEvents = [...existingEvents, ...events];
-      if (allEvents.length > _EventRetryConstants.MAX_LOCAL_STORAGE) {
-        allEvents = allEvents.slice(-_EventRetryConstants.MAX_LOCAL_STORAGE);
+      if (allEvents.length > EventRetryConstants_1.EventRetryConstants.MAX_LOCAL_STORAGE) {
+        allEvents = allEvents.slice(-EventRetryConstants_1.EventRetryConstants.MAX_LOCAL_STORAGE);
       }
-      (0, _setObjectInStorage)(storageKey, allEvents);
-      _Log.debug(`Saved ${events.length} failed shutdown event(s) to storage (total stored: ${allEvents.length})`);
+      (0, StorageProvider_1._setObjectInStorage)(storageKey, allEvents);
+      Log_1.Log.debug(`Saved ${events.length} failed shutdown event(s) to storage (total stored: ${allEvents.length})`);
     } catch (error) {
-      _Log.warn('Unable to save failed shutdown events to storage:', error);
+      Log_1.Log.warn('Unable to save failed shutdown events to storage:', error);
     }
   }
   _getShutdownFailedEventsFromStorage(storageKey) {
     try {
-      const events = (0, _getObjectFromStorage)(storageKey);
+      const events = (0, StorageProvider_1._getObjectFromStorage)(storageKey);
       if (Array.isArray(events)) {
         return events;
       }

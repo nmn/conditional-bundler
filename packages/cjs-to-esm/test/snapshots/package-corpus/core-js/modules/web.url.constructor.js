@@ -12,20 +12,20 @@ import hasOwn from "../internals/has-own-property";
 import assign from "../internals/object-assign";
 import arrayFrom from "../internals/array-from";
 import arraySlice from "../internals/array-slice";
-import { codeAt as _codeAt } from "../internals/string-multibyte";
+import _cjs_import from "../internals/string-multibyte";
 import toASCII from "../internals/string-punycode-to-ascii";
 import $toString from "../internals/to-string";
 import setToStringTag from "../internals/set-to-string-tag";
 import validateArgumentsLength from "../internals/validate-arguments-length";
-import { URLSearchParams as _URLSearchParams, getState as _getState } from "../modules/web.url-search-params.constructor";
-import { set as _set, getterFor as _getterFor } from "../internals/internal-state";
+import URLSearchParamsModule from "../modules/web.url-search-params.constructor";
+import InternalStateModule from "../internals/internal-state";
 // TODO: in core-js@4, move /modules/ dependencies to public entries for better optimization by tools like `preset-env`
 
-var codeAt = _codeAt;
-var setInternalState = _set;
-var getInternalURLState = _getterFor('URL');
-var URLSearchParams = _URLSearchParams;
-var getInternalSearchParamsState = _getState;
+var codeAt = _cjs_import.codeAt;
+var setInternalState = InternalStateModule.set;
+var getInternalURLState = InternalStateModule.getterFor('URL');
+var URLSearchParams = URLSearchParamsModule.URLSearchParams;
+var getInternalSearchParamsState = URLSearchParamsModule.getState;
 var NativeURL = globalThis.URL;
 var TypeError = globalThis.TypeError;
 var encodeURIComponent = globalThis.encodeURIComponent;

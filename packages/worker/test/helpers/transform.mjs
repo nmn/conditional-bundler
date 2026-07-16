@@ -18,17 +18,27 @@ export async function transform(
     dev,
   } = {},
 ) {
-  const { transformWithCore } = await import("../../dist/transform/core.js");
+  const { scanImportRequests, transformWithCore } =
+    await import("../../dist/transform/core.js");
+  const moduleIdentity = canonicalIdentity(filePath, root);
+  const input = {
+    code,
+    id,
+    moduleIdentity,
+    canonicalPath: moduleIdentity,
+    realPath: filePath,
+    pkg: { name: pkgName, version: pkgVersion, root },
+    syntax,
+    envs: ["browser"],
+    dev,
+  };
   return transformWithCore(
     {
-      code,
-      id,
-      realPath: filePath,
-      pkg: { name: pkgName, version: pkgVersion, root },
-      syntax,
-      envs: ["browser"],
-      resolvedImports,
-      dev,
+      ...input,
+      resolvedImports: {
+        ...defaultResolvedImports(scanImportRequests(input), filePath, root),
+        ...resolvedImports,
+      },
     },
     {
       importAttrAllow: ["json"],
@@ -39,6 +49,32 @@ export async function transform(
           }
         : undefined,
     },
+  );
+}
+
+function canonicalIdentity(filePath, root) {
+  return `${pkgName}@${pkgVersion}::${path.posix.relative(root, filePath)}`;
+}
+
+function defaultResolvedImports(requests, filePath, root) {
+  return Object.fromEntries(
+    requests.map(({ key, request }) => {
+      const relativePath = request.startsWith(".")
+        ? path.posix.relative(
+            root,
+            path.posix.resolve(path.posix.dirname(filePath), request),
+          )
+        : request;
+      const canonicalPath = `${pkgName}@${pkgVersion}::${relativePath}`;
+      return [
+        key,
+        {
+          target: { kind: "file", moduleId: canonicalPath, canonicalPath },
+          type: "javascript",
+          intent: "module",
+        },
+      ];
+    }),
   );
 }
 

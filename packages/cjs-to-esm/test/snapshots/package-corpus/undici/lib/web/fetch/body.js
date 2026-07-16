@@ -1,21 +1,47 @@
-import { isDisturbed as _isDisturbed } from "../../core/util";
-import { ReadableStreamFrom as _ReadableStreamFrom, readableStreamClose as _readableStreamClose, fullyReadBody as _fullyReadBody, extractMimeType as _extractMimeType } from "./util";
-import { FormData as _FormData, setFormDataState as _setFormDataState, getFormDataBoundary as _getFormDataBoundary } from "./formdata";
-import { webidl as _webidl } from "../webidl";
+import util from "../../core/util";
+import _cjs_import from "./util";
+import _cjs_import2 from "./formdata";
+import _cjs_import3 from "../webidl";
 import * as assert from "node:assert";
-import * as _cjs_import from "node:stream";
-import * as _cjs_import2 from "node:util/types";
-import { serializeAMimeType as _serializeAMimeType } from "./data-url";
-import { multipartFormDataParser as _multipartFormDataParser } from "./formdata-parser";
-import { parseJSONFromBytes as _parseJSONFromBytes } from "../infra";
-import { utf8DecodeBytes as _utf8DecodeBytes } from "../../encoding";
+import * as _cjs_import4 from "node:stream";
+import * as _cjs_import5 from "node:util/types";
+import _cjs_import6 from "./data-url";
+import _cjs_import7 from "./formdata-parser";
+import _cjs_import8 from "../infra";
+import _cjs_import9 from "../../encoding";
+const {
+  ReadableStreamFrom,
+  readableStreamClose,
+  fullyReadBody,
+  extractMimeType
+} = _cjs_import;
+const {
+  FormData,
+  setFormDataState,
+  getFormDataBoundary
+} = _cjs_import2;
+const {
+  webidl
+} = _cjs_import3;
 const {
   isErrored,
   isDisturbed
-} = _cjs_import;
+} = _cjs_import4;
 const {
   isUint8Array
-} = _cjs_import2;
+} = _cjs_import5;
+const {
+  serializeAMimeType
+} = _cjs_import6;
+const {
+  multipartFormDataParser
+} = _cjs_import7;
+const {
+  parseJSONFromBytes
+} = _cjs_import8;
+const {
+  utf8DecodeBytes
+} = _cjs_import9;
 const textEncoder = new TextEncoder();
 function noop() {}
 const streamRegistry = new FinalizationRegistry(weakRef => {
@@ -40,9 +66,9 @@ function extractBody(object, keepalive = false) {
   let controller = null;
 
   // 2. If object is a ReadableStream object, then set stream to object.
-  if (_webidl.is.ReadableStream(object)) {
+  if (webidl.is.ReadableStream(object)) {
     stream = object;
-  } else if (_webidl.is.Blob(object)) {
+  } else if (webidl.is.Blob(object)) {
     // 3. Otherwise, if object is a Blob object, set stream to the
     //    result of running object’s get stream.
     stream = object.stream();
@@ -60,7 +86,7 @@ function extractBody(object, keepalive = false) {
   }
 
   // 5. Assert: stream is a ReadableStream object.
-  assert(_webidl.is.ReadableStream(stream));
+  assert(webidl.is.ReadableStream(stream));
 
   // 6. Let action be null.
   let action = null;
@@ -82,7 +108,7 @@ function extractBody(object, keepalive = false) {
 
     // Set type to `text/plain;charset=UTF-8`.
     type = 'text/plain;charset=UTF-8';
-  } else if (_webidl.is.URLSearchParams(object)) {
+  } else if (webidl.is.URLSearchParams(object)) {
     // URLSearchParams
 
     // spec says to run application/x-www-form-urlencoded on body.list
@@ -95,11 +121,11 @@ function extractBody(object, keepalive = false) {
 
     // Set type to `application/x-www-form-urlencoded;charset=UTF-8`.
     type = 'application/x-www-form-urlencoded;charset=UTF-8';
-  } else if (_webidl.is.BufferSource(object)) {
+  } else if (webidl.is.BufferSource(object)) {
     // Set source to a copy of the bytes held by object.
-    source = _webidl.util.getCopyOfBytesHeldByBufferSource(object);
-  } else if (_webidl.is.FormData(object)) {
-    const boundary = _getFormDataBoundary(object);
+    source = webidl.util.getCopyOfBytesHeldByBufferSource(object);
+  } else if (webidl.is.FormData(object)) {
+    const boundary = getFormDataBoundary(object);
     const prefix = `--${boundary}\r\nContent-Disposition: form-data`;
 
     /*! formdata-polyfill. MIT License. Jimmy Wärting <https://jimmy.warting.se/opensource> */
@@ -158,7 +184,7 @@ function extractBody(object, keepalive = false) {
     // followed by the multipart/form-data boundary string generated
     // by the multipart/form-data encoding algorithm.
     type = `multipart/form-data; boundary=${boundary}`;
-  } else if (_webidl.is.Blob(object)) {
+  } else if (webidl.is.Blob(object)) {
     // Blob
 
     // Set source to object.
@@ -179,10 +205,10 @@ function extractBody(object, keepalive = false) {
     }
 
     // If object is disturbed or locked, then throw a TypeError.
-    if (_isDisturbed(object) || object.locked) {
+    if (util.isDisturbed(object) || object.locked) {
       throw new TypeError('Response body object should not be disturbed or locked');
     }
-    stream = _webidl.is.ReadableStream(object) ? object : _ReadableStreamFrom(object);
+    stream = webidl.is.ReadableStream(object) ? object : ReadableStreamFrom(object);
   }
 
   // 11. If source is a byte sequence, then set action to a
@@ -216,7 +242,7 @@ function extractBody(object, keepalive = false) {
       }
 
       // 3. When running action is done, close stream.
-      queueMicrotask(() => _readableStreamClose(controller));
+      queueMicrotask(() => readableStreamClose(controller));
     })();
   }
 
@@ -253,9 +279,9 @@ function safelyExtractBody(object, keepalive = false) {
   // a byte sequence or BodyInit object object, run these steps:
 
   // 1. If object is a ReadableStream object, then:
-  if (_webidl.is.ReadableStream(object)) {
+  if (webidl.is.ReadableStream(object)) {
     // Assert: object is neither disturbed nor locked.
-    assert(!_isDisturbed(object), 'The body has already been consumed.');
+    assert(!util.isDisturbed(object), 'The body has already been consumed.');
     assert(!object.locked, 'The stream is locked.');
   }
 
@@ -296,7 +322,7 @@ function bodyMixinMethods(instance, getInternalState) {
         if (mimeType === null) {
           mimeType = '';
         } else if (mimeType) {
-          mimeType = _serializeAMimeType(mimeType);
+          mimeType = serializeAMimeType(mimeType);
         }
 
         // Return a Blob whose contents are bytes and type attribute
@@ -318,12 +344,12 @@ function bodyMixinMethods(instance, getInternalState) {
     text() {
       // The text() method steps are to return the result of running
       // consume body with this and UTF-8 decode.
-      return consumeBody(this, _utf8DecodeBytes, instance, getInternalState);
+      return consumeBody(this, utf8DecodeBytes, instance, getInternalState);
     },
     json() {
       // The json() method steps are to return the result of running
       // consume body with this and parse JSON from bytes.
-      return consumeBody(this, _parseJSONFromBytes, instance, getInternalState);
+      return consumeBody(this, parseJSONFromBytes, instance, getInternalState);
     },
     formData() {
       // The formData() method steps are to return the result of running
@@ -340,12 +366,12 @@ function bodyMixinMethods(instance, getInternalState) {
               {
                 // 1. ... [long step]
                 // 2. If that fails for some reason, then throw a TypeError.
-                const parsed = _multipartFormDataParser(value, mimeType);
+                const parsed = multipartFormDataParser(value, mimeType);
 
                 // 3. Return a new FormData object, appending each entry,
                 //    resulting from the parsing operation, to its entry list.
-                const fd = new _FormData();
-                _setFormDataState(fd, parsed);
+                const fd = new FormData();
+                setFormDataState(fd, parsed);
                 return fd;
               }
             case 'application/x-www-form-urlencoded':
@@ -356,7 +382,7 @@ function bodyMixinMethods(instance, getInternalState) {
                 // 2. If entries is failure, then throw a TypeError.
 
                 // 3. Return a new FormData object whose entry list is entries.
-                const fd = new _FormData();
+                const fd = new FormData();
                 for (const [name, value] of entries) {
                   fd.append(name, value);
                 }
@@ -435,7 +461,7 @@ function mixinBody(prototype, getInternalState) {
  */
 function consumeBody(object, convertBytesToJSValue, instance, getInternalState) {
   try {
-    _webidl.brandCheck(object, instance);
+    webidl.brandCheck(object, instance);
   } catch (e) {
     return Promise.reject(e);
   }
@@ -474,7 +500,7 @@ function consumeBody(object, convertBytesToJSValue, instance, getInternalState) 
 
   // 6. Otherwise, fully read object’s body given successSteps,
   //    errorSteps, and object’s relevant global object.
-  _fullyReadBody(object.body, successSteps, errorSteps);
+  fullyReadBody(object.body, successSteps, errorSteps);
 
   // 7. Return promise.
   return promise.promise;
@@ -490,7 +516,7 @@ function bodyUnusable(object) {
   // An object including the Body interface mixin is
   // said to be unusable if its body is non-null and
   // its body’s stream is disturbed or locked.
-  return body != null && (body.stream.locked || _isDisturbed(body.stream));
+  return body != null && (body.stream.locked || util.isDisturbed(body.stream));
 }
 
 /**
@@ -505,7 +531,7 @@ function bodyMimeType(requestOrResponse) {
   const headers = requestOrResponse.headersList;
 
   // 4. Let mimeType be the result of extracting a MIME type from headers.
-  const mimeType = _extractMimeType(headers);
+  const mimeType = extractMimeType(headers);
 
   // 5. If mimeType is failure, then return null.
   if (mimeType === 'failure') {

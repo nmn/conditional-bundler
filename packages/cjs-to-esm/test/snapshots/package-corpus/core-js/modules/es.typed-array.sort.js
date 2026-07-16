@@ -3,13 +3,13 @@ import uncurryThis from "../internals/function-uncurry-this-clause";
 import fails from "../internals/fails";
 import aCallable from "../internals/a-callable";
 import internalSort from "../internals/array-sort";
-import { aTypedArray as _aTypedArray, exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
 import FF from "../internals/environment-ff-version";
 import IE_OR_EDGE from "../internals/environment-is-ie-or-edge";
 import V8 from "../internals/environment-v8-version";
 import WEBKIT from "../internals/environment-webkit-version";
-var aTypedArray = _aTypedArray;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
 var Uint16Array = globalThis.Uint16Array;
 var nativeSort = Uint16Array && uncurryThis(Uint16Array.prototype.sort);
 

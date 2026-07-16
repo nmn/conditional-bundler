@@ -1,3 +1,5 @@
+import { joinRootURL } from "../output-url.js";
+
 export type BundleTarget = {
   fileName: string;
   exportMode: "entry" | "dynamic";
@@ -14,9 +16,12 @@ export function emitDynamicImportConstants(
   imports: DynamicImportRuntime[],
   bundleMap: Map<string, BundleTarget>,
   envId?: string,
+  stylesByBundle: Map<string, string[]> = new Map(),
+  rootURL = "/",
 ): string {
   const lines: string[] = [];
   const emitted = new Set<string>();
+  let emittedCssRuntime = false;
 
   for (const dynamicImport of imports) {
     if (emitted.has(dynamicImport.hashKey)) {
@@ -42,10 +47,29 @@ export function emitDynamicImportConstants(
     }
 
     const specifier = normalizeChunkSpecifier(target.fileName);
-    if (target.exportMode === "entry") {
+    const styleKey = `${envId ?? "default"}:${dynamicImport.resolvedId}`;
+    const styles = stylesByBundle.get(styleKey) ?? [];
+    if (styles.length > 0 && !emittedCssRuntime) {
+      emittedCssRuntime = true;
       lines.push(
-        `const ${dynamicImport.hashKey} = () => import(${JSON.stringify(specifier)});`,
+        "const __bundler_css_loads__ = globalThis.__BUNDLER_CSS_LOADS__ ??= new Map();",
+        'const __bundler_load_css__ = (href) => { let pending = __bundler_css_loads__.get(href); if (pending) return pending; const link = document.createElement("link"); link.rel = "stylesheet"; link.href = href; pending = new Promise((resolve, reject) => { link.onload = resolve; link.onerror = reject; }); __bundler_css_loads__.set(href, pending); document.head.appendChild(link); return pending; };',
       );
+    }
+    const importExpression = `import(${JSON.stringify(specifier)})`;
+    const loadExpression =
+      styles.length > 0
+        ? `Promise.all([${styles
+            .map(
+              (fileName) =>
+                `__bundler_load_css__(${JSON.stringify(
+                  joinRootURL(rootURL, fileName),
+                )})`,
+            )
+            .join(", ")}]).then(() => ${importExpression})`
+        : importExpression;
+    if (target.exportMode === "entry") {
+      lines.push(`const ${dynamicImport.hashKey} = () => ${loadExpression};`);
       continue;
     }
 
@@ -57,7 +81,7 @@ export function emitDynamicImportConstants(
       .join(", ");
 
     lines.push(
-      `const ${dynamicImport.hashKey} = () => import(${JSON.stringify(specifier)}).then((mod) => Object.freeze({ ${exportMappings} }));`,
+      `const ${dynamicImport.hashKey} = () => ${loadExpression}.then((mod) => Object.freeze({ ${exportMappings} }));`,
     );
   }
 

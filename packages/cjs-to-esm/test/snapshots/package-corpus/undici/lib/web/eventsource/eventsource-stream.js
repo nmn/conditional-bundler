@@ -1,8 +1,13 @@
 import * as _cjs_import from "node:stream";
-import { isASCIINumber as _isASCIINumber, isValidLastEventId as _isValidLastEventId } from "./util";
+import _cjs_import2 from "./util";
 const {
   Transform
 } = _cjs_import;
+const {
+  isASCIINumber,
+  isValidLastEventId
+} = _cjs_import2;
+
 /**
  * @type {number[]} BOM
  */
@@ -294,10 +299,10 @@ class EventSourceStream extends Transform {
    * @param {EventSourceStreamEvent} event
    */
   processEvent(event) {
-    if (event.retry && _isASCIINumber(event.retry)) {
+    if (event.retry && isASCIINumber(event.retry)) {
       this.state.reconnectionTime = parseInt(event.retry, 10);
     }
-    if (event.id !== undefined && _isValidLastEventId(event.id)) {
+    if (event.id !== undefined && isValidLastEventId(event.id)) {
       this.state.lastEventId = event.id;
     }
 

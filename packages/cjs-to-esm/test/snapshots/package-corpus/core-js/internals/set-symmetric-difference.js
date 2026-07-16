@@ -1,11 +1,11 @@
 import aSet from "../internals/a-set";
-import { add as _add, has as _has, remove as _remove } from "../internals/set-helpers";
+import SetHelpers from "../internals/set-helpers";
 import clone from "../internals/set-clone";
 import getSetRecord from "../internals/get-set-record";
 import iterateSimple from "../internals/iterate-simple";
-var add = _add;
-var has = _has;
-var remove = _remove;
+var add = SetHelpers.add;
+var has = SetHelpers.has;
+var remove = SetHelpers.remove;
 
 // `Set.prototype.symmetricDifference` method
 // https://tc39.es/ecma262/#sec-set.prototype.symmetricdifference

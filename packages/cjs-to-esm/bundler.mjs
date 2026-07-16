@@ -1,13 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  decodeCjsVirtualId,
-  encodeCjsVirtualId,
-  createCjsModuleIdentity,
-  isCjsVirtualId,
-  isNodeBuiltin,
-} from "./index.mjs";
+import { createCjsModuleIdentity, isNodeBuiltin } from "./index.mjs";
 
 const transformPath = fileURLToPath(new URL("./index.mjs", import.meta.url));
 const packageTypeCache = new Map();
@@ -19,49 +13,26 @@ export default function cjsToEsmBundlerPlugin(options = {}) {
   return {
     name: options.name ?? "cjs-to-esm",
     async resolveImport(context) {
-      const { request, fromId, envId } = context;
+      const { request } = context;
       if (isNodeBuiltin(request)) {
-        return null;
+        return { preserve: true };
       }
-      if (isCjsVirtualId(request)) {
-        const decoded = decodeCjsVirtualId(request);
-        return {
-          id: encodeCjsVirtualId(
-            decoded.envId ?? envId,
-            decoded.filePath,
-            undefined,
-            nodeEnv,
-          ),
-          filePath: decoded.filePath,
-          moduleIdentity: createCjsModuleIdentity(decoded.filePath),
-          virtual: true,
-        };
-      }
-
-      const parent = isCjsVirtualId(fromId) ? decodeCjsVirtualId(fromId) : null;
       const resolved = await context.resolveDefault();
-      if (!resolved || !isCommonJsFile(resolved.filePath)) {
+      if ("preserve" in resolved || !isCommonJsFile(resolved.filePath)) {
         return resolved;
       }
 
       return {
-        id: encodeCjsVirtualId(
-          parent?.envId ?? envId,
-          resolved.filePath,
-          undefined,
-          nodeEnv,
-        ),
+        id: resolved.filePath,
         filePath: resolved.filePath,
         moduleIdentity: createCjsModuleIdentity(resolved.filePath),
-        virtual: true,
-      };
-    },
-    load({ id }) {
-      if (!isCjsVirtualId(id)) {
-        return undefined;
-      }
-      return {
-        code: fs.readFileSync(decodeCjsVirtualId(id).filePath, "utf8"),
+        type: "javascript",
+        meta: {
+          format: "commonjs",
+          ...(typeof context.importerMeta?.reactCjsEnv === "string"
+            ? { reactCjsEnv: context.importerMeta.reactCjsEnv }
+            : {}),
+        },
       };
     },
     transform: [
@@ -71,6 +42,7 @@ export default function cjsToEsmBundlerPlugin(options = {}) {
           strategy: options.strategy ?? "auto",
           mode,
           nodeEnv,
+          linkModulePaths: true,
         },
       ],
     ],
@@ -81,8 +53,8 @@ function resolveNodeEnv(options) {
   const nodeEnv =
     options.nodeEnv ??
     options.mode ??
-    process.env.NODE_ENV ??
     process.env.BUNDLER_MODE ??
+    process.env.NODE_ENV ??
     "development";
   if (typeof nodeEnv !== "string" || nodeEnv.length === 0) {
     throw new Error("cjs-to-esm requires NODE_ENV to be a non-empty string.");

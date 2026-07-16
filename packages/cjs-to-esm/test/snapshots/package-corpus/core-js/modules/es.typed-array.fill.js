@@ -1,12 +1,12 @@
-import { aTypedArray as _aTypedArray, exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
 import $fill from "../internals/array-fill";
 import toBigInt from "../internals/to-big-int";
 import classof from "../internals/classof";
 import call from "../internals/function-call";
 import uncurryThis from "../internals/function-uncurry-this";
 import fails from "../internals/fails";
-var aTypedArray = _aTypedArray;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
 var slice = uncurryThis(''.slice);
 
 // V8 ~ Chrome < 59, Safari < 14.1, FF < 55, Edge <=18

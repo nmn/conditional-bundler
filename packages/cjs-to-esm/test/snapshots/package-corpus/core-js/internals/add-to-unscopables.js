@@ -1,7 +1,7 @@
 import wellKnownSymbol from "../internals/well-known-symbol";
 import create from "../internals/object-create";
-import { f as _f } from "../internals/object-define-property";
-var defineProperty = _f;
+import _cjs_import from "../internals/object-define-property";
+var defineProperty = _cjs_import.f;
 var UNSCOPABLES = wellKnownSymbol('unscopables');
 var ArrayPrototype = Array.prototype;
 

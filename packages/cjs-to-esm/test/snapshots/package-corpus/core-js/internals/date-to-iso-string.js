@@ -1,7 +1,7 @@
 import uncurryThis from "../internals/function-uncurry-this";
 import fails from "../internals/fails";
-import { start as _start } from "../internals/string-pad";
-var padStart = _start;
+import _cjs_import from "../internals/string-pad";
+var padStart = _cjs_import.start;
 var $RangeError = RangeError;
 var $isFinite = isFinite;
 var abs = Math.abs;

@@ -1,9 +1,9 @@
 import globalThis from "../internals/global-this";
 import defineWellKnownSymbol from "../internals/well-known-symbol-define";
-import { f as _f } from "../internals/object-define-property";
-import { f as _f2 } from "../internals/object-get-own-property-descriptor";
-var defineProperty = _f;
-var getOwnPropertyDescriptor = _f2;
+import _cjs_import from "../internals/object-define-property";
+import _cjs_import2 from "../internals/object-get-own-property-descriptor";
+var defineProperty = _cjs_import.f;
+var getOwnPropertyDescriptor = _cjs_import2.f;
 var Symbol = globalThis.Symbol;
 
 // `Symbol.dispose` well-known symbol

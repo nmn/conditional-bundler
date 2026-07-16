@@ -1,8 +1,8 @@
-import { Log as _Log } from "./Log";
-import { NetworkParam as _NetworkParam } from "./NetworkConfig";
-import { SDKType as _SDKType } from "./SDKType";
-import { SDK_VERSION as _SDK_VERSION } from "./StatsigMetadata";
-import { _isUnloading } from "./VisibilityObserving";
+import Log_1 from "./Log";
+import NetworkConfig_1 from "./NetworkConfig";
+import SDKType_1 from "./SDKType";
+import StatsigMetadata_1 from "./StatsigMetadata";
+import VisibilityObserving_1 from "./VisibilityObserving";
 var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function (resolve) {
@@ -47,7 +47,7 @@ export class EventSender {
       let failurePath = 'event_sender_unexpected_exception';
       const transportFailure = {};
       try {
-        const isClosing = (0, _isUnloading)();
+        const isClosing = (0, VisibilityObserving_1._isUnloading)();
         const shouldUseBeacon = isClosing && this._network.isBeaconSupported() && ((_b = (_a = this._options) === null || _a === void 0 ? void 0 : _a.networkConfig) === null || _b === void 0 ? void 0 : _b.networkOverrideFunc) == null;
         failurePath = 'event_sender_pre_logs_flushed_emitter_exception';
         this._emitter({
@@ -76,7 +76,7 @@ export class EventSender {
           failureDiagnosticMetadata: response.failureDiagnosticMetadata
         } : {});
       } catch (error) {
-        _Log.warn('Failed to send batch:', error);
+        Log_1.Log.warn('Failed to send batch:', error);
         return Object.assign(Object.assign(Object.assign({
           success: false,
           statusCode: -1,
@@ -141,13 +141,13 @@ export class EventSender {
       preserveFailedStatusCode: true,
       isCompressable: true,
       params: {
-        [_NetworkParam.EventCount]: String(batch.events.length)
+        [NetworkConfig_1.NetworkParam.EventCount]: String(batch.events.length)
       },
       headers: {
         'statsig-event-count': String(batch.events.length),
         'statsig-retry-count': String(batch.attempts),
-        'statsig-sdk-type': _SDKType._get(this._sdkKey),
-        'statsig-sdk-version': _SDK_VERSION
+        'statsig-sdk-type': SDKType_1.SDKType._get(this._sdkKey),
+        'statsig-sdk-version': StatsigMetadata_1.SDK_VERSION
       },
       credentials: 'same-origin'
     };

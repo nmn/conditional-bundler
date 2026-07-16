@@ -1,6 +1,13 @@
-import { InvalidArgumentError as _InvalidArgumentError } from "../core/errors";
-import { runtimeFeatures as _runtimeFeatures } from "../util/runtime-features.js";
-import * as _cjs_import from "node:crypto";
+import _cjs_import from "../core/errors";
+import _cjs_import2 from "../util/runtime-features.js";
+import * as _cjs_import3 from "node:crypto";
+const {
+  InvalidArgumentError
+} = _cjs_import;
+const {
+  runtimeFeatures
+} = _cjs_import2;
+
 /**
  * @typedef {Object} HeaderFilters
  * @property {Set<string>} ignore - Set of headers to ignore for matching
@@ -27,7 +34,7 @@ function createHeaderFilters(matchOptions = {}) {
     match: new Set(matchHeaders.map(header => caseSensitive ? header : header.toLowerCase()))
   };
 }
-const crypto = _runtimeFeatures.has('crypto') ? _cjs_import : null;
+const crypto = runtimeFeatures.has('crypto') ? _cjs_import3 : null;
 
 /**
  * @callback HashIdFunction
@@ -135,7 +142,7 @@ const validSnapshotModes = /** @type {const} */['record', 'playback', 'update'];
  */
 function validateSnapshotMode(mode) {
   if (!validSnapshotModes.includes(mode)) {
-    throw new _InvalidArgumentError(`Invalid snapshot mode: ${mode}. Must be one of: ${validSnapshotModes.join(', ')}`);
+    throw new InvalidArgumentError(`Invalid snapshot mode: ${mode}. Must be one of: ${validSnapshotModes.join(', ')}`);
   }
 }
 const _cjs_default = {

@@ -1,7 +1,10 @@
 import DecoratorHandler from "../handler/decorator-handler";
-import { ResponseError as _ResponseError } from "../core/errors";
+import _cjs_import from "../core/errors";
 // const { parseHeaders } = require('../core/util')
 
+const {
+  ResponseError
+} = _cjs_import;
 class ResponseErrorHandler extends DecoratorHandler {
   #statusCode;
   #contentType;
@@ -59,7 +62,7 @@ class ResponseErrorHandler extends DecoratorHandler {
       const stackTraceLimit = Error.stackTraceLimit;
       Error.stackTraceLimit = 0;
       try {
-        err = new _ResponseError('Response Error', this.#statusCode, {
+        err = new ResponseError('Response Error', this.#statusCode, {
           body: this.#body,
           headers: this.#headers
         });

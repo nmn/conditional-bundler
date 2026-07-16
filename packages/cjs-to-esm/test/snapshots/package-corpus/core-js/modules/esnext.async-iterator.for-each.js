@@ -1,6 +1,6 @@
 import $ from "../internals/export";
-import { forEach as _forEach } from "../internals/async-iterator-iteration";
-var $forEach = _forEach;
+import _cjs_import from "../internals/async-iterator-iteration";
+var $forEach = _cjs_import.forEach;
 
 // `AsyncIterator.prototype.forEach` method
 // https://github.com/tc39/proposal-async-iterator-helpers

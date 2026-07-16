@@ -1,11 +1,11 @@
 import $ from "../internals/export";
 import IS_PURE from "../internals/is-pure";
-import { CONSTRUCTOR as _CONSTRUCTOR } from "../internals/promise-constructor-detection";
+import _cjs_import from "../internals/promise-constructor-detection";
 import NativePromiseConstructor from "../internals/promise-native-constructor";
 import getBuiltIn from "../internals/get-built-in";
 import isCallable from "../internals/is-callable";
 import defineBuiltIn from "../internals/define-built-in";
-var FORCED_PROMISE_CONSTRUCTOR = _CONSTRUCTOR;
+var FORCED_PROMISE_CONSTRUCTOR = _cjs_import.CONSTRUCTOR;
 var NativePromisePrototype = NativePromiseConstructor && NativePromiseConstructor.prototype;
 
 // `Promise.prototype.catch` method

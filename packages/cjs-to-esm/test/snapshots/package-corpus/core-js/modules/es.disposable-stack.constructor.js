@@ -7,7 +7,7 @@ import defineBuiltIn from "../internals/define-built-in";
 import defineBuiltIns from "../internals/define-built-ins";
 import defineBuiltInAccessor from "../internals/define-built-in-accessor";
 import wellKnownSymbol from "../internals/well-known-symbol";
-import { set as _set, getterFor as _getterFor } from "../internals/internal-state";
+import InternalStateModule from "../internals/internal-state";
 import addDisposableResource from "../internals/add-disposable-resource";
 // https://github.com/tc39/proposal-explicit-resource-management
 
@@ -16,8 +16,8 @@ var $ReferenceError = ReferenceError;
 var DISPOSE = wellKnownSymbol('dispose');
 var TO_STRING_TAG = wellKnownSymbol('toStringTag');
 var DISPOSABLE_STACK = 'DisposableStack';
-var setInternalState = _set;
-var getDisposableStackInternalState = _getterFor(DISPOSABLE_STACK);
+var setInternalState = InternalStateModule.set;
+var getDisposableStackInternalState = InternalStateModule.getterFor(DISPOSABLE_STACK);
 var HINT = 'sync-dispose';
 var DISPOSED = 'disposed';
 var PENDING = 'pending';

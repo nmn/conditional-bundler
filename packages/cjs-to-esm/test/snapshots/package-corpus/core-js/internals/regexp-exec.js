@@ -2,16 +2,16 @@ import call from "../internals/function-call";
 import uncurryThis from "../internals/function-uncurry-this";
 import toString from "../internals/to-string";
 import regexpFlags from "../internals/regexp-flags";
-import { BROKEN_CARET as _BROKEN_CARET } from "../internals/regexp-sticky-helpers";
+import stickyHelpers from "../internals/regexp-sticky-helpers";
 import shared from "../internals/shared";
 import create from "../internals/object-create";
-import { get as _get } from "../internals/internal-state";
+import _cjs_import from "../internals/internal-state";
 import UNSUPPORTED_DOT_ALL from "../internals/regexp-unsupported-dot-all";
 import UNSUPPORTED_NCG from "../internals/regexp-unsupported-ncg";
 /* eslint-disable regexp/no-empty-capturing-group, regexp/no-empty-group, regexp/no-lazy-ends -- testing */
 /* eslint-disable regexp/no-useless-quantifier -- testing */
 
-var getInternalState = _get;
+var getInternalState = _cjs_import.get;
 var nativeReplace = shared('native-string-replace', String.prototype.replace);
 var nativeExec = RegExp.prototype.exec;
 var patchedExec = nativeExec;
@@ -26,7 +26,7 @@ var UPDATES_LAST_INDEX_WRONG = function () {
   call(nativeExec, re2, 'a');
   return re1.lastIndex !== 0 || re2.lastIndex !== 0;
 }();
-var UNSUPPORTED_Y = _BROKEN_CARET;
+var UNSUPPORTED_Y = stickyHelpers.BROKEN_CARET;
 
 // nonparticipating capturing group, copied from es5-shim's String#split patch.
 var NPCG_INCLUDED = /()??/.exec('')[1] !== undefined;

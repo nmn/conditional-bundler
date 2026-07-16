@@ -3,10 +3,10 @@ import defineBuiltIn from "../internals/define-built-in";
 import getMethod from "../internals/get-method";
 import hasOwn from "../internals/has-own-property";
 import wellKnownSymbol from "../internals/well-known-symbol";
-import { IteratorPrototype as _IteratorPrototype } from "../internals/iterators-core";
+import _cjs_import from "../internals/iterators-core";
 // https://github.com/tc39/proposal-explicit-resource-management
 
-var IteratorPrototype = _IteratorPrototype;
+var IteratorPrototype = _cjs_import.IteratorPrototype;
 var DISPOSE = wellKnownSymbol('dispose');
 if (!hasOwn(IteratorPrototype, DISPOSE)) {
   defineBuiltIn(IteratorPrototype, DISPOSE, function () {

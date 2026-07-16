@@ -1,11 +1,11 @@
-import { aTypedArray as _aTypedArray, getTypedArrayConstructor as _getTypedArrayConstructor, exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
 import isBigIntArray from "../internals/is-big-int-array";
 import lengthOfArrayLike from "../internals/length-of-array-like";
 import toIntegerOrInfinity from "../internals/to-integer-or-infinity";
 import toBigInt from "../internals/to-big-int";
-var aTypedArray = _aTypedArray;
-var getTypedArrayConstructor = _getTypedArrayConstructor;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var getTypedArrayConstructor = ArrayBufferViewCore.getTypedArrayConstructor;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
 var $RangeError = RangeError;
 var PROPER_ORDER = function () {
   try {

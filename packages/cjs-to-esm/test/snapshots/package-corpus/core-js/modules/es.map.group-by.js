@@ -3,13 +3,13 @@ import uncurryThis from "../internals/function-uncurry-this";
 import aCallable from "../internals/a-callable";
 import requireObjectCoercible from "../internals/require-object-coercible";
 import iterate from "../internals/iterate";
-import { Map as _Map, has as _has, get as _get, set as _set } from "../internals/map-helpers";
+import MapHelpers from "../internals/map-helpers";
 import IS_PURE from "../internals/is-pure";
 import fails from "../internals/fails";
-var Map = _Map;
-var has = _has;
-var get = _get;
-var set = _set;
+var Map = MapHelpers.Map;
+var has = MapHelpers.has;
+var get = MapHelpers.get;
+var set = MapHelpers.set;
 var push = uncurryThis([].push);
 
 // https://bugs.webkit.org/show_bug.cgi?id=271524

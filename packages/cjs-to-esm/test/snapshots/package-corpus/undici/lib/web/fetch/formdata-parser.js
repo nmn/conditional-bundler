@@ -1,9 +1,24 @@
-import { bufferToLowerCasedHeaderName as _bufferToLowerCasedHeaderName } from "../../core/util";
-import { HTTP_TOKEN_CODEPOINTS as _HTTP_TOKEN_CODEPOINTS } from "./data-url";
-import { makeEntry as _makeEntry } from "./formdata";
-import { webidl as _webidl } from "../webidl";
+import _cjs_import from "../../core/util";
+import _cjs_import2 from "./data-url";
+import _cjs_import3 from "./formdata";
+import _cjs_import4 from "../webidl";
 import * as assert from "node:assert";
-import { isomorphicDecode as _isomorphicDecode } from "../infra";
+import _cjs_import5 from "../infra";
+const {
+  bufferToLowerCasedHeaderName
+} = _cjs_import;
+const {
+  HTTP_TOKEN_CODEPOINTS
+} = _cjs_import2;
+const {
+  makeEntry
+} = _cjs_import3;
+const {
+  webidl
+} = _cjs_import4;
+const {
+  isomorphicDecode
+} = _cjs_import5;
 const dd = Buffer.from('--');
 const decoder = new TextDecoder();
 const decoderIgnoreBOM = new TextDecoder('utf-8', {
@@ -183,11 +198,11 @@ function multipartFormDataParser(input, mimeType) {
     }
 
     // 5.12. Assert: name is a scalar value string and value is either a scalar value string or a File object.
-    assert(_webidl.is.USVString(name));
-    assert(typeof value === 'string' && _webidl.is.USVString(value) || _webidl.is.File(value));
+    assert(webidl.is.USVString(name));
+    assert(typeof value === 'string' && webidl.is.USVString(value) || webidl.is.File(value));
 
     // 5.13. Create an entry with name and value, and append it to entry list.
-    entryList.push(_makeEntry(name, value, filename));
+    entryList.push(makeEntry(name, value, filename));
   }
 }
 
@@ -317,7 +332,7 @@ function parseMultipartFormDataHeaders(input, position) {
     headerName = removeChars(headerName, true, true, char => char === 0x9 || char === 0x20);
 
     // 2.4. If header name does not match the field-name token production, return failure.
-    if (!_HTTP_TOKEN_CODEPOINTS.test(headerName.toString())) {
+    if (!HTTP_TOKEN_CODEPOINTS.test(headerName.toString())) {
       throw parsingError('header name does not match the field-name token production');
     }
 
@@ -334,7 +349,7 @@ function parseMultipartFormDataHeaders(input, position) {
     collectASequenceOfBytes(char => char === 0x20 || char === 0x09, input, position);
 
     // 2.8. Byte-lowercase header name and switch on the result:
-    switch (_bufferToLowerCasedHeaderName(headerName)) {
+    switch (bufferToLowerCasedHeaderName(headerName)) {
       case 'content-disposition':
         {
           name = filename = null;
@@ -383,14 +398,14 @@ function parseMultipartFormDataHeaders(input, position) {
           headerValue = removeChars(headerValue, false, true, char => char === 0x9 || char === 0x20);
 
           // 3. Set contentType to the isomorphic decoding of header value.
-          contentType = _isomorphicDecode(headerValue);
+          contentType = isomorphicDecode(headerValue);
           break;
         }
       case 'content-transfer-encoding':
         {
           let headerValue = collectASequenceOfBytes(char => char !== 0x0a && char !== 0x0d, input, position);
           headerValue = removeChars(headerValue, false, true, char => char === 0x9 || char === 0x20);
-          encoding = _isomorphicDecode(headerValue);
+          encoding = isomorphicDecode(headerValue);
           break;
         }
       default:

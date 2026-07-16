@@ -554,4 +554,3 @@ if (!__cjs_default__) {
   __cjs_cache__.set("undici@8.7.0::lib/web/websocket/stream/websocketstream.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
-export const WebSocketStream = __cjs_default__["WebSocketStream"];

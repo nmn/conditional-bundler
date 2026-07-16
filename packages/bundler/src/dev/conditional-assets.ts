@@ -25,7 +25,7 @@ export async function readDevAsset(
   }
 
   const body = await fsp.readFile(
-    path.join(config.outputs.outDir, asset?.fileName ?? bundle!.fileName),
+    safeOutputPath(config.outputs.outDir, asset?.fileName ?? bundle!.fileName),
   );
   const isScript = asset?.type === "script" || (bundle != null && !asset);
   return {
@@ -40,6 +40,15 @@ export async function readDevAsset(
   };
 }
 
+function safeOutputPath(outDir: string, fileName: string): string {
+  const root = path.resolve(outDir);
+  const candidate = path.resolve(root, fileName);
+  if (candidate !== root && !candidate.startsWith(`${root}${path.sep}`)) {
+    throw new Error(`Refusing to serve output outside '${root}'.`);
+  }
+  return candidate;
+}
+
 export async function resolveConditionalPatch<T extends { records: string[] }>(
   patch: T,
 ): Promise<T> {
@@ -51,7 +60,7 @@ export async function resolveConditionalPatch<T extends { records: string[] }>(
   };
 }
 
-async function resolveConditionalCode(
+export async function resolveConditionalCode(
   code: string,
   cacheScope?: string,
   conditionNames?: string[],

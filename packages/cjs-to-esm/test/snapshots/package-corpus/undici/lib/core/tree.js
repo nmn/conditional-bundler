@@ -1,4 +1,8 @@
-import { wellknownHeaderNames as _wellknownHeaderNames, headerNameLowerCasedRecord as _headerNameLowerCasedRecord } from "./constants";
+import _cjs_import from "./constants";
+const {
+  wellknownHeaderNames,
+  headerNameLowerCasedRecord
+} = _cjs_import;
 class TstNode {
   /** @type {any} */
   value = null;
@@ -140,8 +144,8 @@ class TernarySearchTree {
   }
 }
 const tree = new TernarySearchTree();
-for (let i = 0; i < _wellknownHeaderNames.length; ++i) {
-  const key = _headerNameLowerCasedRecord[_wellknownHeaderNames[i]];
+for (let i = 0; i < wellknownHeaderNames.length; ++i) {
+  const key = headerNameLowerCasedRecord[wellknownHeaderNames[i]];
   tree.insert(key, key);
 }
 const _cjs_default = {

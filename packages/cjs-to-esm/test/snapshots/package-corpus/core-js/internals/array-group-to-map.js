@@ -3,11 +3,11 @@ import uncurryThis from "../internals/function-uncurry-this";
 import IndexedObject from "../internals/indexed-object";
 import toObject from "../internals/to-object";
 import lengthOfArrayLike from "../internals/length-of-array-like";
-import { Map as _Map, get as _get, has as _has, set as _set } from "../internals/map-helpers";
-var Map = _Map;
-var mapGet = _get;
-var mapHas = _has;
-var mapSet = _set;
+import MapHelpers from "../internals/map-helpers";
+var Map = MapHelpers.Map;
+var mapGet = MapHelpers.get;
+var mapHas = MapHelpers.has;
+var mapSet = MapHelpers.set;
 var push = uncurryThis([].push);
 
 // `Array.prototype.groupToMap` method

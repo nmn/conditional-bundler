@@ -3,8 +3,8 @@ import uncurryThis from "../internals/function-uncurry-this";
 import call from "../internals/function-call";
 import fails from "../internals/fails";
 import objectKeys from "../internals/object-keys";
-import { f as _f } from "../internals/object-get-own-property-symbols";
-import { f as _f2 } from "../internals/object-property-is-enumerable";
+import getOwnPropertySymbolsModule from "../internals/object-get-own-property-symbols";
+import propertyIsEnumerableModule from "../internals/object-property-is-enumerable";
 import toObject from "../internals/to-object";
 import IndexedObject from "../internals/indexed-object";
 // eslint-disable-next-line es/no-object-assign -- safe
@@ -47,8 +47,8 @@ const _cjs_default = !$assign || fails(function () {
   var T = toObject(target);
   var argumentsLength = arguments.length;
   var index = 1;
-  var getOwnPropertySymbols = _f;
-  var propertyIsEnumerable = _f2;
+  var getOwnPropertySymbols = getOwnPropertySymbolsModule.f;
+  var propertyIsEnumerable = propertyIsEnumerableModule.f;
   while (argumentsLength > index) {
     var S = IndexedObject(arguments[index++]);
     var keys = getOwnPropertySymbols ? concat(objectKeys(S), getOwnPropertySymbols(S)) : objectKeys(S);

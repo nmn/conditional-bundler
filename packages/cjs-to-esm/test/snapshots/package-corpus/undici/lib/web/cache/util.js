@@ -1,6 +1,13 @@
 import * as assert from "node:assert";
-import { URLSerializer as _URLSerializer } from "../fetch/data-url";
-import { isValidHeaderName as _isValidHeaderName } from "../fetch/util";
+import _cjs_import from "../fetch/data-url";
+import _cjs_import2 from "../fetch/util";
+const {
+  URLSerializer
+} = _cjs_import;
+const {
+  isValidHeaderName
+} = _cjs_import2;
+
 /**
  * @see https://url.spec.whatwg.org/#concept-url-equals
  * @param {URL} A
@@ -9,8 +16,8 @@ import { isValidHeaderName as _isValidHeaderName } from "../fetch/util";
  * @returns {boolean}
  */
 function urlEquals(A, B, excludeFragment = false) {
-  const serializedA = _URLSerializer(A, excludeFragment);
-  const serializedB = _URLSerializer(B, excludeFragment);
+  const serializedA = URLSerializer(A, excludeFragment);
+  const serializedB = URLSerializer(B, excludeFragment);
   return serializedA === serializedB;
 }
 
@@ -23,7 +30,7 @@ function getFieldValues(header) {
   const values = [];
   for (let value of header.split(',')) {
     value = value.trim();
-    if (_isValidHeaderName(value)) {
+    if (isValidHeaderName(value)) {
       values.push(value);
     }
   }

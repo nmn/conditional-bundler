@@ -1,7 +1,23 @@
-import { PoolStats as _PoolStats } from "../util/stats.js";
+import _cjs_import from "../util/stats.js";
 import DispatcherBase from "./dispatcher-base";
 import FixedQueue from "./fixed-queue";
-import { kConnected as _kConnected, kSize as _kSize, kRunning as _kRunning, kPending as _kPending, kQueued as _kQueued, kBusy as _kBusy, kFree as _kFree, kUrl as _kUrl, kClose as _kClose, kDestroy as _kDestroy, kDispatch as _kDispatch } from "../core/symbols";
+import _cjs_import2 from "../core/symbols";
+const {
+  PoolStats
+} = _cjs_import;
+const {
+  kConnected,
+  kSize,
+  kRunning,
+  kPending,
+  kQueued,
+  kBusy,
+  kFree,
+  kUrl,
+  kClose,
+  kDestroy,
+  kDispatch
+} = _cjs_import2;
 const kClients = Symbol('clients');
 const kNeedDrain = Symbol('needDrain');
 const kQueue = Symbol('queue');
@@ -16,7 +32,7 @@ const kAddClient = Symbol('add client');
 const kRemoveClient = Symbol('remove client');
 class PoolBase extends DispatcherBase {
   [kQueue] = new FixedQueue();
-  [_kQueued] = 0;
+  [kQueued] = 0;
   [kClients] = [];
   [kNeedDrain] = false;
   [kOnDrain](client, origin, targets) {
@@ -27,7 +43,7 @@ class PoolBase extends DispatcherBase {
       if (!item) {
         break;
       }
-      this[_kQueued]--;
+      this[kQueued]--;
       needDrain = !client.dispatch(item.opts, item.handler);
     }
     client[kNeedDrain] = needDrain;
@@ -55,59 +71,59 @@ class PoolBase extends DispatcherBase {
   [kOnConnectionError] = (origin, targets, err) => {
     this.emit('connectionError', origin, [this, ...targets], err);
   };
-  get [_kBusy]() {
+  get [kBusy]() {
     return this[kNeedDrain];
   }
-  get [_kConnected]() {
+  get [kConnected]() {
     let ret = 0;
     for (const {
-      [_kConnected]: connected
+      [kConnected]: connected
     } of this[kClients]) {
       ret += connected;
     }
     return ret;
   }
-  get [_kFree]() {
+  get [kFree]() {
     let ret = 0;
     for (const {
-      [_kConnected]: connected,
+      [kConnected]: connected,
       [kNeedDrain]: needDrain
     } of this[kClients]) {
       ret += connected && !needDrain;
     }
     return ret;
   }
-  get [_kPending]() {
-    let ret = this[_kQueued];
+  get [kPending]() {
+    let ret = this[kQueued];
     for (const {
-      [_kPending]: pending
+      [kPending]: pending
     } of this[kClients]) {
       ret += pending;
     }
     return ret;
   }
-  get [_kRunning]() {
+  get [kRunning]() {
     let ret = 0;
     for (const {
-      [_kRunning]: running
+      [kRunning]: running
     } of this[kClients]) {
       ret += running;
     }
     return ret;
   }
-  get [_kSize]() {
-    let ret = this[_kQueued];
+  get [kSize]() {
+    let ret = this[kQueued];
     for (const {
-      [_kSize]: size
+      [kSize]: size
     } of this[kClients]) {
       ret += size;
     }
     return ret;
   }
   get stats() {
-    return new _PoolStats(this);
+    return new PoolStats(this);
   }
-  [_kClose]() {
+  [kClose]() {
     if (this[kQueue].isEmpty()) {
       const closeAll = [];
       for (let i = 0; i < this[kClients].length; i++) {
@@ -123,7 +139,7 @@ class PoolBase extends DispatcherBase {
       });
     }
   }
-  [_kDestroy](err) {
+  [kDestroy](err) {
     while (true) {
       const item = this[kQueue].shift();
       if (!item) {
@@ -137,7 +153,7 @@ class PoolBase extends DispatcherBase {
     }
     return Promise.all(destroyAll);
   }
-  [_kDispatch](opts, handler) {
+  [kDispatch](opts, handler) {
     const dispatcher = this[kGetDispatcher]();
     if (!dispatcher) {
       this[kNeedDrain] = true;
@@ -145,7 +161,7 @@ class PoolBase extends DispatcherBase {
         opts,
         handler
       });
-      this[_kQueued]++;
+      this[kQueued]++;
     } else if (!dispatcher.dispatch(opts, handler)) {
       dispatcher[kNeedDrain] = true;
       this[kNeedDrain] = !this[kHasDispatcher]();
@@ -167,7 +183,7 @@ class PoolBase extends DispatcherBase {
     if (this[kNeedDrain]) {
       queueMicrotask(() => {
         if (this[kNeedDrain]) {
-          this[kOnDrain](client, client[_kUrl], [client, this]);
+          this[kOnDrain](client, client[kUrl], [client, this]);
         }
       });
     }

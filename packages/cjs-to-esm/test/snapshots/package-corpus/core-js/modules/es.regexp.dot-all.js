@@ -2,8 +2,8 @@ import DESCRIPTORS from "../internals/descriptors";
 import UNSUPPORTED_DOT_ALL from "../internals/regexp-unsupported-dot-all";
 import classof from "../internals/classof-raw";
 import defineBuiltInAccessor from "../internals/define-built-in-accessor";
-import { get as _get } from "../internals/internal-state";
-var getInternalState = _get;
+import _cjs_import from "../internals/internal-state";
+var getInternalState = _cjs_import.get;
 var RegExpPrototype = RegExp.prototype;
 var $TypeError = TypeError;
 

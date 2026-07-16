@@ -1,13 +1,13 @@
 import globalThis from "../internals/global-this";
 import safeGetBuiltIn from "../internals/safe-get-built-in";
 import bind from "../internals/function-bind-context";
-import { set as _set } from "../internals/task";
+import _cjs_import from "../internals/task";
 import Queue from "../internals/queue";
 import IS_IOS from "../internals/environment-is-ios";
 import IS_IOS_PEBBLE from "../internals/environment-is-ios-pebble";
 import IS_WEBOS_WEBKIT from "../internals/environment-is-webos-webkit";
 import IS_NODE from "../internals/environment-is-node";
-var macrotask = _set;
+var macrotask = _cjs_import.set;
 var MutationObserver = globalThis.MutationObserver || globalThis.WebKitMutationObserver;
 var document = globalThis.document;
 var process = globalThis.process;

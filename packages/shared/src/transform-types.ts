@@ -9,20 +9,21 @@ import type {
   DiscoveredEntrypoint,
   ExtraTransformOutput,
   FileRecord,
+  DependencyTarget,
 } from "./ir.js";
 
 export type TransformResolvedImport = {
-  id: string | null;
-  moduleIdentity?: string | null;
-  filePath: string | null;
-  external: boolean;
-  virtual?: boolean;
+  target: DependencyTarget;
+  type: "javascript" | "css" | "asset";
+  intent: "module" | "url" | "raw" | "base64" | "assetPath";
   meta?: Record<string, unknown>;
 };
 
 export type TransformInput = {
   id?: string;
   moduleIdentity?: string;
+  canonicalPath?: string;
+  symbolIdentity?: string;
   code: string;
   realPath: string;
   pkg: { name: string; version: string; root: string };

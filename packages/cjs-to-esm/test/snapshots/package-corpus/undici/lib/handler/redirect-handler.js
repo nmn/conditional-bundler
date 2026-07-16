@@ -1,22 +1,25 @@
-import { wrapRequestBody as _wrapRequestBody, isStream as _isStream, destroy as _destroy, isDisturbed as _isDisturbed, parseURL as _parseURL, headerNameToString as _headerNameToString, hasSafeIterator as _hasSafeIterator } from "../core/util";
+import util from "../core/util";
 import * as assert from "node:assert";
-import { InvalidArgumentError as _InvalidArgumentError } from "../core/errors";
+import _cjs_import from "../core/errors";
+const {
+  InvalidArgumentError
+} = _cjs_import;
 const redirectableStatusCodes = [300, 301, 302, 303, 307, 308];
 const noop = () => {};
 class RedirectHandler {
   static buildDispatch(dispatcher, maxRedirections) {
     if (maxRedirections != null && (!Number.isInteger(maxRedirections) || maxRedirections < 0)) {
-      throw new _InvalidArgumentError('maxRedirections must be a positive number');
+      throw new InvalidArgumentError('maxRedirections must be a positive number');
     }
     const dispatch = dispatcher.dispatch.bind(dispatcher);
     return (opts, originalHandler) => dispatch(opts, new RedirectHandler(dispatch, maxRedirections, opts, originalHandler));
   }
   constructor(dispatch, maxRedirections, opts, handler) {
     if (maxRedirections != null && (!Number.isInteger(maxRedirections) || maxRedirections < 0)) {
-      throw new _InvalidArgumentError('maxRedirections must be a positive number');
+      throw new InvalidArgumentError('maxRedirections must be a positive number');
     }
     if (opts.throwOnMaxRedirect != null && typeof opts.throwOnMaxRedirect !== 'boolean') {
-      throw new _InvalidArgumentError('throwOnMaxRedirect must be a boolean');
+      throw new InvalidArgumentError('throwOnMaxRedirect must be a boolean');
     }
     this.dispatch = dispatch;
     this.location = null;
@@ -27,7 +30,7 @@ class RedirectHandler {
       ...cleanOpts
     } = opts;
     this.opts = cleanOpts; // opts must be a copy, exclude maxRedirections
-    this.opts.body = _wrapRequestBody(this.opts.body);
+    this.opts.body = util.wrapRequestBody(this.opts.body);
     this.stripHeadersOnRedirect = normalizeStripHeaders(stripHeadersOnRedirect, 'stripHeadersOnRedirect');
     this.stripHeadersOnCrossOriginRedirect = normalizeStripHeaders(stripHeadersOnCrossOriginRedirect, 'stripHeadersOnCrossOriginRedirect');
     this.maxRedirections = maxRedirections;
@@ -54,8 +57,8 @@ class RedirectHandler {
     // QUERY is safe (RFC 10008) and should not change method like GET.
     if ((statusCode === 301 || statusCode === 302) && this.opts.method === 'POST') {
       this.opts.method = 'GET';
-      if (_isStream(this.opts.body)) {
-        _destroy(this.opts.body.on('error', noop));
+      if (util.isStream(this.opts.body)) {
+        util.destroy(this.opts.body.on('error', noop));
       }
       this.opts.body = null;
     }
@@ -64,12 +67,12 @@ class RedirectHandler {
     // In case of HTTP 303, always replace method to be either HEAD or GET
     if (statusCode === 303 && this.opts.method !== 'HEAD') {
       this.opts.method = 'GET';
-      if (_isStream(this.opts.body)) {
-        _destroy(this.opts.body.on('error', noop));
+      if (util.isStream(this.opts.body)) {
+        util.destroy(this.opts.body.on('error', noop));
       }
       this.opts.body = null;
     }
-    this.location = this.history.length >= this.maxRedirections || _isDisturbed(this.opts.body) || redirectableStatusCodes.indexOf(statusCode) === -1 ? null : headers.location;
+    this.location = this.history.length >= this.maxRedirections || util.isDisturbed(this.opts.body) || redirectableStatusCodes.indexOf(statusCode) === -1 ? null : headers.location;
     if (this.opts.origin) {
       this.history.push(new URL(this.opts.path, this.opts.origin));
     }
@@ -81,7 +84,7 @@ class RedirectHandler {
       origin,
       pathname,
       search
-    } = _parseURL(new URL(this.location, this.opts.origin && new URL(this.opts.path, this.opts.origin)));
+    } = util.parseURL(new URL(this.location, this.opts.origin && new URL(this.opts.path, this.opts.origin)));
     const path = search ? `${pathname}${search}` : pathname;
 
     // Check for redirect loops by seeing if we've already visited this URL in our history
@@ -90,7 +93,7 @@ class RedirectHandler {
     const redirectUrlString = `${origin}${path}`;
     for (const historyUrl of this.history) {
       if (historyUrl.toString() === redirectUrlString) {
-        throw new _InvalidArgumentError(`Redirect loop detected. Cannot redirect to ${origin}. This typically happens when using a Client or Pool with cross-origin redirects. Use an Agent for cross-origin redirects.`);
+        throw new InvalidArgumentError(`Redirect loop detected. Cannot redirect to ${origin}. This typically happens when using a Client or Pool with cross-origin redirects. Use an Agent for cross-origin redirects.`);
       }
     }
 
@@ -141,7 +144,7 @@ class RedirectHandler {
 
 // https://tools.ietf.org/html/rfc7231#section-6.4.4
 function shouldRemoveHeader(header, removeContent, unknownOrigin, stripHeaders, stripHeadersOnCrossOrigin) {
-  const name = _headerNameToString(header);
+  const name = util.headerNameToString(header);
   if (name === 'host') {
     return true;
   }
@@ -163,14 +166,14 @@ function normalizeStripHeaders(headers, optionName) {
     return null;
   }
   if (!Array.isArray(headers)) {
-    throw new _InvalidArgumentError(`${optionName} must be an array`);
+    throw new InvalidArgumentError(`${optionName} must be an array`);
   }
   const normalized = new Set();
   for (const header of headers) {
     if (typeof header !== 'string') {
-      throw new _InvalidArgumentError(`${optionName} must contain header names`);
+      throw new InvalidArgumentError(`${optionName} must contain header names`);
     }
-    normalized.add(_headerNameToString(header));
+    normalized.add(util.headerNameToString(header));
   }
   return normalized;
 }
@@ -183,7 +186,7 @@ function cleanRequestHeaders(headers, removeContent, unknownOrigin, stripHeaders
       }
     }
   } else if (headers && typeof headers === 'object') {
-    const entries = _hasSafeIterator(headers) ? headers : Object.entries(headers);
+    const entries = util.hasSafeIterator(headers) ? headers : Object.entries(headers);
     for (const [key, value] of entries) {
       if (!shouldRemoveHeader(key, removeContent, unknownOrigin, stripHeaders, stripHeadersOnCrossOrigin)) {
         ret.push(key, value);

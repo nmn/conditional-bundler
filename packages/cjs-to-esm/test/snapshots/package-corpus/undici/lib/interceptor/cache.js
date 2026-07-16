@@ -1,14 +1,25 @@
 import * as assert from "node:assert";
 import * as _cjs_import from "node:stream";
-import { isStream as _isStream, toRawHeaders as _toRawHeaders, bodyLength as _bodyLength, safeHTTPMethods as _safeHTTPMethods } from "../core/util";
+import util from "../core/util";
 import CacheHandler from "../handler/cache-handler";
 import MemoryCacheStore from "../cache/memory-cache-store";
 import CacheRevalidationHandler from "../handler/cache-revalidation-handler";
-import { assertCacheStore as _assertCacheStore, assertCacheMethods as _assertCacheMethods, makeCacheKey as _makeCacheKey, normalizeHeaders as _normalizeHeaders, parseCacheControlHeader as _parseCacheControlHeader } from "../util/cache.js";
-import { AbortError as _AbortError } from "../core/errors.js";
+import _cjs_import2 from "../util/cache.js";
+import _cjs_import3 from "../core/errors.js";
 const {
   Readable
 } = _cjs_import;
+const {
+  assertCacheStore,
+  assertCacheMethods,
+  makeCacheKey,
+  normalizeHeaders,
+  parseCacheControlHeader
+} = _cjs_import2;
+const {
+  AbortError
+} = _cjs_import3;
+
 /**
  * @param {(string | RegExp)[] | undefined} origins
  * @param {string} name
@@ -124,7 +135,7 @@ function handleUncachedResponse(dispatch, globalOpts, cacheKey, handler, opts, r
       },
       abort: reason => {
         aborted = true;
-        handler.onResponseError?.(controller, reason ?? new _AbortError());
+        handler.onResponseError?.(controller, reason ?? new AbortError());
       }
     };
     try {
@@ -157,7 +168,7 @@ function handleUncachedResponse(dispatch, globalOpts, cacheKey, handler, opts, r
  */
 function sendCachedValue(handler, opts, result, age, context, isStale) {
   // TODO (perf): Readable.from path can be optimized...
-  const stream = _isStream(result.body) ? result.body : Readable.from(result.body ?? []);
+  const stream = util.isStream(result.body) ? result.body : Readable.from(result.body ?? []);
   assert(!stream.destroyed, 'stream should not be destroyed');
   assert(!stream.readableDidRead, 'stream should not be readableDidRead');
   const controller = {
@@ -179,7 +190,7 @@ function sendCachedValue(handler, opts, result, age, context, isStale) {
       return stream.errored;
     },
     abort(reason) {
-      stream.destroy(reason ?? new _AbortError());
+      stream.destroy(reason ?? new AbortError());
     }
   };
   stream.on('error', function (err) {
@@ -211,7 +222,7 @@ function sendCachedValue(handler, opts, result, age, context, isStale) {
     //  https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Warning
     headers.warning = '110 - "response is stale"';
   }
-  controller.rawHeaders = _toRawHeaders(headers);
+  controller.rawHeaders = util.toRawHeaders(headers);
   handler.onResponseStart?.(controller, result.statusCode, headers, result.statusMessage);
   if (opts.method === 'HEAD') {
     stream.destroy();
@@ -251,7 +262,7 @@ function handleResult(dispatch, globalOpts, cacheKey, handler, opts, reqCacheCon
 
   // Check if the response is stale
   if (stale || revalidate) {
-    if (_isStream(opts.body) && _bodyLength(opts.body) !== 0) {
+    if (util.isStream(opts.body) && util.bodyLength(opts.body) !== 0) {
       // If body is a stream we can't revalidate...
       // TODO (fix): This could be less strict...
       return dispatch(opts, new CacheHandler(globalOpts, cacheKey, handler));
@@ -324,14 +335,14 @@ function handleResult(dispatch, globalOpts, cacheKey, handler, opts, reqCacheCon
       if (success) {
         // TODO: successful revalidation should be considered fresh (not give stale warning).
         sendCachedValue(handler, opts, result, age, context, stale);
-      } else if (_isStream(result.body)) {
+      } else if (util.isStream(result.body)) {
         result.body.on('error', nop).destroy();
       }
     }, new CacheHandler(globalOpts, cacheKey, handler), withinStaleIfErrorThreshold));
   }
 
   // Dump request body.
-  if (_isStream(opts.body)) {
+  if (util.isStream(opts.body)) {
     opts.body.on('error', nop).destroy();
   }
   sendCachedValue(handler, opts, result, age, null, false);
@@ -352,8 +363,8 @@ const _cjs_default = (opts = {}) => {
   if (typeof opts !== 'object' || opts === null) {
     throw new TypeError(`expected type of opts to be an Object, got ${opts === null ? 'null' : typeof opts}`);
   }
-  _assertCacheStore(store, 'opts.store');
-  _assertCacheMethods(methods, 'opts.methods');
+  assertCacheStore(store, 'opts.store');
+  assertCacheMethods(methods, 'opts.methods');
   assertCacheOrigins(origins, 'opts.origins');
   if (typeof cacheByDefault !== 'undefined' && typeof cacheByDefault !== 'number') {
     throw new TypeError(`expected opts.cacheByDefault to be number or undefined, got ${typeof cacheByDefault}`);
@@ -367,7 +378,7 @@ const _cjs_default = (opts = {}) => {
     cacheByDefault,
     type
   };
-  const safeMethodsToNotCache = _safeHTTPMethods.filter(method => methods.includes(method) === false);
+  const safeMethodsToNotCache = util.safeHTTPMethods.filter(method => methods.includes(method) === false);
   return dispatch => {
     return (opts, handler) => {
       if (!opts.origin || safeMethodsToNotCache.includes(opts.method)) {
@@ -397,9 +408,9 @@ const _cjs_default = (opts = {}) => {
       }
       opts = {
         ...opts,
-        headers: _normalizeHeaders(opts)
+        headers: normalizeHeaders(opts)
       };
-      const reqCacheControl = opts.headers?.['cache-control'] ? _parseCacheControlHeader(opts.headers['cache-control']) : undefined;
+      const reqCacheControl = opts.headers?.['cache-control'] ? parseCacheControlHeader(opts.headers['cache-control']) : undefined;
       if (reqCacheControl?.['no-store']) {
         return dispatch(opts, handler);
       }
@@ -407,7 +418,7 @@ const _cjs_default = (opts = {}) => {
       /**
        * @type {import('../../types/cache-interceptor.d.ts').default.CacheKey}
        */
-      const cacheKey = _makeCacheKey(opts);
+      const cacheKey = makeCacheKey(opts);
       const result = store.get(cacheKey);
       if (result && typeof result.then === 'function') {
         return result.then(result => handleResult(dispatch, globalOpts, cacheKey, handler, opts, reqCacheControl, result));

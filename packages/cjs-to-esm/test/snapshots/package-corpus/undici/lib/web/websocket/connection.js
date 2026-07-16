@@ -389,6 +389,3 @@ if (!__cjs_default__) {
   __cjs_cache__.set("undici@8.7.0::lib/web/websocket/connection.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
-export const closeWebSocketConnection = __cjs_default__["closeWebSocketConnection"];
-export const establishWebSocketConnection = __cjs_default__["establishWebSocketConnection"];
-export const failWebsocketConnection = __cjs_default__["failWebsocketConnection"];

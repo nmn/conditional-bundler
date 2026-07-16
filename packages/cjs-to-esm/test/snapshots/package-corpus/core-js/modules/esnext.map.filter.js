@@ -1,10 +1,10 @@
 import $ from "../internals/export";
 import bind from "../internals/function-bind-context";
 import aMap from "../internals/a-map";
-import { Map as _Map, set as _set } from "../internals/map-helpers";
+import MapHelpers from "../internals/map-helpers";
 import iterate from "../internals/map-iterate";
-var Map = _Map;
-var set = _set;
+var Map = MapHelpers.Map;
+var set = MapHelpers.set;
 
 // `Map.prototype.filter` method
 // https://github.com/tc39/proposal-collection-methods

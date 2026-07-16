@@ -17,7 +17,9 @@
     "@babel/parser": "^7.24.0",
     "@babel/traverse": "^7.24.0",
     "@babel/types": "^7.24.0",
-    "@bundler/shared": "workspace:*"
+    "@bundler/shared": "workspace:*",
+    "image-size": "^2.0.2",
+    "lightningcss": "^1.29.1"
   },
   "devDependencies": {
     "@types/babel__core": "^7.20.5",

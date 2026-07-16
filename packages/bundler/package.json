@@ -17,9 +17,12 @@
     "@babel/traverse": "^7.24.0",
     "@babel/types": "^7.24.0",
     "@bundler/assets": "workspace:*",
+    "@bundler/css-plugin": "workspace:*",
+    "@bundler/html-plugin": "workspace:*",
+    "@bundler/module-paths": "workspace:*",
+    "@bundler/static-assets": "workspace:*",
     "@bundler/shared": "workspace:*",
     "@bundler/worker": "workspace:*",
-    "lightningcss": "^1.29.1",
     "react-refresh": "0.14.2"
   }
 }

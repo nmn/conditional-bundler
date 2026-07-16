@@ -2,7 +2,7 @@ import $ from "../internals/export";
 import globalThis from "../internals/global-this";
 import apply from "../internals/function-apply";
 import slice from "../internals/array-slice";
-import { f as _f } from "../internals/new-promise-capability";
+import newPromiseCapabilityModule from "../internals/new-promise-capability";
 import aCallable from "../internals/a-callable";
 import perform from "../internals/perform";
 var Promise = globalThis.Promise;
@@ -24,7 +24,7 @@ $({
 }, {
   'try': function (callbackfn /* , ...args */) {
     var args = arguments.length > 1 ? slice(arguments, 1) : [];
-    var promiseCapability = _f(this);
+    var promiseCapability = newPromiseCapabilityModule.f(this);
     var result = perform(function () {
       return apply(aCallable(callbackfn), undefined, args);
     });

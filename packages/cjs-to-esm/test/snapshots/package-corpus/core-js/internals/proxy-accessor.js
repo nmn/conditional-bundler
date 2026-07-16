@@ -1,5 +1,5 @@
-import { f as _f } from "../internals/object-define-property";
-var defineProperty = _f;
+import _cjs_import from "../internals/object-define-property";
+var defineProperty = _cjs_import.f;
 const _cjs_default = function (Target, Source, key) {
   key in Target || defineProperty(Target, key, {
     configurable: true,

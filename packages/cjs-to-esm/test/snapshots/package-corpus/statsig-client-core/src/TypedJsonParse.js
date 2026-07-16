@@ -1,4 +1,4 @@
-import { Log as _Log } from "./Log";
+import Log_1 from "./Log";
 /**
  *
  * @param {string} data The values to parse into T
@@ -15,7 +15,7 @@ export function _typedJsonParse(data, guard, typeName) {
   } catch (_a) {
     // noop
   }
-  _Log.error(`Failed to parse ${typeName}`);
+  Log_1.Log.error(`Failed to parse ${typeName}`);
   return null;
 }
 const _cjs_default = {

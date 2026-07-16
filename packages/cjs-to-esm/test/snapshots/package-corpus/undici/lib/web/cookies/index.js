@@ -1,8 +1,20 @@
-import { parseSetCookie as _parseSetCookie } from "./parse";
-import { stringify as _stringify } from "./util";
-import { webidl as _webidl } from "../webidl";
-import { Headers as _Headers } from "../fetch/headers";
-const brandChecks = _webidl.brandCheckMultiple([_Headers, globalThis.Headers].filter(Boolean));
+import _cjs_import from "./parse";
+import _cjs_import2 from "./util";
+import _cjs_import3 from "../webidl";
+import _cjs_import4 from "../fetch/headers";
+const {
+  parseSetCookie
+} = _cjs_import;
+const {
+  stringify
+} = _cjs_import2;
+const {
+  webidl
+} = _cjs_import3;
+const {
+  Headers
+} = _cjs_import4;
+const brandChecks = webidl.brandCheckMultiple([Headers, globalThis.Headers].filter(Boolean));
 
 /**
  * @typedef {Object} Cookie
@@ -23,7 +35,7 @@ const brandChecks = _webidl.brandCheckMultiple([_Headers, globalThis.Headers].fi
  * @returns {Record<string, string>}
  */
 function getCookies(headers) {
-  _webidl.argumentLengthCheck(arguments, 1, 'getCookies');
+  webidl.argumentLengthCheck(arguments, 1, 'getCookies');
   brandChecks(headers);
   const cookie = headers.get('cookie');
 
@@ -48,9 +60,9 @@ function getCookies(headers) {
 function deleteCookie(headers, name, attributes) {
   brandChecks(headers);
   const prefix = 'deleteCookie';
-  _webidl.argumentLengthCheck(arguments, 2, prefix);
-  name = _webidl.converters.DOMString(name, prefix, 'name');
-  attributes = _webidl.converters.DeleteCookieAttributes(attributes);
+  webidl.argumentLengthCheck(arguments, 2, prefix);
+  name = webidl.converters.DOMString(name, prefix, 'name');
+  attributes = webidl.converters.DeleteCookieAttributes(attributes);
 
   // Matches behavior of
   // https://github.com/denoland/deno_std/blob/63827b16330b82489a04614027c33b7904e08be5/http/cookie.ts#L278
@@ -67,13 +79,13 @@ function deleteCookie(headers, name, attributes) {
  * @returns {Cookie[]}
  */
 function getSetCookies(headers) {
-  _webidl.argumentLengthCheck(arguments, 1, 'getSetCookies');
+  webidl.argumentLengthCheck(arguments, 1, 'getSetCookies');
   brandChecks(headers);
   const cookies = headers.getSetCookie();
   if (!cookies) {
     return [];
   }
-  return cookies.map(pair => _parseSetCookie(pair));
+  return cookies.map(pair => parseSetCookie(pair));
 }
 
 /**
@@ -81,8 +93,8 @@ function getSetCookies(headers) {
  * @param {string} cookie
  */
 function parseCookie(cookie) {
-  cookie = _webidl.converters.DOMString(cookie);
-  return _parseSetCookie(cookie);
+  cookie = webidl.converters.DOMString(cookie);
+  return parseSetCookie(cookie);
 }
 
 /**
@@ -91,64 +103,64 @@ function parseCookie(cookie) {
  * @returns {void}
  */
 function setCookie(headers, cookie) {
-  _webidl.argumentLengthCheck(arguments, 2, 'setCookie');
+  webidl.argumentLengthCheck(arguments, 2, 'setCookie');
   brandChecks(headers);
-  cookie = _webidl.converters.Cookie(cookie);
-  const str = _stringify(cookie);
+  cookie = webidl.converters.Cookie(cookie);
+  const str = stringify(cookie);
   if (str) {
     headers.append('set-cookie', str, true);
   }
 }
-_webidl.converters.DeleteCookieAttributes = _webidl.dictionaryConverter([{
-  converter: _webidl.nullableConverter(_webidl.converters.DOMString),
+webidl.converters.DeleteCookieAttributes = webidl.dictionaryConverter([{
+  converter: webidl.nullableConverter(webidl.converters.DOMString),
   key: 'path',
   defaultValue: () => null
 }, {
-  converter: _webidl.nullableConverter(_webidl.converters.DOMString),
+  converter: webidl.nullableConverter(webidl.converters.DOMString),
   key: 'domain',
   defaultValue: () => null
 }]);
-_webidl.converters.Cookie = _webidl.dictionaryConverter([{
-  converter: _webidl.converters.DOMString,
+webidl.converters.Cookie = webidl.dictionaryConverter([{
+  converter: webidl.converters.DOMString,
   key: 'name'
 }, {
-  converter: _webidl.converters.DOMString,
+  converter: webidl.converters.DOMString,
   key: 'value'
 }, {
-  converter: _webidl.nullableConverter(value => {
+  converter: webidl.nullableConverter(value => {
     if (typeof value === 'number') {
-      return _webidl.converters['unsigned long long'](value);
+      return webidl.converters['unsigned long long'](value);
     }
     return new Date(value);
   }),
   key: 'expires',
   defaultValue: () => null
 }, {
-  converter: _webidl.nullableConverter(_webidl.converters['long long']),
+  converter: webidl.nullableConverter(webidl.converters['long long']),
   key: 'maxAge',
   defaultValue: () => null
 }, {
-  converter: _webidl.nullableConverter(_webidl.converters.DOMString),
+  converter: webidl.nullableConverter(webidl.converters.DOMString),
   key: 'domain',
   defaultValue: () => null
 }, {
-  converter: _webidl.nullableConverter(_webidl.converters.DOMString),
+  converter: webidl.nullableConverter(webidl.converters.DOMString),
   key: 'path',
   defaultValue: () => null
 }, {
-  converter: _webidl.nullableConverter(_webidl.converters.boolean),
+  converter: webidl.nullableConverter(webidl.converters.boolean),
   key: 'secure',
   defaultValue: () => null
 }, {
-  converter: _webidl.nullableConverter(_webidl.converters.boolean),
+  converter: webidl.nullableConverter(webidl.converters.boolean),
   key: 'httpOnly',
   defaultValue: () => null
 }, {
-  converter: _webidl.converters.USVString,
+  converter: webidl.converters.USVString,
   key: 'sameSite',
   allowedValues: ['Strict', 'Lax', 'None']
 }, {
-  converter: _webidl.sequenceConverter(_webidl.converters.DOMString),
+  converter: webidl.sequenceConverter(webidl.converters.DOMString),
   key: 'unparsed',
   defaultValue: () => []
 }]);

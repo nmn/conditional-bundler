@@ -3,7 +3,7 @@ import globalThis from "../internals/global-this";
 import uncurryThis from "../internals/function-uncurry-this";
 import isForced from "../internals/is-forced";
 import defineBuiltIn from "../internals/define-built-in";
-import { enable as _enable } from "../internals/internal-metadata";
+import InternalMetadataModule from "../internals/internal-metadata";
 import iterate from "../internals/iterate";
 import anInstance from "../internals/an-instance";
 import isCallable from "../internals/is-callable";
@@ -43,7 +43,7 @@ const _cjs_default = function (CONSTRUCTOR_NAME, wrapper, common) {
   if (REPLACE) {
     // create collection constructor
     Constructor = common.getConstructor(wrapper, CONSTRUCTOR_NAME, IS_MAP, ADDER);
-    _enable();
+    InternalMetadataModule.enable();
   } else if (isForced(CONSTRUCTOR_NAME, true)) {
     var instance = new Constructor();
     // early implementations not supports chaining

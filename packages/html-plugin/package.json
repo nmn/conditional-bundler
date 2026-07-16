@@ -1,0 +1,15 @@
+{
+  "name": "@bundler/html-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./bundler.mjs",
+  "exports": {
+    ".": "./bundler.mjs"
+  },
+  "dependencies": {
+    "@bundler/shared": "workspace:*",
+    "@jridgewell/gen-mapping": "^0.3.8",
+    "parse5": "^7.2.1"
+  }
+}

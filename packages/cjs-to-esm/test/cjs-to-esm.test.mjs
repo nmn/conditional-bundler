@@ -3,20 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { transformAsync } from "@babel/core";
 import { TraceMap, originalPositionFor } from "@jridgewell/trace-mapping";
-import cjsToEsmBabelPlugin, {
-  decodeCjsVirtualId,
-  encodeCjsVirtualId,
-} from "../index.mjs";
+import cjsToEsmBabelPlugin, { createCjsModuleIdentity } from "../index.mjs";
 
 async function transformCjs(source, options = {}) {
   const filePath = options.filePath ?? path.join(os.tmpdir(), "example.cjs");
   const envId = options.envId ?? "client";
-  const id = encodeCjsVirtualId(
-    envId,
-    filePath,
-    undefined,
-    options.virtualMode,
-  );
   return transformAsync(source, {
     filename: filePath,
     sourceMaps: true,
@@ -24,8 +15,9 @@ async function transformCjs(source, options = {}) {
       [
         cjsToEsmBabelPlugin,
         {
-          id,
           filePath,
+          moduleIdentity: createCjsModuleIdentity(filePath),
+          format: "commonjs",
           envId,
           mode: options.mode ?? "development",
           strategy: options.strategy,
@@ -93,11 +85,7 @@ describe("cjs-to-esm Babel plugin", () => {
 
     expect(result.code).toContain('from "./dependency.cjs"');
     expect(result.code).not.toContain("virtual:cjs-to-esm:");
-    expect(
-      decodeCjsVirtualId(
-        encodeCjsVirtualId("client", filePath, undefined, "production"),
-      ),
-    ).toEqual({ envId: "client", mode: "production", filePath });
+    expect(result.metadata.cjsToEsm).toEqual({ strategy: "static" });
   });
 
   test("selects the production NODE_ENV conditional entry", async () => {

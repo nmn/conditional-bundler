@@ -2,9 +2,9 @@ import $ from "../internals/export";
 import getBuiltIn from "../internals/get-built-in";
 import IS_PURE from "../internals/is-pure";
 import NativePromiseConstructor from "../internals/promise-native-constructor";
-import { CONSTRUCTOR as _CONSTRUCTOR } from "../internals/promise-constructor-detection";
+import _cjs_import from "../internals/promise-constructor-detection";
 import promiseResolve from "../internals/promise-resolve";
-var FORCED_PROMISE_CONSTRUCTOR = _CONSTRUCTOR;
+var FORCED_PROMISE_CONSTRUCTOR = _cjs_import.CONSTRUCTOR;
 var PromiseConstructorWrapper = getBuiltIn('Promise');
 var CHECK_WRAPPER = IS_PURE && !FORCED_PROMISE_CONSTRUCTOR;
 

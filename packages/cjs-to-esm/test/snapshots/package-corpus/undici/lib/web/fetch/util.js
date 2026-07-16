@@ -1,23 +1,48 @@
 import * as _cjs_import from "node:stream";
 import * as zlib from "node:zlib";
-import { redirectStatusSet as _redirectStatusSet, referrerPolicyTokens as _referrerPolicyTokens, badPortsSet as _badPortsSet } from "./constants";
-import { getGlobalOrigin as _getGlobalOrigin } from "./global";
-import { collectAnHTTPQuotedString as _collectAnHTTPQuotedString, parseMIMEType as _parseMIMEType } from "./data-url";
-import * as _cjs_import2 from "node:perf_hooks";
-import { ReadableStreamFrom as _ReadableStreamFrom, isValidHTTPToken as _isValidHTTPToken, normalizedMethodRecordsBase as _normalizedMethodRecordsBase } from "../../core/util";
+import _cjs_import2 from "./constants";
+import _cjs_import3 from "./global";
+import _cjs_import4 from "./data-url";
+import * as _cjs_import5 from "node:perf_hooks";
+import _cjs_import6 from "../../core/util";
 import * as assert from "node:assert";
-import * as _cjs_import3 from "node:util/types";
-import { webidl as _webidl } from "../webidl";
-import { isomorphicEncode as _isomorphicEncode, collectASequenceOfCodePoints as _collectASequenceOfCodePoints, removeChars as _removeChars } from "../infra";
+import * as _cjs_import7 from "node:util/types";
+import _cjs_import8 from "../webidl";
+import _cjs_import9 from "../infra";
 const {
   Transform
 } = _cjs_import;
 const {
-  performance
+  redirectStatusSet,
+  referrerPolicyTokens,
+  badPortsSet
 } = _cjs_import2;
 const {
-  isUint8Array
+  getGlobalOrigin
 } = _cjs_import3;
+const {
+  collectAnHTTPQuotedString,
+  parseMIMEType
+} = _cjs_import4;
+const {
+  performance
+} = _cjs_import5;
+const {
+  ReadableStreamFrom,
+  isValidHTTPToken,
+  normalizedMethodRecordsBase
+} = _cjs_import6;
+const {
+  isUint8Array
+} = _cjs_import7;
+const {
+  webidl
+} = _cjs_import8;
+const {
+  isomorphicEncode,
+  collectASequenceOfCodePoints,
+  removeChars
+} = _cjs_import9;
 function responseURL(response) {
   // https://fetch.spec.whatwg.org/#responses
   // A response has an associated URL. It is a pointer to the last URL
@@ -30,7 +55,7 @@ function responseURL(response) {
 // https://fetch.spec.whatwg.org/#concept-response-location-url
 function responseLocationURL(response, requestFragment) {
   // 1. If response’s status is not a redirect status, then return null.
-  if (!_redirectStatusSet.has(response.status)) {
+  if (!redirectStatusSet.has(response.status)) {
     return null;
   }
 
@@ -98,7 +123,7 @@ function requestBadPort(request) {
 
   // 2. If url’s scheme is an HTTP(S) scheme and url’s port is a bad port,
   // then return blocked.
-  if (urlIsHttpHttpsScheme(url) && _badPortsSet.has(url.port)) {
+  if (urlIsHttpHttpsScheme(url) && badPortsSet.has(url.port)) {
     return 'blocked';
   }
 
@@ -135,7 +160,7 @@ function isValidReasonPhrase(statusText) {
  * @see https://fetch.spec.whatwg.org/#header-name
  * @param {string} potentialValue
  */
-const isValidHeaderName = _isValidHTTPToken;
+const isValidHeaderName = isValidHTTPToken;
 
 /**
  * @see https://fetch.spec.whatwg.org/#header-value
@@ -169,7 +194,7 @@ function parseReferrerPolicy(actualResponse) {
     // The left-most policy is the fallback.
     for (let i = policyHeader.length; i !== 0; i--) {
       const token = policyHeader[i - 1].trim();
-      if (_referrerPolicyTokens.has(token)) {
+      if (referrerPolicyTokens.has(token)) {
         policy = token;
         break;
       }
@@ -388,7 +413,7 @@ function determineRequestsReferrer(request) {
     // Note: node isn't a browser and doesn't implement document/iframes,
     // so we bypass this step and replace it with our own.
 
-    const globalOrigin = _getGlobalOrigin();
+    const globalOrigin = getGlobalOrigin();
     if (!globalOrigin || globalOrigin.origin === 'null') {
       return 'no-referrer';
     }
@@ -396,7 +421,7 @@ function determineRequestsReferrer(request) {
     // Note: we need to clone it as it's mutated
     referrerSource = new URL(globalOrigin);
     // a URL
-  } else if (_webidl.is.URL(request.referrer)) {
+  } else if (webidl.is.URL(request.referrer)) {
     // Let referrerSource be request’s referrer.
     referrerSource = request.referrer;
   }
@@ -513,7 +538,7 @@ function determineRequestsReferrer(request) {
  */
 function stripURLForReferrer(url, originOnly = false) {
   // 1. Assert: url is a URL.
-  assert(_webidl.is.URL(url));
+  assert(webidl.is.URL(url));
 
   // Note: Create a new URL instance to avoid mutating the original URL.
   url = new URL(url);
@@ -642,7 +667,7 @@ function isOriginPotentiallyTrustworthy(origin) {
 function isURLPotentiallyTrustworthy(url) {
   // Given a URL record (url), the following algorithm returns "Potentially
   // Trustworthy" or "Not Trustworthy" as appropriate:
-  if (!_webidl.is.URL(url)) {
+  if (!webidl.is.URL(url)) {
     return false;
   }
 
@@ -702,7 +727,7 @@ function isCancelled(fetchParams) {
  * @param {string} method
  */
 function normalizeMethod(method) {
-  return _normalizedMethodRecordsBase[method.toLowerCase()] ?? method;
+  return normalizedMethodRecordsBase[method.toLowerCase()] ?? method;
 }
 
 // https://tc39.es/ecma262/#sec-%25iteratorprototype%25-object
@@ -861,7 +886,7 @@ function iteratorMixin(name, object, kInternalIterator, keyIndex = 0, valueIndex
       enumerable: true,
       configurable: true,
       value: function keys() {
-        _webidl.brandCheck(this, object);
+        webidl.brandCheck(this, object);
         return makeIterator(this, 'key');
       }
     },
@@ -870,7 +895,7 @@ function iteratorMixin(name, object, kInternalIterator, keyIndex = 0, valueIndex
       enumerable: true,
       configurable: true,
       value: function values() {
-        _webidl.brandCheck(this, object);
+        webidl.brandCheck(this, object);
         return makeIterator(this, 'value');
       }
     },
@@ -879,7 +904,7 @@ function iteratorMixin(name, object, kInternalIterator, keyIndex = 0, valueIndex
       enumerable: true,
       configurable: true,
       value: function entries() {
-        _webidl.brandCheck(this, object);
+        webidl.brandCheck(this, object);
         return makeIterator(this, 'key+value');
       }
     },
@@ -888,8 +913,8 @@ function iteratorMixin(name, object, kInternalIterator, keyIndex = 0, valueIndex
       enumerable: true,
       configurable: true,
       value: function forEach(callbackfn, thisArg = globalThis) {
-        _webidl.brandCheck(this, object);
-        _webidl.argumentLengthCheck(arguments, 1, `${name}.forEach`);
+        webidl.brandCheck(this, object);
+        webidl.argumentLengthCheck(arguments, 1, `${name}.forEach`);
         if (typeof callbackfn !== 'function') {
           throw new TypeError(`Failed to execute 'forEach' on '${name}': parameter 1 is not of type 'Function'.`);
         }
@@ -1067,7 +1092,7 @@ function simpleRangeHeaderValue(value, allowWhitespace) {
   // 4. If allowWhitespace is true, collect a sequence of code points that are HTTP tab or space,
   //    from data given position.
   if (allowWhitespace) {
-    _collectASequenceOfCodePoints(char => char === '\t' || char === ' ', data, position);
+    collectASequenceOfCodePoints(char => char === '\t' || char === ' ', data, position);
   }
 
   // 5. If the code point at position within data is not U+003D (=), then return failure.
@@ -1081,12 +1106,12 @@ function simpleRangeHeaderValue(value, allowWhitespace) {
   // 7. If allowWhitespace is true, collect a sequence of code points that are HTTP tab or space, from
   //    data given position.
   if (allowWhitespace) {
-    _collectASequenceOfCodePoints(char => char === '\t' || char === ' ', data, position);
+    collectASequenceOfCodePoints(char => char === '\t' || char === ' ', data, position);
   }
 
   // 8. Let rangeStart be the result of collecting a sequence of code points that are ASCII digits,
   //    from data given position.
-  const rangeStart = _collectASequenceOfCodePoints(char => {
+  const rangeStart = collectASequenceOfCodePoints(char => {
     const code = char.charCodeAt(0);
     return code >= 0x30 && code <= 0x39;
   }, data, position);
@@ -1098,7 +1123,7 @@ function simpleRangeHeaderValue(value, allowWhitespace) {
   // 10. If allowWhitespace is true, collect a sequence of code points that are HTTP tab or space,
   //     from data given position.
   if (allowWhitespace) {
-    _collectASequenceOfCodePoints(char => char === '\t' || char === ' ', data, position);
+    collectASequenceOfCodePoints(char => char === '\t' || char === ' ', data, position);
   }
 
   // 11. If the code point at position within data is not U+002D (-), then return failure.
@@ -1113,13 +1138,13 @@ function simpleRangeHeaderValue(value, allowWhitespace) {
   //     or space, from data given position.
   // Note from Khafra: its the same step as in #8 again lol
   if (allowWhitespace) {
-    _collectASequenceOfCodePoints(char => char === '\t' || char === ' ', data, position);
+    collectASequenceOfCodePoints(char => char === '\t' || char === ' ', data, position);
   }
 
   // 14. Let rangeEnd be the result of collecting a sequence of code points that are
   //     ASCII digits, from data given position.
   // Note from Khafra: you wouldn't guess it, but this is also the same step as #8
-  const rangeEnd = _collectASequenceOfCodePoints(char => {
+  const rangeEnd = collectASequenceOfCodePoints(char => {
     const code = char.charCodeAt(0);
     return code >= 0x30 && code <= 0x39;
   }, data, position);
@@ -1168,19 +1193,19 @@ function buildContentRange(rangeStart, rangeEnd, fullLength) {
   let contentRange = 'bytes ';
 
   // 2. Append rangeStart, serialized and isomorphic encoded, to contentRange.
-  contentRange += _isomorphicEncode(`${rangeStart}`);
+  contentRange += isomorphicEncode(`${rangeStart}`);
 
   // 3. Append 0x2D (-) to contentRange.
   contentRange += '-';
 
   // 4. Append rangeEnd, serialized and isomorphic encoded to contentRange.
-  contentRange += _isomorphicEncode(`${rangeEnd}`);
+  contentRange += isomorphicEncode(`${rangeEnd}`);
 
   // 5. Append 0x2F (/) to contentRange.
   contentRange += '/';
 
   // 6. Append fullLength, serialized and isomorphic encoded to contentRange.
-  contentRange += _isomorphicEncode(`${fullLength}`);
+  contentRange += isomorphicEncode(`${fullLength}`);
 
   // 7. Return contentRange.
   return contentRange;
@@ -1254,7 +1279,7 @@ function extractMimeType(headers) {
   // 6. For each value of values:
   for (const value of values) {
     // 6.1. Let temporaryMimeType be the result of parsing value.
-    const temporaryMimeType = _parseMIMEType(value);
+    const temporaryMimeType = parseMIMEType(value);
 
     // 6.2. If temporaryMimeType is failure or its essence is "*/*", then continue.
     if (temporaryMimeType === 'failure' || temporaryMimeType.essence === '*/*') {
@@ -1316,14 +1341,14 @@ function gettingDecodingSplitting(value) {
   while (position.position < input.length) {
     // 5.1. Append the result of collecting a sequence of code points that are not U+0022 (")
     //      or U+002C (,) from input, given position, to temporaryValue.
-    temporaryValue += _collectASequenceOfCodePoints(char => char !== '"' && char !== ',', input, position);
+    temporaryValue += collectASequenceOfCodePoints(char => char !== '"' && char !== ',', input, position);
 
     // 5.2. If position is not past the end of input, then:
     if (position.position < input.length) {
       // 5.2.1. If the code point at position within input is U+0022 ("), then:
       if (input.charCodeAt(position.position) === 0x22) {
         // 5.2.1.1. Append the result of collecting an HTTP quoted string from input, given position, to temporaryValue.
-        temporaryValue += _collectAnHTTPQuotedString(input, position);
+        temporaryValue += collectAnHTTPQuotedString(input, position);
 
         // 5.2.1.2. If position is not past the end of input, then continue.
         if (position.position < input.length) {
@@ -1341,7 +1366,7 @@ function gettingDecodingSplitting(value) {
     }
 
     // 5.3. Remove all HTTP tab or space from the start and end of temporaryValue.
-    temporaryValue = _removeChars(temporaryValue, true, true, char => char === 0x9 || char === 0x20);
+    temporaryValue = removeChars(temporaryValue, true, true, char => char === 0x9 || char === 0x20);
 
     // 5.4. Append temporaryValue to values.
     values.push(temporaryValue);
@@ -1396,7 +1421,7 @@ function isTraversableNavigable(navigable) {
 }
 class EnvironmentSettingsObjectBase {
   get baseUrl() {
-    return _getGlobalOrigin();
+    return getGlobalOrigin();
   }
   get origin() {
     return this.baseUrl?.origin;
@@ -1411,7 +1436,7 @@ const _cjs_default = {
   isAborted,
   isCancelled,
   isValidEncodedURL,
-  ReadableStreamFrom: _ReadableStreamFrom,
+  ReadableStreamFrom,
   tryUpgradeRequestToAPotentiallyTrustworthyURL,
   clampAndCoarsenConnectionTimingInfo,
   coarsenedSharedCurrentTime,
@@ -1425,7 +1450,7 @@ const _cjs_default = {
   crossOriginResourcePolicyCheck,
   createOpaqueTimingInfo,
   setRequestReferrerPolicyOnRedirect,
-  isValidHTTPToken: _isValidHTTPToken,
+  isValidHTTPToken,
   requestBadPort,
   requestCurrentURL,
   responseURL,
@@ -1462,8 +1487,8 @@ const _isCancelled = _cjs_default["isCancelled"];
 export { _isCancelled as isCancelled };
 const _isValidEncodedURL = _cjs_default["isValidEncodedURL"];
 export { _isValidEncodedURL as isValidEncodedURL };
-const _ReadableStreamFrom2 = _cjs_default["ReadableStreamFrom"];
-export { _ReadableStreamFrom2 as ReadableStreamFrom };
+const _ReadableStreamFrom = _cjs_default["ReadableStreamFrom"];
+export { _ReadableStreamFrom as ReadableStreamFrom };
 const _tryUpgradeRequestToAPotentiallyTrustworthyURL = _cjs_default["tryUpgradeRequestToAPotentiallyTrustworthyURL"];
 export { _tryUpgradeRequestToAPotentiallyTrustworthyURL as tryUpgradeRequestToAPotentiallyTrustworthyURL };
 const _clampAndCoarsenConnectionTimingInfo = _cjs_default["clampAndCoarsenConnectionTimingInfo"];
@@ -1490,8 +1515,8 @@ const _createOpaqueTimingInfo = _cjs_default["createOpaqueTimingInfo"];
 export { _createOpaqueTimingInfo as createOpaqueTimingInfo };
 const _setRequestReferrerPolicyOnRedirect = _cjs_default["setRequestReferrerPolicyOnRedirect"];
 export { _setRequestReferrerPolicyOnRedirect as setRequestReferrerPolicyOnRedirect };
-const _isValidHTTPToken2 = _cjs_default["isValidHTTPToken"];
-export { _isValidHTTPToken2 as isValidHTTPToken };
+const _isValidHTTPToken = _cjs_default["isValidHTTPToken"];
+export { _isValidHTTPToken as isValidHTTPToken };
 const _requestBadPort = _cjs_default["requestBadPort"];
 export { _requestBadPort as requestBadPort };
 const _requestCurrentURL = _cjs_default["requestCurrentURL"];

@@ -1,4 +1,4 @@
-import { _typeOf } from "./TypingUtils";
+import TypingUtils_1 from "./TypingUtils";
 const _DJB2 = value => {
   let hash = 0;
   for (let i = 0; i < value.length; i++) {
@@ -21,7 +21,7 @@ const _getSortedObject = (object, maxDepth) => {
   const sortedObject = {};
   keys.forEach(key => {
     const value = object[key];
-    if (maxDepth === 0 || (0, _typeOf)(value) !== 'object') {
+    if (maxDepth === 0 || (0, TypingUtils_1._typeOf)(value) !== 'object') {
       sortedObject[key] = value;
       return;
     }

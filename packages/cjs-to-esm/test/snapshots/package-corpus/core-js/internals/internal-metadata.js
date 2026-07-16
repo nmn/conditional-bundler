@@ -3,13 +3,13 @@ import uncurryThis from "../internals/function-uncurry-this";
 import hiddenKeys from "../internals/hidden-keys";
 import isObject from "../internals/is-object";
 import hasOwn from "../internals/has-own-property";
-import { f as _f } from "../internals/object-define-property";
-import { f as _f2 } from "../internals/object-get-own-property-names";
-import { f as _f3 } from "../internals/object-get-own-property-names-external";
+import _cjs_import from "../internals/object-define-property";
+import getOwnPropertyNamesModule from "../internals/object-get-own-property-names";
+import getOwnPropertyNamesExternalModule from "../internals/object-get-own-property-names-external";
 import isExtensible from "../internals/object-is-extensible";
 import uid from "../internals/uid";
 import FREEZING from "../internals/freezing";
-var defineProperty = _f;
+var defineProperty = _cjs_import.f;
 var REQUIRED = false;
 var METADATA = uid('meta');
 var id = 0;
@@ -57,7 +57,7 @@ var onFreeze = function (it) {
 var enable = function () {
   meta.enable = function () {/* empty */};
   REQUIRED = true;
-  var getOwnPropertyNames = _f2;
+  var getOwnPropertyNames = getOwnPropertyNamesModule.f;
   var splice = uncurryThis([].splice);
   var test = {};
   // eslint-disable-next-line unicorn/no-immediate-mutation -- ES3 syntax limitation
@@ -65,7 +65,7 @@ var enable = function () {
 
   // prevent exposing of metadata key
   if (getOwnPropertyNames(test).length) {
-    _f2 = function (it) {
+    getOwnPropertyNamesModule.f = function (it) {
       var result = getOwnPropertyNames(it);
       for (var i = 0, length = result.length; i < length; i++) {
         if (result[i] === METADATA) {
@@ -80,7 +80,7 @@ var enable = function () {
       stat: true,
       forced: true
     }, {
-      getOwnPropertyNames: _f3
+      getOwnPropertyNames: getOwnPropertyNamesExternalModule.f
     });
   }
 };

@@ -1,5 +1,9 @@
 import * as assert from "node:assert";
-import { utf8DecodeBytes as _utf8DecodeBytes } from "../../encoding";
+import _cjs_import from "../../encoding";
+const {
+  utf8DecodeBytes
+} = _cjs_import;
+
 /**
  * @param {(char: string) => boolean} condition
  * @param {string} input
@@ -155,7 +159,7 @@ function isomorphicEncode(input) {
  * @param {Uint8Array} bytes
  */
 function parseJSONFromBytes(bytes) {
-  return JSON.parse(_utf8DecodeBytes(bytes));
+  return JSON.parse(utf8DecodeBytes(bytes));
 }
 
 /**

@@ -1,8 +1,8 @@
-import { aTypedArray as _aTypedArray, exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
-import { findLast as _findLast } from "../internals/array-iteration-from-last";
-var $findLast = _findLast;
-var aTypedArray = _aTypedArray;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
+import _cjs_import from "../internals/array-iteration-from-last";
+var $findLast = _cjs_import.findLast;
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
 
 // `%TypedArray%.prototype.findLast` method
 // https://tc39.es/ecma262/#sec-%typedarray%.prototype.findlast

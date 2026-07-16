@@ -1,4 +1,4 @@
-import { DataAdapterCore as _DataAdapterCore, _normalizeUser, _typedJsonParse, Log as _Log, _getStorageKey, DataAdapterCachePrefix as _DataAdapterCachePrefix, _getFullUserHash } from "@statsig/client-core";
+import client_core_1 from "@statsig/client-core";
 import Network_1 from "./Network";
 var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, generator) {
   function adopt(value) {
@@ -27,7 +27,7 @@ var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, gene
     step((generator = generator.apply(thisArg, _arguments || [])).next());
   });
 };
-export class StatsigEvaluationsDataAdapter extends _DataAdapterCore {
+export class StatsigEvaluationsDataAdapter extends client_core_1.DataAdapterCore {
   constructor() {
     super('EvaluationsDataAdapter', 'evaluations');
     this._network = null;
@@ -42,17 +42,17 @@ export class StatsigEvaluationsDataAdapter extends _DataAdapterCore {
     }
   }
   getDataAsync(current, user, options) {
-    return this._getDataAsyncImpl(current, (0, _normalizeUser)(user, this._options), options);
+    return this._getDataAsyncImpl(current, (0, client_core_1._normalizeUser)(user, this._options), options);
   }
   prefetchData(user, options) {
     return this._prefetchDataImpl(user, options);
   }
   setData(data) {
-    const values = (0, _typedJsonParse)(data, 'has_updates', 'data');
+    const values = (0, client_core_1._typedJsonParse)(data, 'has_updates', 'data');
     if (values && 'user' in values) {
       super.setData(data, values.user);
     } else {
-      _Log.error('StatsigUser not found. You may be using an older server SDK version. Please upgrade your SDK or use setDataLegacy.');
+      client_core_1.Log.error('StatsigUser not found. You may be using an older server SDK version. Please upgrade your SDK or use setDataLegacy.');
     }
   }
   setDataLegacy(data, user) {
@@ -67,11 +67,11 @@ export class StatsigEvaluationsDataAdapter extends _DataAdapterCore {
   }
   _getCacheKey(user) {
     var _a;
-    const key = (0, _getStorageKey)(this._getSdkKey(), user, (_a = this._options) === null || _a === void 0 ? void 0 : _a.customUserCacheKeyFunc);
-    return `${_DataAdapterCachePrefix}.${this._cacheSuffix}.${key}`;
+    const key = (0, client_core_1._getStorageKey)(this._getSdkKey(), user, (_a = this._options) === null || _a === void 0 ? void 0 : _a.customUserCacheKeyFunc);
+    return `${client_core_1.DataAdapterCachePrefix}.${this._cacheSuffix}.${key}`;
   }
   _isCachedResultValidFor204(result, user) {
-    return result.fullUserHash != null && result.fullUserHash === (0, _getFullUserHash)(user);
+    return result.fullUserHash != null && result.fullUserHash === (0, client_core_1._getFullUserHash)(user);
   }
 }
 const _cjs_default = {

@@ -4,8 +4,8 @@ import uncurryThis from "../internals/function-uncurry-this";
 import objectGetPrototypeOf from "../internals/object-get-prototype-of";
 import objectKeys from "../internals/object-keys";
 import toIndexedObject from "../internals/to-indexed-object";
-import { f as _f } from "../internals/object-property-is-enumerable";
-var $propertyIsEnumerable = _f;
+import _cjs_import from "../internals/object-property-is-enumerable";
+var $propertyIsEnumerable = _cjs_import.f;
 var propertyIsEnumerable = uncurryThis($propertyIsEnumerable);
 var push = uncurryThis([].push);
 

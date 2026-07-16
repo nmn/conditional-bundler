@@ -1,12 +1,12 @@
 import getBuiltIn from "../internals/get-built-in";
 import aConstructor from "../internals/a-constructor";
 import arrayFromAsync from "../internals/array-from-async";
-import { aTypedArrayConstructor as _aTypedArrayConstructor, exportTypedArrayStaticMethod as _exportTypedArrayStaticMethod } from "../internals/array-buffer-view-core";
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
 import arrayFromConstructorAndList from "../internals/array-from-constructor-and-list";
 // TODO: Remove from `core-js@4`
 
-var aTypedArrayConstructor = _aTypedArrayConstructor;
-var exportTypedArrayStaticMethod = _exportTypedArrayStaticMethod;
+var aTypedArrayConstructor = ArrayBufferViewCore.aTypedArrayConstructor;
+var exportTypedArrayStaticMethod = ArrayBufferViewCore.exportTypedArrayStaticMethod;
 
 // `%TypedArray%.fromAsync` method
 // https://github.com/tc39/proposal-array-from-async

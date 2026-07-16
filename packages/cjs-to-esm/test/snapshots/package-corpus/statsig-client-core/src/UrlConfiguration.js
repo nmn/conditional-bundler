@@ -1,9 +1,9 @@
-import { _DJB2 as _DJB } from "./Hashing";
-import { Endpoint as _Endpoint, NetworkDefault as _NetworkDefault } from "./NetworkConfig";
+import Hashing_1 from "./Hashing";
+import NetworkConfig_1 from "./NetworkConfig";
 const ENDPOINT_DNS_KEY_MAP = {
-  [_Endpoint._initialize]: 'i',
-  [_Endpoint._rgstr]: 'e',
-  [_Endpoint._download_config_specs]: 'd'
+  [NetworkConfig_1.Endpoint._initialize]: 'i',
+  [NetworkConfig_1.Endpoint._rgstr]: 'e',
+  [NetworkConfig_1.Endpoint._download_config_specs]: 'd'
 };
 export class UrlConfiguration {
   constructor(endpoint, customUrl, customApi, fallbackUrls) {
@@ -20,7 +20,7 @@ export class UrlConfiguration {
     if (fallbackUrls) {
       this.fallbackUrls = fallbackUrls;
     }
-    const defaultApi = _NetworkDefault[endpoint];
+    const defaultApi = NetworkConfig_1.NetworkDefault[endpoint];
     this.defaultUrl = `${defaultApi}/${endpoint}`;
   }
   getUrl() {
@@ -30,7 +30,7 @@ export class UrlConfiguration {
   getChecksum() {
     var _a;
     const fallbacks = ((_a = this.fallbackUrls) !== null && _a !== void 0 ? _a : []).sort().join(',');
-    return (0, _DJB)(this.customUrl + fallbacks);
+    return (0, Hashing_1._DJB2)(this.customUrl + fallbacks);
   }
 }
 const _cjs_default = {

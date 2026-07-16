@@ -2,13 +2,20 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import asyncSeries from "async/series";
 import * as zlib from "node:zlib";
-import { MESSAGE as _MESSAGE } from "triple-beam";
-import { Stream as _Stream, PassThrough as _PassThrough } from "readable-stream";
+import _cjs_import from "triple-beam";
+import _cjs_import2 from "readable-stream";
 import TransportStream from "winston-transport";
-import _cjs_import from "@dabh/diagnostics";
+import _cjs_import3 from "@dabh/diagnostics";
 import * as os from "node:os";
 import tailFile from "../tail-file";
-const debug = _cjs_import('winston:file');
+const {
+  MESSAGE
+} = _cjs_import;
+const {
+  Stream,
+  PassThrough
+} = _cjs_import2;
+const debug = _cjs_import3('winston:file');
 /**
  * Transport for outputting to a local log file.
  * @type {File}
@@ -37,7 +44,7 @@ const _cjs_default = class File extends TransportStream {
     }
 
     // Setup the base stream that always gets piped to to handle buffering.
-    this._stream = new _PassThrough();
+    this._stream = new PassThrough();
     this._stream.setMaxListeners(30);
 
     // Bind this context for listener methods.
@@ -184,7 +191,7 @@ const _cjs_default = class File extends TransportStream {
     }
 
     // Grab the raw string and append the expected EOL.
-    const output = `${info[_MESSAGE]}${this.eol}`;
+    const output = `${info[MESSAGE]}${this.eol}`;
     const bytes = Buffer.byteLength(output);
 
     // After we have written to the PassThrough check to see if we need
@@ -379,7 +386,7 @@ const _cjs_default = class File extends TransportStream {
    */
   stream(options = {}) {
     const file = path.join(this.dirname, this.filename);
-    const stream = new _Stream();
+    const stream = new Stream();
     const tail = {
       file,
       start: options.start
@@ -564,7 +571,7 @@ const _cjs_default = class File extends TransportStream {
       // start writing to a new PassThrough, begin opening the next file
       // and cleanup the previous source and dest once the source has drained.
       if (this.rotatedWhileOpening) {
-        this._stream = new _PassThrough();
+        this._stream = new PassThrough();
         this._stream.setMaxListeners(30);
         this._rotateFile();
         this.rotatedWhileOpening = false;

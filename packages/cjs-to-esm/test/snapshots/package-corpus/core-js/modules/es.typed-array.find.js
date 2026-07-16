@@ -1,8 +1,8 @@
-import { aTypedArray as _aTypedArray, exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
-import { find as _find } from "../internals/array-iteration";
-var $find = _find;
-var aTypedArray = _aTypedArray;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
+import _cjs_import from "../internals/array-iteration";
+var $find = _cjs_import.find;
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
 
 // `%TypedArray%.prototype.find` method
 // https://tc39.es/ecma262/#sec-%typedarray%.prototype.find

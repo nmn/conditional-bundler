@@ -1,0 +1,14 @@
+{
+  "name": "@bundler/module-paths",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./bundler": "./bundler.mjs"
+  },
+  "peerDependencies": {
+    "@babel/core": "^7.24.0"
+  }
+}

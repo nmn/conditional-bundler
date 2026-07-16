@@ -7,11 +7,11 @@ export default function metadataOutputBabelPlugin() {
           "test-metadata": {
             contents: JSON.stringify({
               envId: state.opts.envId,
-              filePath: state.opts.filePath,
+              moduleIdentity: state.opts.moduleIdentity,
             }),
             metadata: {
               envId: state.opts.envId,
-              filePath: state.opts.filePath,
+              moduleIdentity: state.opts.moduleIdentity,
             },
           },
         };

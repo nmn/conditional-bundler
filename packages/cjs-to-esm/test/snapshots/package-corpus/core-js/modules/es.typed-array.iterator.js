@@ -1,7 +1,7 @@
 import globalThis from "../internals/global-this";
 import fails from "../internals/fails";
 import uncurryThis from "../internals/function-uncurry-this";
-import { aTypedArray as _aTypedArray, exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
 import ArrayIterators from "../modules/es.array.iterator";
 import wellKnownSymbol from "../internals/well-known-symbol";
 var ITERATOR = wellKnownSymbol('iterator');
@@ -9,8 +9,8 @@ var Uint8Array = globalThis.Uint8Array;
 var arrayValues = uncurryThis(ArrayIterators.values);
 var arrayKeys = uncurryThis(ArrayIterators.keys);
 var arrayEntries = uncurryThis(ArrayIterators.entries);
-var aTypedArray = _aTypedArray;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
 var TypedArrayPrototype = Uint8Array && Uint8Array.prototype;
 var GENERIC = !fails(function () {
   TypedArrayPrototype[ITERATOR].call([1]);

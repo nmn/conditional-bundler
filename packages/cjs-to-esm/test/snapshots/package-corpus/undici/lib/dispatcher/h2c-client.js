@@ -1,12 +1,15 @@
-import { InvalidArgumentError as _InvalidArgumentError } from "../core/errors";
+import _cjs_import from "../core/errors";
 import Client from "./client";
+const {
+  InvalidArgumentError
+} = _cjs_import;
 class H2CClient extends Client {
   constructor(origin, clientOpts) {
     if (typeof origin === 'string') {
       origin = new URL(origin);
     }
     if (origin.protocol !== 'http:') {
-      throw new _InvalidArgumentError('h2c-client: Only h2c protocol is supported');
+      throw new InvalidArgumentError('h2c-client: Only h2c protocol is supported');
     }
     const {
       maxConcurrentStreams,
@@ -16,13 +19,13 @@ class H2CClient extends Client {
     const defaultMaxConcurrentStreams = maxConcurrentStreams ?? 100;
     let defaultPipelining = 100;
     if (maxConcurrentStreams != null && (!Number.isInteger(maxConcurrentStreams) || maxConcurrentStreams < 1)) {
-      throw new _InvalidArgumentError('maxConcurrentStreams must be a positive integer, greater than 0');
+      throw new InvalidArgumentError('maxConcurrentStreams must be a positive integer, greater than 0');
     }
     if (pipelining != null && Number.isInteger(pipelining) && pipelining > 0) {
       defaultPipelining = pipelining;
     }
     if (defaultPipelining > defaultMaxConcurrentStreams) {
-      throw new _InvalidArgumentError('h2c-client: pipelining cannot be greater than maxConcurrentStreams');
+      throw new InvalidArgumentError('h2c-client: pipelining cannot be greater than maxConcurrentStreams');
     }
     super(origin, {
       ...opts,

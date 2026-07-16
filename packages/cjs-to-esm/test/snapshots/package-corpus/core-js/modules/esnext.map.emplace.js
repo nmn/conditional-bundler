@@ -1,9 +1,9 @@
 import $ from "../internals/export";
 import aMap from "../internals/a-map";
-import { get as _get, has as _has, set as _set } from "../internals/map-helpers";
-var get = _get;
-var has = _has;
-var set = _set;
+import MapHelpers from "../internals/map-helpers";
+var get = MapHelpers.get;
+var has = MapHelpers.has;
+var set = MapHelpers.set;
 
 // `Map.prototype.emplace` method
 // https://github.com/tc39/proposal-upsert

@@ -1,7 +1,7 @@
-import { f as _f } from "../internals/object-define-property";
+import _cjs_import from "../internals/object-define-property";
 import hasOwn from "../internals/has-own-property";
 import wellKnownSymbol from "../internals/well-known-symbol";
-var defineProperty = _f;
+var defineProperty = _cjs_import.f;
 var TO_STRING_TAG = wellKnownSymbol('toStringTag');
 const _cjs_default = function (target, TAG, STATIC) {
   if (target && !STATIC) target = target.prototype;

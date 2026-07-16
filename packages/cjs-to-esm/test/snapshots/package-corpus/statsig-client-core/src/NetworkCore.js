@@ -1,17 +1,17 @@
-import { _getStatsigGlobalFlag } from "./$_StatsigGlobal";
-import { Diagnostics as _Diagnostics } from "./Diagnostics";
-import { Log as _Log } from "./Log";
-import { Endpoint as _Endpoint, NetworkParam as _NetworkParam } from "./NetworkConfig";
-import { NetworkFallbackResolver as _NetworkFallbackResolver } from "./NetworkFallbackResolver";
-import { SDKFlags as _SDKFlags } from "./SDKFlags";
-import { SDKType as _SDKType } from "./SDKType";
-import { _getWindowSafe } from "./SafeJs";
-import { SessionID as _SessionID } from "./SessionID";
-import { StableID as _StableID } from "./StableID";
-import { ErrorTag as _ErrorTag } from "./StatsigClientEventEmitter";
-import { SDK_VERSION as _SDK_VERSION, StatsigMetadataProvider as _StatsigMetadataProvider } from "./StatsigMetadata";
-import { LogEventCompressionMode as _LogEventCompressionMode } from "./StatsigOptionsCommon";
-import { _isUnloading } from "./VisibilityObserving";
+import __StatsigGlobal_1 from "./$_StatsigGlobal";
+import Diagnostics_1 from "./Diagnostics";
+import Log_1 from "./Log";
+import NetworkConfig_1 from "./NetworkConfig";
+import NetworkFallbackResolver_1 from "./NetworkFallbackResolver";
+import SDKFlags_1 from "./SDKFlags";
+import SDKType_1 from "./SDKType";
+import SafeJs_1 from "./SafeJs";
+import SessionID_1 from "./SessionID";
+import StableID_1 from "./StableID";
+import StatsigClientEventEmitter_1 from "./StatsigClientEventEmitter";
+import StatsigMetadata_1 from "./StatsigMetadata";
+import StatsigOptionsCommon_1 from "./StatsigOptionsCommon";
+import VisibilityObserving_1 from "./VisibilityObserving";
 var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function (resolve) {
@@ -65,7 +65,7 @@ export class NetworkCore {
     if (this._netConfig.networkTimeoutMs) {
       this._timeout = this._netConfig.networkTimeoutMs;
     }
-    this._fallbackResolver = new _NetworkFallbackResolver(this._options);
+    this._fallbackResolver = new NetworkFallbackResolver_1.NetworkFallbackResolver(this._options);
     this.setLogEventCompressionMode(this._getLogEventCompressionMode(options));
   }
   setLogEventCompressionMode(mode) {
@@ -145,7 +145,7 @@ export class NetworkCore {
       } = args;
       const endpoint = args.urlConfig.endpoint;
       if (this._isRateLimited(endpoint)) {
-        _Log.warn(`Request to ${endpoint} was blocked because you are making requests too frequently.`);
+        Log_1.Log.warn(`Request to ${endpoint} was blocked because you are making requests too frequently.`);
         if (failureInfo) {
           failureInfo.path = 'network_rate_limited';
         }
@@ -156,7 +156,7 @@ export class NetworkCore {
       const populatedUrl = this._getPopulatedURL(args);
       const startTime = Date.now();
       let response = null;
-      const keepalive = (0, _isUnloading)();
+      const keepalive = (0, VisibilityObserving_1._isUnloading)();
       try {
         const config = {
           method,
@@ -204,11 +204,11 @@ export class NetworkCore {
           (_c = this._emitter) === null || _c === void 0 ? void 0 : _c.call(this, {
             name: 'error',
             error,
-            tag: _ErrorTag.NetworkError,
+            tag: StatsigClientEventEmitter_1.ErrorTag.NetworkError,
             requestArgs: args
           });
           const formattedErrorMsg = `A networking error occurred during ${method} request to ${populatedUrl}.`;
-          _Log.error(formattedErrorMsg, errorMessage, error);
+          Log_1.Log.error(formattedErrorMsg, errorMessage, error);
           (_d = this._errorBoundary) === null || _d === void 0 ? void 0 : _d.attachErrorIfNoneExists(formattedErrorMsg);
           if (args.preserveFailedStatusCode && response != null) {
             return {
@@ -245,11 +245,11 @@ export class NetworkCore {
     // Handle backward compatibility for deprecated disableCompression flag
     let compressionMode = options === null || options === void 0 ? void 0 : options.logEventCompressionMode;
     if (!compressionMode && (options === null || options === void 0 ? void 0 : options.disableCompression) === true) {
-      compressionMode = _LogEventCompressionMode.Disabled;
+      compressionMode = StatsigOptionsCommon_1.LogEventCompressionMode.Disabled;
     }
     // Default to enabled if unset
     if (!compressionMode) {
-      compressionMode = _LogEventCompressionMode.Enabled;
+      compressionMode = StatsigOptionsCommon_1.LogEventCompressionMode.Enabled;
     }
     return compressionMode;
   }
@@ -274,15 +274,15 @@ export class NetworkCore {
   _getPopulatedURL(args) {
     var _a;
     const url = (_a = args.fallbackUrl) !== null && _a !== void 0 ? _a : args.urlConfig.getUrl();
-    if (args.urlConfig.endpoint === _Endpoint._initialize || args.urlConfig.endpoint === _Endpoint._download_config_specs) {
+    if (args.urlConfig.endpoint === NetworkConfig_1.Endpoint._initialize || args.urlConfig.endpoint === NetworkConfig_1.Endpoint._download_config_specs) {
       this._lastUsedInitUrl = url;
     }
     const params = Object.assign({
-      [_NetworkParam.SdkKey]: args.sdkKey,
-      [_NetworkParam.SdkType]: _SDKType._get(args.sdkKey),
-      [_NetworkParam.SdkVersion]: _SDK_VERSION,
-      [_NetworkParam.Time]: String(Date.now()),
-      [_NetworkParam.SessionID]: _SessionID.get(args.sdkKey)
+      [NetworkConfig_1.NetworkParam.SdkKey]: args.sdkKey,
+      [NetworkConfig_1.NetworkParam.SdkType]: SDKType_1.SDKType._get(args.sdkKey),
+      [NetworkConfig_1.NetworkParam.SdkVersion]: StatsigMetadata_1.SDK_VERSION,
+      [NetworkConfig_1.NetworkParam.Time]: String(Date.now()),
+      [NetworkConfig_1.NetworkParam.SessionID]: SessionID_1.SessionID.get(args.sdkKey)
     }, args.params);
     const query = Object.keys(params).map(key => {
       return `${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`;
@@ -291,18 +291,18 @@ export class NetworkCore {
   }
   _tryEncodeBody(args) {
     var _a;
-    const win = (0, _getWindowSafe)();
+    const win = (0, SafeJs_1._getWindowSafe)();
     const body = args.body;
-    if (!args.isStatsigEncodable || this._options.disableStatsigEncoding || typeof body !== 'string' || (0, _getStatsigGlobalFlag)('no-encode') != null || !(win === null || win === void 0 ? void 0 : win.btoa)) {
+    if (!args.isStatsigEncodable || this._options.disableStatsigEncoding || typeof body !== 'string' || (0, __StatsigGlobal_1._getStatsigGlobalFlag)('no-encode') != null || !(win === null || win === void 0 ? void 0 : win.btoa)) {
       return;
     }
     try {
       args.body = win.btoa(body).split('').reverse().join('');
       args.params = Object.assign(Object.assign({}, (_a = args.params) !== null && _a !== void 0 ? _a : {}), {
-        [_NetworkParam.StatsigEncoded]: '1'
+        [NetworkConfig_1.NetworkParam.StatsigEncoded]: '1'
       });
     } catch (e) {
-      _Log.warn(`Request encoding failed for ${args.urlConfig.getUrl()}`, e);
+      Log_1.Log.warn(`Request encoding failed for ${args.urlConfig.getUrl()}`, e);
     }
   }
   _tryToCompressBody(args) {
@@ -316,8 +316,8 @@ export class NetworkCore {
         const bytes = new TextEncoder().encode(body);
         const stream = new CompressionStream('gzip');
         const writer = stream.writable.getWriter();
-        writer.write(bytes).catch(_Log.error);
-        writer.close().catch(_Log.error);
+        writer.write(bytes).catch(Log_1.Log.error);
+        writer.close().catch(Log_1.Log.error);
         const reader = stream.readable.getReader();
         const chunks = [];
         let result;
@@ -334,10 +334,10 @@ export class NetworkCore {
         }
         args.body = combined;
         args.params = Object.assign(Object.assign({}, (_a = args.params) !== null && _a !== void 0 ? _a : {}), {
-          [_NetworkParam.IsGzipped]: '1'
+          [NetworkConfig_1.NetworkParam.IsGzipped]: '1'
         });
       } catch (e) {
-        _Log.warn(`Request compression failed for ${args.urlConfig.getUrl()}`, e);
+        Log_1.Log.warn(`Request compression failed for ${args.urlConfig.getUrl()}`, e);
       }
     });
   }
@@ -355,7 +355,7 @@ export class NetworkCore {
 }
 const _ensureValidSdkKey = args => {
   if (!args.sdkKey) {
-    _Log.warn('Unable to make request without an SDK key');
+    Log_1.Log.warn('Unable to make request without an SDK key');
     return false;
   }
   return true;
@@ -365,11 +365,11 @@ const _populateRequestBody = (args, data) => {
     sdkKey,
     fallbackUrl
   } = args;
-  const stableID = _StableID.get(sdkKey);
-  const sessionID = _SessionID.get(sdkKey);
-  const sdkType = _SDKType._get(sdkKey);
+  const stableID = StableID_1.StableID.get(sdkKey);
+  const sessionID = SessionID_1.SessionID.get(sdkKey);
+  const sdkType = SDKType_1.SDKType._get(sdkKey);
   args.body = JSON.stringify(Object.assign(Object.assign({}, data), {
-    statsigMetadata: Object.assign(Object.assign({}, _StatsigMetadataProvider.get()), {
+    statsigMetadata: Object.assign(Object.assign({}, StatsigMetadata_1.StatsigMetadataProvider.get()), {
       stableID,
       sessionID,
       sdkType,
@@ -382,21 +382,21 @@ function _allowCompression(args, options) {
     return false;
   }
   // Never compress if 'no-compress' is set globally or required APIs are unavailable
-  if ((0, _getStatsigGlobalFlag)('no-compress') != null || typeof CompressionStream === 'undefined' || typeof TextEncoder === 'undefined') {
+  if ((0, __StatsigGlobal_1._getStatsigGlobalFlag)('no-compress') != null || typeof CompressionStream === 'undefined' || typeof TextEncoder === 'undefined') {
     return false;
   }
   const isProxy = args.urlConfig.customUrl != null || args.urlConfig.fallbackUrls != null;
-  const flagEnabled = _SDKFlags.get(args.sdkKey, 'enable_log_event_compression') === true;
+  const flagEnabled = SDKFlags_1.SDKFlags.get(args.sdkKey, 'enable_log_event_compression') === true;
   switch (options.logEventCompressionMode) {
-    case _LogEventCompressionMode.Disabled:
+    case StatsigOptionsCommon_1.LogEventCompressionMode.Disabled:
       return false;
-    case _LogEventCompressionMode.Enabled:
+    case StatsigOptionsCommon_1.LogEventCompressionMode.Enabled:
       // Only compress through proxy if flag is explicitly on
       if (isProxy && !flagEnabled) {
         return false;
       }
       return true;
-    case _LogEventCompressionMode.Forced:
+    case StatsigOptionsCommon_1.LogEventCompressionMode.Forced:
       return true;
     default:
       return false;
@@ -417,10 +417,10 @@ function _didTimeout(errorMsg, abortedByTimeout) {
 }
 function _getNoResponseDiagnostics(args, populatedUrl, timedOut, elapsedMs) {
   var _a, _b, _c;
-  const win = (0, _getWindowSafe)();
+  const win = (0, SafeJs_1._getWindowSafe)();
   const doc = win === null || win === void 0 ? void 0 : win.document;
   const nav = typeof navigator !== 'undefined' ? navigator : null;
-  const isUnloading = (0, _isUnloading)();
+  const isUnloading = (0, VisibilityObserving_1._isUnloading)();
   const online = nav && typeof nav.onLine === 'boolean' ? String(nav.onLine) : 'unknown';
   const visibilityState = (_a = doc === null || doc === void 0 ? void 0 : doc.visibilityState) !== null && _a !== void 0 ? _a : 'unknown';
   const hasCustomHeaders = Object.keys((_b = args.headers) !== null && _b !== void 0 ? _b : {}).length > 0;
@@ -491,18 +491,18 @@ function _bucketNumber(value, thresholds) {
   return `>=${thresholds[thresholds.length - 1]}`;
 }
 function _tryMarkInitStart(args, attempt) {
-  if (args.urlConfig.endpoint !== _Endpoint._initialize) {
+  if (args.urlConfig.endpoint !== NetworkConfig_1.Endpoint._initialize) {
     return;
   }
-  _Diagnostics._markInitNetworkReqStart(args.sdkKey, {
+  Diagnostics_1.Diagnostics._markInitNetworkReqStart(args.sdkKey, {
     attempt
   });
 }
 function _tryMarkInitEnd(args, response, attempt, body, err) {
-  if (args.urlConfig.endpoint !== _Endpoint._initialize) {
+  if (args.urlConfig.endpoint !== NetworkConfig_1.Endpoint._initialize) {
     return;
   }
-  _Diagnostics._markInitNetworkReqEnd(args.sdkKey, _Diagnostics._getDiagnosticsData(response, attempt, body, err));
+  Diagnostics_1.Diagnostics._markInitNetworkReqEnd(args.sdkKey, Diagnostics_1.Diagnostics._getDiagnosticsData(response, attempt, body, err));
 }
 function _exponentialBackoff(attempt) {
   return __awaiter(this, void 0, void 0, function* () {

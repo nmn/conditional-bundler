@@ -1,8 +1,36 @@
-import { InvalidArgumentError as _InvalidArgumentError, NotSupportedError as _NotSupportedError } from "./errors";
+import _cjs_import from "./errors";
 import * as assert from "node:assert";
-import { isValidHTTPToken as _isValidHTTPToken, isValidHeaderValue as _isValidHeaderValue, isStream as _isStream, destroy as _destroy, isBuffer as _isBuffer, isFormDataLike as _isFormDataLike, isIterable as _isIterable, hasSafeIterator as _hasSafeIterator, isBlobLike as _isBlobLike, serializePathWithQuery as _serializePathWithQuery, parseHeaders as _parseHeaders, assertRequestHandler as _assertRequestHandler, getServerName as _getServerName, normalizedMethodRecords as _normalizedMethodRecords, getProtocolFromUrlString as _getProtocolFromUrlString } from "./util";
-import { channels as _channels } from "./diagnostics.js";
-import { headerNameLowerCasedRecord as _headerNameLowerCasedRecord } from "./constants";
+import _cjs_import2 from "./util";
+import _cjs_import3 from "./diagnostics.js";
+import _cjs_import4 from "./constants";
+const {
+  InvalidArgumentError,
+  NotSupportedError
+} = _cjs_import;
+const {
+  isValidHTTPToken,
+  isValidHeaderValue,
+  isStream,
+  destroy,
+  isBuffer,
+  isFormDataLike,
+  isIterable,
+  hasSafeIterator,
+  isBlobLike,
+  serializePathWithQuery,
+  parseHeaders,
+  assertRequestHandler,
+  getServerName,
+  normalizedMethodRecords,
+  getProtocolFromUrlString
+} = _cjs_import2;
+const {
+  channels
+} = _cjs_import3;
+const {
+  headerNameLowerCasedRecord
+} = _cjs_import4;
+
 // Verifies that a given path is valid does not contain control chars \x00 to \x20
 const invalidPathRegex = /[^\u0021-\u00ff]/;
 function isValidContentLengthHeaderValue(val) {
@@ -77,43 +105,43 @@ class Request {
     typeOfService
   }, handler) {
     if (typeof path !== 'string') {
-      throw new _InvalidArgumentError('path must be a string');
+      throw new InvalidArgumentError('path must be a string');
     } else if (path[0] !== '/' && !(path.startsWith('http://') || path.startsWith('https://')) && method !== 'CONNECT') {
-      throw new _InvalidArgumentError('path must be an absolute URL or start with a slash');
+      throw new InvalidArgumentError('path must be an absolute URL or start with a slash');
     } else if (invalidPathRegex.test(path)) {
-      throw new _InvalidArgumentError('invalid request path');
+      throw new InvalidArgumentError('invalid request path');
     }
     if (typeof method !== 'string') {
-      throw new _InvalidArgumentError('method must be a string');
-    } else if (_normalizedMethodRecords[method] === undefined && !_isValidHTTPToken(method)) {
-      throw new _InvalidArgumentError('invalid request method');
+      throw new InvalidArgumentError('method must be a string');
+    } else if (normalizedMethodRecords[method] === undefined && !isValidHTTPToken(method)) {
+      throw new InvalidArgumentError('invalid request method');
     }
     if (upgrade && typeof upgrade !== 'string') {
-      throw new _InvalidArgumentError('upgrade must be a string');
+      throw new InvalidArgumentError('upgrade must be a string');
     }
-    if (upgrade && !_isValidHeaderValue(upgrade)) {
-      throw new _InvalidArgumentError('invalid upgrade header');
+    if (upgrade && !isValidHeaderValue(upgrade)) {
+      throw new InvalidArgumentError('invalid upgrade header');
     }
     if (headersTimeout != null && (!Number.isFinite(headersTimeout) || headersTimeout < 0)) {
-      throw new _InvalidArgumentError('invalid headersTimeout');
+      throw new InvalidArgumentError('invalid headersTimeout');
     }
     if (bodyTimeout != null && (!Number.isFinite(bodyTimeout) || bodyTimeout < 0)) {
-      throw new _InvalidArgumentError('invalid bodyTimeout');
+      throw new InvalidArgumentError('invalid bodyTimeout');
     }
     if (reset != null && typeof reset !== 'boolean') {
-      throw new _InvalidArgumentError('invalid reset');
+      throw new InvalidArgumentError('invalid reset');
     }
     if (expectContinue != null && typeof expectContinue !== 'boolean') {
-      throw new _InvalidArgumentError('invalid expectContinue');
+      throw new InvalidArgumentError('invalid expectContinue');
     }
     if (throwOnError != null) {
-      throw new _InvalidArgumentError('invalid throwOnError');
+      throw new InvalidArgumentError('invalid throwOnError');
     }
     if (maxRedirections != null && maxRedirections !== 0) {
-      throw new _InvalidArgumentError('maxRedirections is not supported, use the redirect interceptor');
+      throw new InvalidArgumentError('maxRedirections is not supported, use the redirect interceptor');
     }
     if (typeOfService != null && (!Number.isInteger(typeOfService) || typeOfService < 0 || typeOfService > 255)) {
-      throw new _InvalidArgumentError('typeOfService must be an integer between 0 and 255');
+      throw new InvalidArgumentError('typeOfService must be an integer between 0 and 255');
     }
     this.headersTimeout = headersTimeout;
     this.bodyTimeout = bodyTimeout;
@@ -122,12 +150,12 @@ class Request {
     this.abort = null;
     if (body == null) {
       this.body = null;
-    } else if (_isStream(body)) {
+    } else if (isStream(body)) {
       this.body = body;
       const rState = this.body._readableState;
       if (!rState || !rState.autoDestroy) {
         this.endHandler = function autoDestroy() {
-          _destroy(this);
+          destroy(this);
         };
         this.body.on('end', this.endHandler);
       }
@@ -139,7 +167,7 @@ class Request {
         }
       };
       this.body.on('error', this.errorHandler);
-    } else if (_isBuffer(body)) {
+    } else if (isBuffer(body)) {
       this.body = body.byteLength ? body : null;
     } else if (ArrayBuffer.isView(body)) {
       this.body = body.buffer.byteLength ? Buffer.from(body.buffer, body.byteOffset, body.byteLength) : null;
@@ -147,19 +175,19 @@ class Request {
       this.body = body.byteLength ? Buffer.from(body) : null;
     } else if (typeof body === 'string') {
       this.body = body.length ? Buffer.from(body) : null;
-    } else if (_isFormDataLike(body) || _isIterable(body) || _isBlobLike(body)) {
+    } else if (isFormDataLike(body) || isIterable(body) || isBlobLike(body)) {
       this.body = body;
     } else {
-      throw new _InvalidArgumentError('body must be a string, a Buffer, a Readable stream, an iterable, or an async iterable');
+      throw new InvalidArgumentError('body must be a string, a Buffer, a Readable stream, an iterable, or an async iterable');
     }
     this.completed = false;
     this.aborted = false;
     this.upgrade = upgrade || null;
-    this.path = query ? _serializePathWithQuery(path, query) : path;
+    this.path = query ? serializePathWithQuery(path, query) : path;
 
     // TODO: shall we maybe standardize it to an URL object?
     this.origin = origin;
-    this.protocol = _getProtocolFromUrlString(origin);
+    this.protocol = getProtocolFromUrlString(origin);
     this.idempotent = idempotent == null ? method === 'HEAD' || method === 'GET' || method === 'QUERY' : idempotent;
     this.blocking = blocking ?? this.method !== 'HEAD';
     this.reset = reset == null ? null : reset;
@@ -172,16 +200,16 @@ class Request {
     this.expectContinue = expectContinue != null ? expectContinue : false;
     if (Array.isArray(headers)) {
       if (headers.length % 2 !== 0) {
-        throw new _InvalidArgumentError('headers array must be even');
+        throw new InvalidArgumentError('headers array must be even');
       }
       for (let i = 0; i < headers.length; i += 2) {
         processHeader(this, headers[i], headers[i + 1]);
       }
     } else if (headers && typeof headers === 'object') {
-      if (_hasSafeIterator(headers)) {
+      if (hasSafeIterator(headers)) {
         for (const header of headers) {
           if (!Array.isArray(header) || header.length !== 2) {
-            throw new _InvalidArgumentError('headers must be in key-value pair format');
+            throw new InvalidArgumentError('headers must be in key-value pair format');
           }
           processHeader(this, header[0], header[1]);
         }
@@ -192,20 +220,20 @@ class Request {
         }
       }
     } else if (headers != null) {
-      throw new _InvalidArgumentError('headers must be an object or an array');
+      throw new InvalidArgumentError('headers must be an object or an array');
     }
-    _assertRequestHandler(handler, method, upgrade);
-    this.servername = servername || _getServerName(this.host) || null;
+    assertRequestHandler(handler, method, upgrade);
+    this.servername = servername || getServerName(this.host) || null;
     this[kHandler] = handler;
-    if (_channels.create.hasSubscribers) {
-      _channels.create.publish({
+    if (channels.create.hasSubscribers) {
+      channels.create.publish({
         request: this
       });
     }
   }
   onBodySent(chunk) {
-    if (_channels.bodyChunkSent.hasSubscribers) {
-      _channels.bodyChunkSent.publish({
+    if (channels.bodyChunkSent.hasSubscribers) {
+      channels.bodyChunkSent.publish({
         request: this,
         chunk
       });
@@ -219,8 +247,8 @@ class Request {
     }
   }
   onRequestSent() {
-    if (_channels.bodySent.hasSubscribers) {
-      _channels.bodySent.publish({
+    if (channels.bodySent.hasSubscribers) {
+      channels.bodySent.publish({
         request: this
       });
     }
@@ -249,8 +277,8 @@ class Request {
   onResponseStart(statusCode, headers, resume, statusText) {
     assert(!this.aborted);
     assert(!this.completed);
-    if (_channels.headers.hasSubscribers) {
-      _channels.headers.publish({
+    if (channels.headers.hasSubscribers) {
+      channels.headers.publish({
         request: this,
         response: {
           statusCode,
@@ -264,7 +292,7 @@ class Request {
       controller[kResume] = resume;
       controller.rawHeaders = headers;
     }
-    const parsedHeaders = Array.isArray(headers) ? _parseHeaders(headers) : headers;
+    const parsedHeaders = Array.isArray(headers) ? parseHeaders(headers) : headers;
     try {
       this[kHandler].onResponseStart?.(controller, statusCode, parsedHeaders, statusText);
       return !controller?.paused;
@@ -276,8 +304,8 @@ class Request {
   onResponseData(chunk) {
     assert(!this.aborted);
     assert(!this.completed);
-    if (_channels.bodyChunkReceived.hasSubscribers) {
-      _channels.bodyChunkReceived.publish({
+    if (channels.bodyChunkReceived.hasSubscribers) {
+      channels.bodyChunkReceived.publish({
         request: this,
         chunk
       });
@@ -298,7 +326,7 @@ class Request {
     if (controller) {
       controller.rawHeaders = headers;
     }
-    const parsedHeaders = Array.isArray(headers) ? _parseHeaders(headers) : headers;
+    const parsedHeaders = Array.isArray(headers) ? parseHeaders(headers) : headers;
     return this[kHandler].onRequestUpgrade?.(controller, statusCode, parsedHeaders, socket);
   }
   onResponseEnd(trailers) {
@@ -306,8 +334,8 @@ class Request {
     assert(!this.aborted);
     assert(!this.completed);
     this.completed = true;
-    if (_channels.trailers.hasSubscribers) {
-      _channels.trailers.publish({
+    if (channels.trailers.hasSubscribers) {
+      channels.trailers.publish({
         request: this,
         trailers
       });
@@ -316,7 +344,7 @@ class Request {
     if (controller) {
       controller.rawTrailers = trailers;
     }
-    const parsedTrailers = Array.isArray(trailers) ? _parseHeaders(trailers) : trailers;
+    const parsedTrailers = Array.isArray(trailers) ? parseHeaders(trailers) : trailers;
     try {
       return this[kHandler].onResponseEnd?.(controller, parsedTrailers);
     } catch (err) {
@@ -326,8 +354,8 @@ class Request {
   }
   onResponseError(error) {
     this.onFinally();
-    if (_channels.error.hasSubscribers) {
-      _channels.error.publish({
+    if (channels.error.hasSubscribers) {
+      channels.error.publish({
         request: this,
         error
       });
@@ -356,37 +384,37 @@ class Request {
 }
 function processHeader(request, key, val) {
   if (val && typeof val === 'object' && !Array.isArray(val)) {
-    throw new _InvalidArgumentError(`invalid ${key} header`);
+    throw new InvalidArgumentError(`invalid ${key} header`);
   } else if (val === undefined) {
     return;
   }
-  let headerName = _headerNameLowerCasedRecord[key];
+  let headerName = headerNameLowerCasedRecord[key];
   if (headerName === undefined) {
     headerName = key.toLowerCase();
-    if (_headerNameLowerCasedRecord[headerName] === undefined && !_isValidHTTPToken(headerName)) {
-      throw new _InvalidArgumentError('invalid header key');
+    if (headerNameLowerCasedRecord[headerName] === undefined && !isValidHTTPToken(headerName)) {
+      throw new InvalidArgumentError('invalid header key');
     }
   }
   if (Array.isArray(val)) {
     const arr = [];
     for (let i = 0; i < val.length; i++) {
       if (typeof val[i] === 'string') {
-        if (!_isValidHeaderValue(val[i])) {
-          throw new _InvalidArgumentError(`invalid ${key} header`);
+        if (!isValidHeaderValue(val[i])) {
+          throw new InvalidArgumentError(`invalid ${key} header`);
         }
         arr.push(val[i]);
       } else if (val[i] === null) {
         arr.push('');
       } else if (typeof val[i] === 'object') {
-        throw new _InvalidArgumentError(`invalid ${key} header`);
+        throw new InvalidArgumentError(`invalid ${key} header`);
       } else {
         arr.push(`${val[i]}`);
       }
     }
     val = arr;
   } else if (typeof val === 'string') {
-    if (!_isValidHeaderValue(val)) {
-      throw new _InvalidArgumentError(`invalid ${key} header`);
+    if (!isValidHeaderValue(val)) {
+      throw new InvalidArgumentError(`invalid ${key} header`);
     }
   } else if (val === null) {
     val = '';
@@ -395,44 +423,44 @@ function processHeader(request, key, val) {
   }
   if (headerName === 'host') {
     if (request.host !== null) {
-      throw new _InvalidArgumentError('duplicate host header');
+      throw new InvalidArgumentError('duplicate host header');
     }
     if (typeof val !== 'string') {
-      throw new _InvalidArgumentError('invalid host header');
+      throw new InvalidArgumentError('invalid host header');
     }
     // Consumed by Client
     request.host = val;
   } else if (headerName === 'content-length') {
     if (request.contentLength !== null) {
-      throw new _InvalidArgumentError('duplicate content-length header');
+      throw new InvalidArgumentError('duplicate content-length header');
     }
     if (!isValidContentLengthHeaderValue(val)) {
-      throw new _InvalidArgumentError('invalid content-length header');
+      throw new InvalidArgumentError('invalid content-length header');
     }
     request.contentLength = parseInt(val, 10);
   } else if (request.contentType === null && headerName === 'content-type') {
     request.contentType = val;
     request.headers.push(key, val);
   } else if (headerName === 'transfer-encoding' || headerName === 'keep-alive' || headerName === 'upgrade') {
-    throw new _InvalidArgumentError(`invalid ${headerName} header`);
+    throw new InvalidArgumentError(`invalid ${headerName} header`);
   } else if (headerName === 'connection') {
     // Per RFC 7230 Section 6.1, Connection header can contain
     // a comma-separated list of connection option tokens (header names)
     const value = typeof val === 'string' ? val : null;
     if (value === null) {
-      throw new _InvalidArgumentError('invalid connection header');
+      throw new InvalidArgumentError('invalid connection header');
     }
     for (const token of value.toLowerCase().split(',')) {
       const trimmed = token.trim();
-      if (!_isValidHTTPToken(trimmed)) {
-        throw new _InvalidArgumentError('invalid connection header');
+      if (!isValidHTTPToken(trimmed)) {
+        throw new InvalidArgumentError('invalid connection header');
       }
       if (trimmed === 'close') {
         request.reset = true;
       }
     }
   } else if (headerName === 'expect') {
-    throw new _NotSupportedError('expect header not supported');
+    throw new NotSupportedError('expect header not supported');
   } else {
     request.headers.push(key, val);
   }

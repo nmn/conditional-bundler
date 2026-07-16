@@ -1,7 +1,7 @@
 import $ from "../internals/export";
 import fails from "../internals/fails";
-import { f as _f } from "../internals/object-get-own-property-names-external";
-var getOwnPropertyNames = _f;
+import _cjs_import from "../internals/object-get-own-property-names-external";
+var getOwnPropertyNames = _cjs_import.f;
 
 // eslint-disable-next-line es/no-object-getownpropertynames -- required for testing
 var FAILS_ON_PRIMITIVES = fails(function () {

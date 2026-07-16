@@ -4,10 +4,10 @@ import uncurryThis from "../internals/function-uncurry-this";
 import anObjectOrUndefined from "../internals/an-object-or-undefined";
 import anUint8Array from "../internals/an-uint8-array";
 import notDetached from "../internals/array-buffer-not-detached";
-import { i2c as _i2c, i2cUrl as _i2cUrl } from "../internals/base64-map";
+import base64Map from "../internals/base64-map";
 import getAlphabetOption from "../internals/get-alphabet-option";
-var base64Alphabet = _i2c;
-var base64UrlAlphabet = _i2cUrl;
+var base64Alphabet = base64Map.i2c;
+var base64UrlAlphabet = base64Map.i2cUrl;
 var charAt = uncurryThis(''.charAt);
 var Uint8Array = globalThis.Uint8Array;
 var INCORRECT_BEHAVIOR_OR_DOESNT_EXISTS = !Uint8Array || !Uint8Array.prototype.toBase64 || !function () {

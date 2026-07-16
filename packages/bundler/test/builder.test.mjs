@@ -9,6 +9,7 @@ import {
   packagePathIdentity,
   readPkgSafe,
 } from "@bundler/shared";
+import { materializeHmrPatch } from "../dist/dev/hmr-linker.js";
 
 const rootDir = path.resolve(process.cwd());
 const fixturesDir = path.join(rootDir, "test/fixtures");
@@ -36,14 +37,24 @@ async function buildFixture(name, options = {}) {
       cacheDir,
       cache: options.cache,
       css: options.css,
+      transforms: options.transforms,
       maxWorkers: 2,
       diagnostics: "human",
+      debug: options.debug,
       plugins: options.configPlugins ?? [],
       dev: options.dev,
     },
     options.plugins ?? [],
   );
 }
+
+test("rejects arbitrary per-file CSS transform options", async () => {
+  await expect(
+    buildFixture("simple", {
+      transforms: { css: { minify: true } },
+    }),
+  ).rejects.toThrow("transforms.css must be exactly 'lightningcss' or false");
+});
 
 async function readBundle(result, name) {
   const bundle = result.bundles[0];
@@ -377,7 +388,7 @@ test("tree-shakes independent static CommonJS exports", async () => {
   expect(output).not.toContain("__BUNDLER_CJS_CACHE__");
 });
 
-test("uses the same consumer-set bundle boundaries in development and production", async () => {
+test("coalesces shared modules into one stable common bundle in development and production", async () => {
   const projectDir = path.join(outRoot, "consumer-set-boundaries");
   const srcDir = path.join(projectDir, "src");
   await fs.rm(projectDir, { recursive: true, force: true });
@@ -450,18 +461,18 @@ export const c = sharedAll;`,
     );
 
   expect(moduleOwners(development)).toEqual(moduleOwners(production));
-  expect(production.bundles).toHaveLength(5);
-  expect(development.bundles).toHaveLength(6);
+  expect(production.bundles).toHaveLength(4);
+  expect(development.bundles).toHaveLength(5);
   expect(
     production.bundles.filter((bundle) =>
       bundle.entryId.startsWith("bundler:common:"),
     ),
-  ).toHaveLength(2);
+  ).toHaveLength(1);
   expect(moduleOwners(production)[path.join(srcDir, "shared-all.js")]).toBe(
     "bundler:common:browser",
   );
-  expect(moduleOwners(production)[path.join(srcDir, "shared-ab.js")]).toMatch(
-    /^bundler:common:browser:[a-z0-9]+$/,
+  expect(moduleOwners(production)[path.join(srcDir, "shared-ab.js")]).toBe(
+    "bundler:common:browser",
   );
   expect(moduleOwners(production)[path.join(srcDir, "only-a.js")]).toBe(
     path.join(srcDir, "a.js"),
@@ -498,11 +509,357 @@ test("rewrites import.meta url", async () => {
   expect(snapshot).toMatchInlineSnapshot(`
 {
   "name": "import-meta",
-  "output": "
-const a2i26jx0t_asset = __BUNDLER_URL__("a2i26jx0t", "./asset.png").href;
+  "output": "const __bundler_xfjh41avex_asset_url = "/assets/asset.awn9r5lu.svg";
+
+const g2ch9q22_default = {
+  src: __bundler_xfjh41avex_asset_url,
+  width: 8,
+  height: 6
+};
+const a2i26jx0t_asset = new URL(g2ch9q22_default.src, import.meta.url).href;
 export { a2i26jx0t_asset as asset };",
 }
 `);
+});
+
+test("builds HTML entries with scripts, styles, and assets", async () => {
+  const name = "html-entry";
+  const htmlPath = path.join(fixturesDir, name, "index.html");
+  const result = await buildFixture(name, {
+    entries: [{ id: "index", path: htmlPath, kind: "html" }],
+    outputs: {
+      outDir: path.join(outRoot, name),
+      fileName: "[entry].[env].[hash].js",
+      htmlFileName: "[entry].html",
+      cssFileName: "[entry].[env].[hash].css",
+    },
+  });
+  const document = result.manifest.documents?.[0];
+  expect(document).toEqual(
+    expect.objectContaining({
+      entryId: "index",
+      fileName: "index.html",
+    }),
+  );
+  expect(document.scripts).toHaveLength(2);
+  expect(document.styles.length).toBeGreaterThanOrEqual(2);
+  expect(document.assets).toHaveLength(1);
+  const html = await fs.readFile(
+    path.join(outRoot, name, document.fileName),
+    "utf8",
+  );
+  for (const fileName of [
+    ...document.scripts,
+    ...document.styles,
+    ...document.assets,
+  ]) {
+    expect(html).toContain(path.basename(fileName));
+    await expect(fs.access(path.join(outRoot, name, fileName))).resolves.toBe(
+      undefined,
+    );
+  }
+  expect(html).not.toContain("document.body.dataset.inline");
+  expect(html).not.toContain("sha384-stale");
+  expect(html.match(/integrity="sha384-[^"]+"/g)).toHaveLength(2);
+  expect(html.match(/assets\/logo\.[a-z0-9]+\.svg/g)).toHaveLength(4);
+  expect(html).toContain("data:image/png;base64,AAAA 1x");
+  const documentCss = await Promise.all(
+    document.styles.map((fileName) =>
+      fs.readFile(path.join(outRoot, name, fileName), "utf8"),
+    ),
+  );
+  expect(documentCss.some((css) => css.includes(".client-loaded"))).toBe(true);
+});
+
+test("links shared CSS into multiple HTML documents without duplication", async () => {
+  const name = "html-shared-css";
+  const fixtureDir = path.join(fixturesDir, "html-entry");
+  const outDir = path.join(outRoot, name);
+  const result = await buildFixture(name, {
+    entries: [
+      { id: "index", path: path.join(fixtureDir, "index.html"), kind: "html" },
+      {
+        id: "second",
+        path: path.join(fixtureDir, "second.html"),
+        kind: "html",
+      },
+    ],
+    outputs: {
+      outDir,
+      fileName: "[entry].[env].[hash].js",
+      htmlFileName: "[entry].html",
+      cssFileName: "[entry].[env].[hash].css",
+    },
+  });
+
+  expect(result.manifest.documents).toHaveLength(2);
+  for (const document of result.manifest.documents) {
+    expect(document.styles.length).toBeGreaterThan(0);
+    const html = await fs.readFile(
+      path.join(outDir, document.fileName),
+      "utf8",
+    );
+    for (const styleFile of document.styles) {
+      expect(html).toContain(path.basename(styleFile));
+    }
+  }
+  const styles = await Promise.all(
+    result.manifest.assets
+      .filter((asset) => asset.type === "style")
+      .map((asset) => fs.readFile(path.join(outDir, asset.fileName), "utf8")),
+  );
+  expect(
+    styles.filter((css) => css.includes("box-sizing: border-box")),
+  ).toHaveLength(1);
+});
+
+test("hydrates HTML resource templates from the remote cache", async () => {
+  const name = "html-remote-cache";
+  const cacheDir = path.join(cacheRoot, name);
+  const remoteDir = path.join(cacheRoot, `${name}-remote`);
+  const cache = {
+    local: { dir: cacheDir },
+    remote: { kind: "file", dir: remoteDir, prefix: "test" },
+  };
+  const options = {
+    entries: [
+      {
+        id: "index",
+        path: path.join(fixturesDir, "html-entry", "index.html"),
+        kind: "html",
+      },
+    ],
+    outputs: {
+      outDir: path.join(outRoot, name),
+      fileName: "[entry].[env].[hash].js",
+      htmlFileName: "[entry].html",
+    },
+    cacheDir,
+    cache,
+  };
+  await fs.rm(cacheDir, { recursive: true, force: true });
+  await fs.rm(remoteDir, { recursive: true, force: true });
+  await buildFixture(name, options);
+  const remoteDocuments = await fs.readdir(
+    path.join(remoteDir, "test", "documents"),
+  );
+  expect(remoteDocuments.some((fileName) => fileName.endsWith(".json"))).toBe(
+    true,
+  );
+
+  await fs.rm(cacheDir, { recursive: true, force: true });
+  await buildFixture(name, options);
+  const localDocuments = await fs.readdir(path.join(cacheDir, "documents"));
+  expect(localDocuments.some((fileName) => fileName.endsWith(".json"))).toBe(
+    true,
+  );
+});
+
+test("links runtime module paths without embedding source paths", async () => {
+  const name = "module-paths";
+  const result = await buildFixture(name, {
+    envs: { node: { conditions: ["node"], target: "node" } },
+  });
+  const bundle = result.bundles[0];
+  const bundlePath = path.join(outRoot, name, bundle.fileName);
+  const code = await fs.readFile(bundlePath, "utf8");
+  expect(code).not.toContain(path.join(fixturesDir, name));
+  await fs.writeFile(
+    path.join(outRoot, name, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+  const { stdout } = await execFileAsync(process.execPath, [
+    "--eval",
+    `import(${JSON.stringify(pathToFileURL(bundlePath).href)}).then((mod) => console.log(JSON.stringify({ dirname: mod.dirname, filename: mod.filename, moduleUrl: mod.moduleUrl })))`,
+  ]);
+  const loaded = JSON.parse(stdout);
+  expect(loaded.dirname).toBe(path.dirname(bundlePath));
+  expect(loaded.filename).toBe(bundlePath);
+  expect(loaded.moduleUrl).toBe(pathToFileURL(bundlePath).href);
+});
+
+test("emits imported binary assets with linked URLs", async () => {
+  const name = "asset-import";
+  const result = await buildFixture(name);
+  const bundle = result.bundles[0];
+  const bundlePath = path.join(outRoot, name, bundle.fileName);
+  const assets = result.manifest.assets.filter((item) => item.type === "asset");
+  expect(assets).toHaveLength(1);
+  const [asset] = assets;
+  expect(asset.fileName).toMatch(/^assets\/logo\.[a-z0-9]+\.svg$/);
+  await fs.writeFile(
+    path.join(outRoot, name, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+  const { stdout } = await execFileAsync(process.execPath, [
+    "--eval",
+    `import(${JSON.stringify(pathToFileURL(bundlePath).href)}).then((mod) => console.log(JSON.stringify({ logo: mod.logo, freshLogo: mod.freshLogo.href })))`,
+  ]);
+  const loaded = JSON.parse(stdout);
+  const assetUrl = `/${asset.fileName}`;
+  expect(loaded).toEqual({
+    logo: { src: assetUrl, width: 4, height: 4 },
+    freshLogo: new URL(assetUrl, pathToFileURL(bundlePath)).href,
+  });
+});
+
+test("resolves new URL assets against a configured root URL", async () => {
+  const name = "asset-root-url";
+  const outDir = path.join(outRoot, name);
+  const result = await buildFixture(name, {
+    entries: [
+      {
+        id: name,
+        path: path.join(fixturesDir, "asset-import", "src/index.js"),
+      },
+    ],
+    outputs: {
+      outDir,
+      fileName: "[entry].[env].[hash].js",
+      rootURL: "/static/",
+    },
+  });
+  const bundlePath = path.join(outDir, result.bundles[0].fileName);
+  await fs.writeFile(
+    path.join(outDir, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+  const { stdout } = await execFileAsync(process.execPath, [
+    "--eval",
+    `import(${JSON.stringify(pathToFileURL(bundlePath).href)}).then((mod) => console.log(JSON.stringify({ logo: mod.logo, freshLogo: mod.freshLogo.href })))`,
+  ]);
+  const loaded = JSON.parse(stdout);
+  expect(loaded.logo).toMatchObject({ width: 4, height: 4 });
+  expect(loaded.logo.src).toMatch(/^\/static\/assets\/logo\.[a-z0-9]+\.svg$/);
+  expect(loaded.freshLogo).toBe(
+    new URL(loaded.logo.src, pathToFileURL(bundlePath)).href,
+  );
+});
+
+test("transforms raw and base64 asset intents without copying output", async () => {
+  const name = "asset-variants";
+  const result = await buildFixture(name);
+  const bundlePath = path.join(outRoot, name, result.bundles[0].fileName);
+  await fs.writeFile(
+    path.join(outRoot, name, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+  const module = await import(pathToFileURL(bundlePath).href);
+  expect(module.values).toEqual({
+    raw: "portable asset text\n",
+    base64: Buffer.from("portable asset text\n").toString("base64"),
+  });
+  expect(
+    result.manifest.assets.filter((item) => item.type === "asset"),
+  ).toEqual([]);
+});
+
+test("preserves binary assets and changes bundle hashes with asset contents", async () => {
+  const projectDir = path.join(rootDir, "tmp", "asset-binary-hash");
+  const sourceDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  const cacheDir = path.join(projectDir, ".cache");
+  const entryPath = path.join(sourceDir, "index.js");
+  const assetPath = path.join(sourceDir, "payload.wasm");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(sourceDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({
+      name: "asset-binary-hash",
+      version: "1.0.0",
+      type: "module",
+    }),
+  );
+  await fs.writeFile(
+    entryPath,
+    'import payloadUrl from "./payload.wasm"; export const payload = payloadUrl;',
+  );
+  const firstBytes = Uint8Array.from([0, 255, 1, 128, 2, 127]);
+  await fs.writeFile(assetPath, firstBytes);
+  const { buildProject } = await import("../dist/builder.js");
+  const build = () =>
+    buildProject(
+      {
+        envs: { browser: { conditions: ["default"], target: "browser" } },
+        entries: [{ id: "binary", path: entryPath }],
+        outputs: { outDir, fileName: "[entry].[env].[hash].js" },
+        cacheDir,
+        maxWorkers: 2,
+        diagnostics: "human",
+      },
+      [],
+    );
+  const first = await build();
+  const firstAsset = first.manifest.assets.find(
+    (asset) => asset.type === "asset",
+  );
+  expect(await fs.readFile(path.join(outDir, firstAsset.fileName))).toEqual(
+    Buffer.from(firstBytes),
+  );
+
+  const secondBytes = Uint8Array.from([0, 255, 1, 128, 3, 127]);
+  await fs.writeFile(assetPath, secondBytes);
+  const second = await build();
+  const secondAsset = second.manifest.assets.find(
+    (asset) => asset.type === "asset",
+  );
+  expect(await fs.readFile(path.join(outDir, secondAsset.fileName))).toEqual(
+    Buffer.from(secondBytes),
+  );
+  expect(secondAsset.fileName).not.toBe(firstAsset.fileName);
+  expect(second.bundles[0].fileName).not.toBe(first.bundles[0].fileName);
+});
+
+test("loads a dynamic chunk's CSS before importing its JavaScript", async () => {
+  const name = "dynamic-css";
+  const result = await buildFixture(name);
+  const entry = result.bundles.find((bundle) =>
+    bundle.entryId.endsWith("/src/index.js"),
+  );
+  const code = await fs.readFile(
+    path.join(outRoot, name, entry.fileName),
+    "utf8",
+  );
+  const style = result.manifest.assets.find((item) => item.type === "style");
+  expect(style).toBeDefined();
+  expect(code).toContain("__bundler_load_css__");
+  expect(code).toContain(`"/${style.fileName}"`);
+  const css = await fs.readFile(
+    path.join(outRoot, name, style.fileName),
+    "utf8",
+  );
+  expect(css).toMatch(/url\("\/assets\/pixel\.[a-z0-9]+\.svg"\)/);
+  expect(css).not.toContain("/assets/assets/");
+});
+
+test("joins CSS asset and stylesheet paths after a configured root URL", async () => {
+  const name = "dynamic-css-root-url";
+  const outDir = path.join(outRoot, name);
+  const result = await buildFixture(name, {
+    entries: [
+      {
+        id: name,
+        path: path.join(fixturesDir, "dynamic-css", "src/index.js"),
+      },
+    ],
+    outputs: {
+      outDir,
+      fileName: "[entry].[env].[hash].js",
+      rootURL: "https://cdn.example.test/app/",
+    },
+  });
+  const entry = result.bundles.find((bundle) =>
+    bundle.entryId.endsWith("/src/index.js"),
+  );
+  const style = result.manifest.assets.find((item) => item.type === "style");
+  const code = await fs.readFile(path.join(outDir, entry.fileName), "utf8");
+  const css = await fs.readFile(path.join(outDir, style.fileName), "utf8");
+
+  expect(code).toContain(`"https://cdn.example.test/app/${style.fileName}"`);
+  expect(css).toMatch(
+    /url\("https:\/\/cdn\.example\.test\/app\/assets\/pixel\.[a-z0-9]+\.svg"\)/,
+  );
 });
 
 test("fails on top-level await", async () => {
@@ -561,6 +918,99 @@ test("reuses cached worker artifacts for unchanged modules", async () => {
   const secondArtifactStat = await fs.stat(artifactPaths[0]);
   expect(secondModuleStat.mtimeMs).toBe(firstModuleStat.mtimeMs);
   expect(secondArtifactStat.mtimeMs).toBe(firstArtifactStat.mtimeMs);
+});
+
+test("writes and replaces readable debug transformations, including cache hits", async () => {
+  const projectDir = path.join(outRoot, "debug-transformations");
+  const cacheDir = path.join(projectDir, ".cache/conditional-bundler");
+  const debugDir = path.join(projectDir, ".cache/__DEBUG__");
+  await fs.rm(projectDir, { recursive: true, force: true });
+
+  await buildFixture("simple", { cacheDir, debug: true });
+  const firstFiles = await fs.readdir(debugDir, { recursive: true });
+  const inputFile = firstFiles.find((file) =>
+    file.endsWith(
+      path.join("src", "index.js", "__intent-module", "browser", "input.js"),
+    ),
+  );
+  const recordFile = firstFiles.find((file) =>
+    file.endsWith(
+      path.join("src", "index.js", "__intent-module", "browser", "record.json"),
+    ),
+  );
+  expect(inputFile).toBeDefined();
+  expect(recordFile).toBeDefined();
+  expect(
+    firstFiles.some((file) => file.includes(`${path.sep}cells${path.sep}`)),
+  ).toBe(true);
+  expect(
+    JSON.parse(await fs.readFile(path.join(debugDir, recordFile), "utf8")).input
+      .cacheHit,
+  ).toBe(false);
+
+  await fs.writeFile(path.join(debugDir, "stale-marker.txt"), "stale");
+  await buildFixture("simple", { cacheDir, debug: true });
+  await expect(
+    fs.stat(path.join(debugDir, "stale-marker.txt")),
+  ).rejects.toThrow();
+  const secondFiles = await fs.readdir(debugDir, { recursive: true });
+  const secondRecord = secondFiles.find((file) =>
+    file.endsWith(
+      path.join("src", "index.js", "__intent-module", "browser", "record.json"),
+    ),
+  );
+  expect(
+    JSON.parse(await fs.readFile(path.join(debugDir, secondRecord), "utf8"))
+      .input.cacheHit,
+  ).toBe(true);
+
+  await buildFixture("simple", { cacheDir, debug: false });
+  await expect(fs.stat(debugDir)).rejects.toThrow();
+});
+
+test("relinks output-name changes without transforming cached modules", async () => {
+  const cacheDir = path.join(cacheRoot, "output-name-relink");
+  const outDir = path.join(outRoot, "output-name-relink");
+  await fs.rm(cacheDir, { recursive: true, force: true });
+
+  const first = await buildFixture("simple", {
+    cacheDir,
+    outputs: {
+      outDir,
+      fileName: "first.[entry].[env].[hash].js",
+      publicPath: "/first/",
+    },
+  });
+  const v2Dir = path.join(cacheDir, "v2");
+  const [configRoot] = (await fs.readdir(v2Dir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  const moduleFiles = (
+    await fs.readdir(path.join(v2Dir, configRoot), {
+      recursive: true,
+    })
+  ).filter((fileName) => fileName.endsWith("module.json"));
+  expect(moduleFiles.length).toBeGreaterThan(0);
+  const modulePath = path.join(v2Dir, configRoot, moduleFiles[0]);
+  const firstModuleStat = await fs.stat(modulePath);
+
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const second = await buildFixture("simple", {
+    cacheDir,
+    outputs: {
+      outDir,
+      fileName: "second.[entry].[env].[hash].js",
+      publicPath: "/second/",
+    },
+  });
+
+  const configRoots = (await fs.readdir(v2Dir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  expect(configRoots).toEqual([configRoot]);
+  expect((await fs.stat(modulePath)).mtimeMs).toBe(firstModuleStat.mtimeMs);
+  expect(first.bundles[0].fileName).toMatch(/^first\./);
+  expect(second.bundles[0].fileName).toMatch(/^second\./);
 });
 
 async function findModuleCacheSuffix(moduleRoot) {
@@ -826,6 +1276,12 @@ test("extracts CSS and rewrites CSS module imports", async () => {
   );
   expect(css).toContain("body");
   expect(css).toContain("color: red");
+  expect(css).toContain("@media print");
+  expect(css).toContain(".print-only");
+  expect(css.indexOf(".before-import")).toBeLessThan(
+    css.indexOf(".print-only"),
+  );
+  expect(css.indexOf(".print-only")).toBeLessThan(css.indexOf("body"));
 
   const bundleUrl = pathToFileURL(
     path.join(outRoot, "css-basic", result.bundles[0].fileName),
@@ -838,8 +1294,68 @@ test("extracts CSS and rewrites CSS module imports", async () => {
   const mod = JSON.parse(stdout);
   const [defaultClass, namedClass, namespaceClass] = mod.className.split(":");
   expect(defaultClass).toBe(namespaceClass);
-  expect(namedClass).toContain("button");
+  expect(defaultClass).toContain("shared");
+  expect(namedClass).toMatch(/^[a-z0-9]+_button$/);
   expect(mod.noCollision).toBe(true);
+});
+
+test("uses exact eight-character CSS module names in production", async () => {
+  const previous = process.env.BUNDLER_MODE;
+  process.env.BUNDLER_MODE = "production";
+  try {
+    const name = "css-basic-production";
+    const result = await buildFixture(name, {
+      entries: [
+        {
+          id: name,
+          path: path.join(fixturesDir, "css-basic", "src/index.js"),
+        },
+      ],
+      outputs: {
+        outDir: path.join(outRoot, name),
+        fileName: `${name}.[env].[hash].js`,
+      },
+    });
+    const bundleUrl = pathToFileURL(
+      path.join(outRoot, name, result.bundles[0].fileName),
+    ).href;
+    const { stdout } = await execFileAsync(process.execPath, [
+      "--input-type=module",
+      "--eval",
+      `const mod = await import(${JSON.stringify(bundleUrl)}); console.log(mod.className);`,
+    ]);
+    const [, namedClass] = stdout.trim().split(":");
+    expect(namedClass).toMatch(/^[a-z][a-z0-9]{7}$/);
+  } finally {
+    if (previous === undefined) delete process.env.BUNDLER_MODE;
+    else process.env.BUNDLER_MODE = previous;
+  }
+});
+
+test("builds a stylesheet entry without parsing CSS during linking", async () => {
+  const name = "css-style-entry";
+  const outDir = path.join(outRoot, name);
+  const result = await buildFixture(name, {
+    entries: [
+      {
+        id: "styles",
+        path: path.join(fixturesDir, "css-basic", "src/base.css"),
+        kind: "style",
+      },
+    ],
+    outputs: {
+      outDir,
+      fileName: "[entry].[env].[hash].js",
+      cssFileName: "[entry].[env].[hash].css",
+    },
+  });
+
+  expect(result.bundles).toHaveLength(1);
+  const style = result.manifest.assets.find((asset) => asset.type === "style");
+  expect(style).toBeDefined();
+  const css = await fs.readFile(path.join(outDir, style.fileName), "utf8");
+  expect(css).toContain("body");
+  expect(css).toContain("@media print");
 });
 
 test("dev hmr emits mutable cell installers keyed by identifiers", async () => {
@@ -847,6 +1363,7 @@ test("dev hmr emits mutable cell installers keyed by identifiers", async () => {
     outputs: {
       outDir: path.join(outRoot, "simple-hmr"),
       fileName: "simple-hmr.[env].[hash].js",
+      manifestFile: "manifest.json",
     },
     dev: { hmr: true, reactRefresh: false },
   });
@@ -864,7 +1381,7 @@ test("dev hmr emits mutable cell installers keyed by identifiers", async () => {
     "utf8",
   );
   const hmrBundle =
-    result.manifest.metadata.hmr.bundles[
+    result.hmr.bundles[
       `${result.bundles[0].envId}:${result.bundles[0].entryId}`
     ];
   const symbolCell = hmrBundle.cells.find((cell) => cell.symbols.length > 0);
@@ -873,6 +1390,7 @@ test("dev hmr emits mutable cell installers keyed by identifiers", async () => {
     `import { __BUNDLER_HMR__ } from "./${runtimeBundle.fileName}";`,
   );
   expect(output).toContain("__BUNDLER_HMR__.register");
+  expect(output).toContain("__BUNDLER_HMR__.registerBundle");
   expect(output).not.toContain("const __BUNDLER_HMR__");
   expect(runtimeOutput).toContain("const __BUNDLER_HMR__");
   expect(runtimeOutput).toContain('message.type === "rsc-refresh"');
@@ -881,12 +1399,113 @@ test("dev hmr emits mutable cell installers keyed by identifiers", async () => {
   expect(output).toContain("a33jpi1jb_value = k7isotkd_foo + 1;");
   expect(hmrBundle.reactRefresh).toBe(false);
   expect(symbolCell.symbols.length).toBeGreaterThan(0);
+  expect(symbolCell.artifactPath).toBeDefined();
+  expect(symbolCell.code).toBeUndefined();
+  expect(result.manifest.metadata.hmr).toBeUndefined();
+  const serializedManifest = await fs.readFile(
+    path.join(outRoot, "simple-hmr", "manifest.json"),
+    "utf8",
+  );
+  expect(serializedManifest).not.toContain("__BUNDLER_HMR__.register");
   expect(Object.prototype.hasOwnProperty.call(symbolCell, "moduleId")).toBe(
     false,
   );
   expect(Object.prototype.hasOwnProperty.call(symbolCell, "cellId")).toBe(
     false,
   );
+});
+
+test("dev hmr applies fetched patches inside the owning bundle scope", async () => {
+  const outDir = path.join(outRoot, "hmr-lexical-patch");
+  const result = await buildFixture("simple", {
+    outputs: {
+      outDir,
+      fileName: "hmr-lexical.[env].[hash].js",
+    },
+    dev: { hmr: true, reactRefresh: false },
+  });
+  const bundle = result.bundles.find(
+    (candidate) => !candidate.entryId.startsWith("bundler:hmr-runtime:"),
+  );
+  const bundleKey = `${bundle.envId}:${bundle.entryId}`;
+  const cell = result.hmr.bundles[bundleKey].cells.find((candidate) =>
+    candidate.symbols.some((symbol) => symbol.endsWith("_value")),
+  );
+  const symbol = cell.symbols.find((candidate) => candidate.endsWith("_value"));
+  const patchCode = await materializeHmrPatch({
+    ...cell,
+    hash: "patched",
+    code: `${symbol} = 42;`,
+    artifactPath: undefined,
+    map: undefined,
+    mapArtifactPath: undefined,
+  });
+  const bundleUrl = pathToFileURL(path.join(outDir, bundle.fileName)).href;
+  const script = `
+    let reloads = 0;
+    globalThis.WebSocket = undefined;
+    globalThis.fetch = async () => new Response(${JSON.stringify(patchCode)});
+    globalThis.location = { reload: () => { reloads += 1; } };
+    const module = await import(${JSON.stringify(bundleUrl)});
+    const before = module.value;
+    await globalThis.__BUNDLER_HMR__.applyPatch(
+      [{ bundleKey: ${JSON.stringify(bundleKey)}, url: "/__bundler_hmr_updates/1/patch.js" }],
+      [],
+      []
+    );
+    console.log(JSON.stringify({ before, after: module.value, reloads }));
+    process.exit(0);
+  `;
+  const { stdout } = await execFileAsync(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    script,
+  ]);
+  expect(JSON.parse(stdout)).toEqual({ before: 3, after: 42, reloads: 1 });
+});
+
+test("dev hmr manifest size does not scale with source payload size", async () => {
+  const projectDir = path.join(outRoot, "hmr-large-manifest");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  const cacheDir = path.join(projectDir, ".cache");
+  const payload = "x".repeat(512 * 1024);
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(
+    path.join(srcDir, "index.js"),
+    `export const payload = ${JSON.stringify(payload)};`,
+  );
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: { browser: { conditions: ["default"], target: "browser" } },
+      entries: [{ id: "large", path: path.join(srcDir, "index.js") }],
+      outputs: {
+        outDir,
+        fileName: "large.[env].[hash].js",
+        manifestFile: "manifest.json",
+      },
+      cacheDir,
+      css: false,
+      maxWorkers: 1,
+      diagnostics: "human",
+      dev: { hmr: true, reactRefresh: false },
+    },
+    [],
+  );
+  const manifest = await fs.readFile(path.join(outDir, "manifest.json"));
+  const applicationBundle = result.bundles.find(
+    (bundle) => !bundle.entryId.startsWith("bundler:hmr-runtime:"),
+  );
+  const bundle = await fs.readFile(
+    path.join(outDir, applicationBundle.fileName),
+  );
+
+  expect(bundle.byteLength).toBeGreaterThan(payload.length);
+  expect(manifest.byteLength).toBeLessThan(20_000);
+  expect(result.manifest.metadata.hmr).toBeUndefined();
+  expect(result.hmr.bundles).toBeDefined();
 });
 
 test("dev hmr enables react refresh only when react is declared", async () => {
@@ -919,7 +1538,7 @@ test("dev hmr enables react refresh only when react is declared", async () => {
   );
 
   expect(
-    result.manifest.metadata.hmr.bundles[
+    result.hmr.bundles[
       `${result.bundles[0].envId}:${result.bundles[0].entryId}`
     ].reactRefresh,
   ).toBe(true);
@@ -1009,7 +1628,7 @@ export function Unused() {
     "utf8",
   );
   const hmrBundle =
-    result.manifest.metadata.hmr.bundles[
+    result.hmr.bundles[
       `${result.bundles[0].envId}:${result.bundles[0].entryId}`
     ];
   const usedCell = hmrBundle.cells.find((cell) =>
@@ -1020,7 +1639,7 @@ export function Unused() {
   expect(output).toContain("reactRefreshRegister");
   expect(output).not.toContain("_Unused");
   expect(usedCell).toBeDefined();
-  expect(usedCell.code).toContain("reactRefreshRegister");
+  expect(usedCell.artifactPath ?? usedCell.code).toBeDefined();
 });
 
 test("cli loads async config files", async () => {
@@ -1115,7 +1734,7 @@ test("supports env-specific externalized imports via resolveImport", async () =>
         resolveImport: {
           ssr: async ({ request }) => {
             "externalize-foo-v1";
-            return request === "./foo.js" ? null : undefined;
+            return request === "./foo.js" ? { preserve: true } : undefined;
           },
         },
       },
@@ -1376,7 +1995,7 @@ export const dyn = React.Fragment && typeof fs.readFileSync === "function" && ex
           resolveImport: async ({ request }) => {
             "externalize-test-imports-v1";
             return request === "react" || request === "node:fs"
-              ? null
+              ? { preserve: true }
               : undefined;
           },
         },
@@ -1420,26 +2039,34 @@ export const dyn = React.Fragment && typeof fs.readFileSync === "function" && ex
   await expect(imported.loadDyn()).resolves.toMatchObject({ dyn: "dyn" });
 });
 
-test("supports virtual modules through resolveImport and load", async () => {
+test("rejects load hooks and redirects resolver requests to real files", async () => {
   const fixtureName = "plugin-virtual";
-  const virtualPath = path.join(outRoot, ".virtual", "virtual-msg.js");
+  const realPath = path.join(fixturesDir, fixtureName, "src/real-msg.js");
   const cacheDir = path.join(cacheRoot, fixtureName);
   await fs.rm(cacheDir, { recursive: true, force: true });
+
+  await expect(
+    buildFixture(fixtureName, {
+      configPlugins: [
+        {
+          name: "removed-loader",
+          load() {
+            return { code: "export const msg = 'virtual'" };
+          },
+        },
+      ],
+    }),
+  ).rejects.toThrow("removed 'load' hook");
+
   const result = await buildFixture(fixtureName, {
     cacheDir,
     configPlugins: [
       {
-        name: "virtual-msg",
+        name: "real-file-redirect",
         resolveImport: async ({ request }) => {
           "virtual-resolve-v1";
           return request === "virtual:msg"
-            ? { id: "virtual:msg", filePath: virtualPath, virtual: true }
-            : undefined;
-        },
-        load: async ({ id }) => {
-          "virtual-load-v1";
-          return id === "virtual:msg"
-            ? { code: 'export const msg = "hello from virtual";' }
+            ? { id: realPath, filePath: realPath }
             : undefined;
         },
       },
@@ -1447,29 +2074,8 @@ test("supports virtual modules through resolveImport and load", async () => {
   });
 
   const output = await readBundle(result, fixtureName);
-  expect(output).toContain('"hello from virtual"');
+  expect(output).toContain('"hello from a real file"');
   expect(output).toContain("export {");
-
-  const v2Dir = path.join(cacheDir, "v2");
-  const configRoots = (await fs.readdir(v2Dir, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name);
-  expect(configRoots).toHaveLength(1);
-  const activeRoot = path.join(v2Dir, configRoots[0]);
-  const virtualFileHash = contentHash("virtual:msg");
-  const moduleRoot = path.join(activeRoot, "files", virtualFileHash);
-  const moduleJson = JSON.parse(
-    await fs.readFile(
-      path.join(moduleRoot, await findModuleCacheSuffix(moduleRoot)),
-      "utf8",
-    ),
-  );
-  const fileRecord =
-    moduleJson.fileRecordsByEnv?.browser ??
-    moduleJson.fileRecordsByEnv?.default ??
-    moduleJson.fileRecord;
-  expect(fileRecord.filePath).toBe("virtual:msg");
-  expect(JSON.stringify(moduleJson)).not.toContain(path.resolve(virtualPath));
 });
 
 test("runs module-backed worker transforms per environment", async () => {

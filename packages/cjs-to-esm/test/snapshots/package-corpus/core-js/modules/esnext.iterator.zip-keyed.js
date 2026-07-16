@@ -5,7 +5,7 @@ import createProperty from "../internals/create-property";
 import call from "../internals/function-call";
 import uncurryThis from "../internals/function-uncurry-this";
 import getBuiltIn from "../internals/get-built-in";
-import { f as _f } from "../internals/object-property-is-enumerable";
+import propertyIsEnumerableModule from "../internals/object-property-is-enumerable";
 import getIteratorFlattenable from "../internals/get-iterator-flattenable";
 import getModeOption from "../internals/get-mode-option";
 import iteratorCloseAll from "../internals/iterator-close-all";
@@ -32,7 +32,7 @@ $({
     var padding = [];
     var allKeys = ownKeys(iterables);
     var keys = [];
-    var propertyIsEnumerable = _f;
+    var propertyIsEnumerable = propertyIsEnumerableModule.f;
     var i, key, value;
     for (i = 0; i < allKeys.length; i++) try {
       key = allKeys[i];

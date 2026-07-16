@@ -1,12 +1,12 @@
 import $ from "../internals/export";
-import { has as _has, get as _get, toKey as _toKey } from "../internals/reflect-metadata";
+import ReflectMetadataModule from "../internals/reflect-metadata";
 import anObject from "../internals/an-object";
 import getPrototypeOf from "../internals/object-get-prototype-of";
 // TODO: Remove from `core-js@4`
 
-var ordinaryHasOwnMetadata = _has;
-var ordinaryGetOwnMetadata = _get;
-var toMetadataKey = _toKey;
+var ordinaryHasOwnMetadata = ReflectMetadataModule.has;
+var ordinaryGetOwnMetadata = ReflectMetadataModule.get;
+var toMetadataKey = ReflectMetadataModule.toKey;
 var ordinaryGetMetadata = function (MetadataKey, O, P) {
   var hasOwn = ordinaryHasOwnMetadata(MetadataKey, O, P);
   if (hasOwn) return ordinaryGetOwnMetadata(MetadataKey, O, P);

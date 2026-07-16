@@ -1,5 +1,5 @@
-import { Log as _Log } from "./Log";
-import { _getWindowSafe } from "./SafeJs";
+import Log_1 from "./Log";
+import SafeJs_1 from "./SafeJs";
 const inMemoryStore = {};
 const _inMemoryProvider = {
   isReady: () => true,
@@ -16,7 +16,7 @@ const _inMemoryProvider = {
 };
 let _localStorageProvider = null;
 try {
-  const win = (0, _getWindowSafe)();
+  const win = (0, SafeJs_1._getWindowSafe)();
   if (win && win.localStorage && typeof win.localStorage.getItem === 'function') {
     _localStorageProvider = {
       isReady: () => true,
@@ -29,7 +29,7 @@ try {
     };
   }
 } catch (error) {
-  _Log.warn('Failed to setup localStorageProvider.');
+  Log_1.Log.warn('Failed to setup localStorageProvider.');
 }
 let _main = _localStorageProvider !== null && _localStorageProvider !== void 0 ? _localStorageProvider : _inMemoryProvider;
 let _current = _main;
@@ -71,7 +71,7 @@ export function _getObjectFromStorage(key) {
   try {
     return JSON.parse(value !== null && value !== void 0 ? value : 'null');
   } catch (e) {
-    _Log.error(`Failed to parse value for key "${key}"`);
+    Log_1.Log.error(`Failed to parse value for key "${key}"`);
     return null;
   }
 }

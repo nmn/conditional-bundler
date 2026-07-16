@@ -1,8 +1,15 @@
 import * as http from "node:http";
 import * as https from "node:https";
-import { Stream as _Stream } from "readable-stream";
+import _cjs_import from "readable-stream";
 import TransportStream from "winston-transport";
-import { configure as _configure } from "safe-stable-stringify";
+import _cjs_import2 from "safe-stable-stringify";
+const {
+  Stream
+} = _cjs_import;
+const {
+  configure
+} = _cjs_import2;
+
 /**
  * Transport for outputting to a json-rpc server.
  * @type {Stream}
@@ -107,7 +114,7 @@ const _cjs_default = class Http extends TransportStream {
    * @returns {Stream} - TODO: add return description
    */
   stream(options = {}) {
-    const stream = new _Stream();
+    const stream = new Stream();
     options = {
       method: 'stream',
       params: options
@@ -222,7 +229,7 @@ const _cjs_default = class Http extends TransportStream {
     });
     req.on('error', callback);
     req.on('response', res => res.on('end', () => callback(null, res)).resume());
-    const jsonStringify = _configure({
+    const jsonStringify = configure({
       ...(this.maximumDepth && {
         maximumDepth: this.maximumDepth
       })

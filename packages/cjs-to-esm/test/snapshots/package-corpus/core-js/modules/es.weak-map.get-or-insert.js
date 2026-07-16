@@ -1,9 +1,9 @@
 import $ from "../internals/export";
-import { get as _get, has as _has, set as _set } from "../internals/weak-map-helpers";
+import WeakMapHelpers from "../internals/weak-map-helpers";
 import IS_PURE from "../internals/is-pure";
-var get = _get;
-var has = _has;
-var set = _set;
+var get = WeakMapHelpers.get;
+var has = WeakMapHelpers.has;
+var set = WeakMapHelpers.set;
 
 // `WeakMap.prototype.getOrInsert` method
 // https://tc39.es/ecma262/#sec-weakmap.prototype.getorinsert

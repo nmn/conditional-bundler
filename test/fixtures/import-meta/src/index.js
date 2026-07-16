@@ -1,1 +1,1 @@
-export const asset = new URL("./asset.png", import.meta.url).href;
+export const asset = new URL("./asset.svg", import.meta.url).href;

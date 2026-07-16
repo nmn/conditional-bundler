@@ -1,12 +1,43 @@
 import * as assert from "node:assert";
-import { kConstruct as _kConstruct } from "../../core/symbols";
-import { urlEquals as _urlEquals, getFieldValues as _getFieldValues } from "./util";
-import { kEnumerableProperty as _kEnumerableProperty, isDisturbed as _isDisturbed } from "../../core/util";
-import { webidl as _webidl } from "../webidl";
-import { cloneResponse as _cloneResponse, fromInnerResponse as _fromInnerResponse, getResponseState as _getResponseState } from "../fetch/response";
-import { Request as _Request, fromInnerRequest as _fromInnerRequest, getRequestState as _getRequestState } from "../fetch/request";
-import { fetching as _fetching } from "../fetch/index";
-import { urlIsHttpHttpsScheme as _urlIsHttpHttpsScheme, readAllBytes as _readAllBytes } from "../fetch/util";
+import _cjs_import from "../../core/symbols";
+import _cjs_import2 from "./util";
+import _cjs_import3 from "../../core/util";
+import _cjs_import4 from "../webidl";
+import _cjs_import5 from "../fetch/response";
+import _cjs_import6 from "../fetch/request";
+import _cjs_import7 from "../fetch/index";
+import _cjs_import8 from "../fetch/util";
+const {
+  kConstruct
+} = _cjs_import;
+const {
+  urlEquals,
+  getFieldValues
+} = _cjs_import2;
+const {
+  kEnumerableProperty,
+  isDisturbed
+} = _cjs_import3;
+const {
+  webidl
+} = _cjs_import4;
+const {
+  cloneResponse,
+  fromInnerResponse,
+  getResponseState
+} = _cjs_import5;
+const {
+  Request,
+  fromInnerRequest,
+  getRequestState
+} = _cjs_import6;
+const {
+  fetching
+} = _cjs_import7;
+const {
+  urlIsHttpHttpsScheme,
+  readAllBytes
+} = _cjs_import8;
 /**
  * @see https://w3c.github.io/ServiceWorker/#dfn-cache-batch-operation
  * @typedef {Object} CacheBatchOperation
@@ -28,18 +59,18 @@ class Cache {
    */
   #relevantRequestResponseList;
   constructor() {
-    if (arguments[0] !== _kConstruct) {
-      _webidl.illegalConstructor();
+    if (arguments[0] !== kConstruct) {
+      webidl.illegalConstructor();
     }
-    _webidl.util.markAsUncloneable(this);
+    webidl.util.markAsUncloneable(this);
     this.#relevantRequestResponseList = arguments[1];
   }
   async match(request, options = {}) {
-    _webidl.brandCheck(this, Cache);
+    webidl.brandCheck(this, Cache);
     const prefix = 'Cache.match';
-    _webidl.argumentLengthCheck(arguments, 1, prefix);
-    request = _webidl.converters.RequestInfo(request);
-    options = _webidl.converters.CacheQueryOptions(options, prefix, 'options');
+    webidl.argumentLengthCheck(arguments, 1, prefix);
+    request = webidl.converters.RequestInfo(request);
+    options = webidl.converters.CacheQueryOptions(options, prefix, 'options');
     const p = this.#internalMatchAll(request, options, 1);
     if (p.length === 0) {
       return;
@@ -47,17 +78,17 @@ class Cache {
     return p[0];
   }
   async matchAll(request = undefined, options = {}) {
-    _webidl.brandCheck(this, Cache);
+    webidl.brandCheck(this, Cache);
     const prefix = 'Cache.matchAll';
-    if (request !== undefined) request = _webidl.converters.RequestInfo(request);
-    options = _webidl.converters.CacheQueryOptions(options, prefix, 'options');
+    if (request !== undefined) request = webidl.converters.RequestInfo(request);
+    options = webidl.converters.CacheQueryOptions(options, prefix, 'options');
     return this.#internalMatchAll(request, options);
   }
   async add(request) {
-    _webidl.brandCheck(this, Cache);
+    webidl.brandCheck(this, Cache);
     const prefix = 'Cache.add';
-    _webidl.argumentLengthCheck(arguments, 1, prefix);
-    request = _webidl.converters.RequestInfo(request);
+    webidl.argumentLengthCheck(arguments, 1, prefix);
+    request = webidl.converters.RequestInfo(request);
 
     // 1.
     const requests = [request];
@@ -69,9 +100,9 @@ class Cache {
     return await responseArrayPromise;
   }
   async addAll(requests) {
-    _webidl.brandCheck(this, Cache);
+    webidl.brandCheck(this, Cache);
     const prefix = 'Cache.addAll';
-    _webidl.argumentLengthCheck(arguments, 1, prefix);
+    webidl.argumentLengthCheck(arguments, 1, prefix);
 
     // 1.
     const responsePromises = [];
@@ -82,23 +113,23 @@ class Cache {
     // 3.
     for (let request of requests) {
       if (request === undefined) {
-        throw _webidl.errors.conversionFailed({
+        throw webidl.errors.conversionFailed({
           prefix,
           argument: 'Argument 1',
           types: ['undefined is not allowed']
         });
       }
-      request = _webidl.converters.RequestInfo(request);
+      request = webidl.converters.RequestInfo(request);
       if (typeof request === 'string') {
         continue;
       }
 
       // 3.1
-      const r = _getRequestState(request);
+      const r = getRequestState(request);
 
       // 3.2
-      if (!_urlIsHttpHttpsScheme(r.url) || r.method !== 'GET') {
-        throw _webidl.errors.exception({
+      if (!urlIsHttpHttpsScheme(r.url) || r.method !== 'GET') {
+        throw webidl.errors.exception({
           header: prefix,
           message: 'Expected http/s scheme when method is not GET.'
         });
@@ -112,11 +143,11 @@ class Cache {
     // 5.
     for (const request of requests) {
       // 5.1
-      const r = _getRequestState(new _Request(request));
+      const r = getRequestState(new Request(request));
 
       // 5.2
-      if (!_urlIsHttpHttpsScheme(r.url)) {
-        throw _webidl.errors.exception({
+      if (!urlIsHttpHttpsScheme(r.url)) {
+        throw webidl.errors.exception({
           header: prefix,
           message: 'Expected http/s scheme.'
         });
@@ -133,25 +164,25 @@ class Cache {
       const responsePromise = Promise.withResolvers();
 
       // 5.7
-      fetchControllers.push(_fetching({
+      fetchControllers.push(fetching({
         request: r,
         processResponse(response) {
           // 1.
           if (response.type === 'error' || response.status === 206 || response.status < 200 || response.status > 299) {
-            responsePromise.reject(_webidl.errors.exception({
+            responsePromise.reject(webidl.errors.exception({
               header: 'Cache.addAll',
               message: 'Received an invalid status code or the request failed.'
             }));
           } else if (response.headersList.contains('vary')) {
             // 2.
             // 2.1
-            const fieldValues = _getFieldValues(response.headersList.get('vary'));
+            const fieldValues = getFieldValues(response.headersList.get('vary'));
 
             // 2.2
             for (const fieldValue of fieldValues) {
               // 2.2.1
               if (fieldValue === '*') {
-                responsePromise.reject(_webidl.errors.exception({
+                responsePromise.reject(webidl.errors.exception({
                   header: 'Cache.addAll',
                   message: 'invalid vary field value'
                 }));
@@ -235,37 +266,37 @@ class Cache {
     return cacheJobPromise.promise;
   }
   async put(request, response) {
-    _webidl.brandCheck(this, Cache);
+    webidl.brandCheck(this, Cache);
     const prefix = 'Cache.put';
-    _webidl.argumentLengthCheck(arguments, 2, prefix);
-    request = _webidl.converters.RequestInfo(request);
-    response = _webidl.converters.Response(response, prefix, 'response');
+    webidl.argumentLengthCheck(arguments, 2, prefix);
+    request = webidl.converters.RequestInfo(request);
+    response = webidl.converters.Response(response, prefix, 'response');
 
     // 1.
     let innerRequest = null;
 
     // 2.
-    if (_webidl.is.Request(request)) {
-      innerRequest = _getRequestState(request);
+    if (webidl.is.Request(request)) {
+      innerRequest = getRequestState(request);
     } else {
       // 3.
-      innerRequest = _getRequestState(new _Request(request));
+      innerRequest = getRequestState(new Request(request));
     }
 
     // 4.
-    if (!_urlIsHttpHttpsScheme(innerRequest.url) || innerRequest.method !== 'GET') {
-      throw _webidl.errors.exception({
+    if (!urlIsHttpHttpsScheme(innerRequest.url) || innerRequest.method !== 'GET') {
+      throw webidl.errors.exception({
         header: prefix,
         message: 'Expected an http/s scheme when method is not GET'
       });
     }
 
     // 5.
-    const innerResponse = _getResponseState(response);
+    const innerResponse = getResponseState(response);
 
     // 6.
     if (innerResponse.status === 206) {
-      throw _webidl.errors.exception({
+      throw webidl.errors.exception({
         header: prefix,
         message: 'Got 206 status'
       });
@@ -274,13 +305,13 @@ class Cache {
     // 7.
     if (innerResponse.headersList.contains('vary')) {
       // 7.1.
-      const fieldValues = _getFieldValues(innerResponse.headersList.get('vary'));
+      const fieldValues = getFieldValues(innerResponse.headersList.get('vary'));
 
       // 7.2.
       for (const fieldValue of fieldValues) {
         // 7.2.1
         if (fieldValue === '*') {
-          throw _webidl.errors.exception({
+          throw webidl.errors.exception({
             header: prefix,
             message: 'Got * vary field value'
           });
@@ -289,15 +320,15 @@ class Cache {
     }
 
     // 8.
-    if (innerResponse.body && (_isDisturbed(innerResponse.body.stream) || innerResponse.body.stream.locked)) {
-      throw _webidl.errors.exception({
+    if (innerResponse.body && (isDisturbed(innerResponse.body.stream) || innerResponse.body.stream.locked)) {
+      throw webidl.errors.exception({
         header: prefix,
         message: 'Response body is locked or disturbed'
       });
     }
 
     // 9.
-    const clonedResponse = _cloneResponse(innerResponse);
+    const clonedResponse = cloneResponse(innerResponse);
 
     // 10.
     const bodyReadPromise = Promise.withResolvers();
@@ -311,7 +342,7 @@ class Cache {
       const reader = stream.getReader();
 
       // 11.3
-      _readAllBytes(reader, bodyReadPromise.resolve, bodyReadPromise.reject);
+      readAllBytes(reader, bodyReadPromise.resolve, bodyReadPromise.reject);
     } else {
       bodyReadPromise.resolve(undefined);
     }
@@ -365,24 +396,24 @@ class Cache {
     return cacheJobPromise.promise;
   }
   async delete(request, options = {}) {
-    _webidl.brandCheck(this, Cache);
+    webidl.brandCheck(this, Cache);
     const prefix = 'Cache.delete';
-    _webidl.argumentLengthCheck(arguments, 1, prefix);
-    request = _webidl.converters.RequestInfo(request);
-    options = _webidl.converters.CacheQueryOptions(options, prefix, 'options');
+    webidl.argumentLengthCheck(arguments, 1, prefix);
+    request = webidl.converters.RequestInfo(request);
+    options = webidl.converters.CacheQueryOptions(options, prefix, 'options');
 
     /**
      * @type {Request}
      */
     let r = null;
-    if (_webidl.is.Request(request)) {
-      r = _getRequestState(request);
+    if (webidl.is.Request(request)) {
+      r = getRequestState(request);
       if (r.method !== 'GET' && !options.ignoreMethod) {
         return false;
       }
     } else {
       assert(typeof request === 'string');
-      r = _getRequestState(new _Request(request));
+      r = getRequestState(new Request(request));
     }
 
     /** @type {CacheBatchOperation[]} */
@@ -420,10 +451,10 @@ class Cache {
    * @returns {Promise<readonly Request[]>}
    */
   async keys(request = undefined, options = {}) {
-    _webidl.brandCheck(this, Cache);
+    webidl.brandCheck(this, Cache);
     const prefix = 'Cache.keys';
-    if (request !== undefined) request = _webidl.converters.RequestInfo(request);
-    options = _webidl.converters.CacheQueryOptions(options, prefix, 'options');
+    if (request !== undefined) request = webidl.converters.RequestInfo(request);
+    options = webidl.converters.CacheQueryOptions(options, prefix, 'options');
 
     // 1.
     let r = null;
@@ -431,9 +462,9 @@ class Cache {
     // 2.
     if (request !== undefined) {
       // 2.1
-      if (_webidl.is.Request(request)) {
+      if (webidl.is.Request(request)) {
         // 2.1.1
-        r = _getRequestState(request);
+        r = getRequestState(request);
 
         // 2.1.2
         if (r.method !== 'GET' && !options.ignoreMethod) {
@@ -441,7 +472,7 @@ class Cache {
         }
       } else if (typeof request === 'string') {
         // 2.2
-        r = _getRequestState(new _Request(request));
+        r = getRequestState(new Request(request));
       }
     }
 
@@ -478,7 +509,7 @@ class Cache {
 
       // 5.4.2
       for (const request of requests) {
-        const requestObject = _fromInnerRequest(request, undefined, new AbortController().signal, 'immutable');
+        const requestObject = fromInnerRequest(request, undefined, new AbortController().signal, 'immutable');
         // 5.4.2.1
         requestList.push(requestObject);
       }
@@ -511,7 +542,7 @@ class Cache {
       for (const operation of operations) {
         // 4.2.1
         if (operation.type !== 'delete' && operation.type !== 'put') {
-          throw _webidl.errors.exception({
+          throw webidl.errors.exception({
             header: 'Cache.#batchCacheOperations',
             message: 'operation type does not match "delete" or "put"'
           });
@@ -519,7 +550,7 @@ class Cache {
 
         // 4.2.2
         if (operation.type === 'delete' && operation.response != null) {
-          throw _webidl.errors.exception({
+          throw webidl.errors.exception({
             header: 'Cache.#batchCacheOperations',
             message: 'delete operation should not have an associated response'
           });
@@ -555,7 +586,7 @@ class Cache {
           // 4.2.6
           // 4.2.6.1
           if (operation.response == null) {
-            throw _webidl.errors.exception({
+            throw webidl.errors.exception({
               header: 'Cache.#batchCacheOperations',
               message: 'put operation should have an associated response'
             });
@@ -565,8 +596,8 @@ class Cache {
           const r = operation.request;
 
           // 4.2.6.3
-          if (!_urlIsHttpHttpsScheme(r.url)) {
-            throw _webidl.errors.exception({
+          if (!urlIsHttpHttpsScheme(r.url)) {
+            throw webidl.errors.exception({
               header: 'Cache.#batchCacheOperations',
               message: 'expected http or https scheme'
             });
@@ -574,7 +605,7 @@ class Cache {
 
           // 4.2.6.4
           if (r.method !== 'GET') {
-            throw _webidl.errors.exception({
+            throw webidl.errors.exception({
               header: 'Cache.#batchCacheOperations',
               message: 'not get method'
             });
@@ -582,7 +613,7 @@ class Cache {
 
           // 4.2.6.5
           if (operation.options != null) {
-            throw _webidl.errors.exception({
+            throw webidl.errors.exception({
               header: 'Cache.#batchCacheOperations',
               message: 'options must not be defined'
             });
@@ -665,13 +696,13 @@ class Cache {
       cachedURL.search = '';
       queryURL.search = '';
     }
-    if (!_urlEquals(queryURL, cachedURL, true)) {
+    if (!urlEquals(queryURL, cachedURL, true)) {
       return false;
     }
     if (response == null || options?.ignoreVary || !response.headersList.contains('vary')) {
       return true;
     }
-    const fieldValues = _getFieldValues(response.headersList.get('vary'));
+    const fieldValues = getFieldValues(response.headersList.get('vary'));
     for (const fieldValue of fieldValues) {
       if (fieldValue === '*') {
         return false;
@@ -693,9 +724,9 @@ class Cache {
 
     // 2.
     if (request !== undefined) {
-      if (_webidl.is.Request(request)) {
+      if (webidl.is.Request(request)) {
         // 2.1.1
-        r = _getRequestState(request);
+        r = getRequestState(request);
 
         // 2.1.2
         if (r.method !== 'GET' && !options.ignoreMethod) {
@@ -703,7 +734,7 @@ class Cache {
         }
       } else if (typeof request === 'string') {
         // 2.2.1
-        r = _getRequestState(new _Request(request));
+        r = getRequestState(new Request(request));
       }
     }
 
@@ -737,7 +768,7 @@ class Cache {
     // 5.5.2
     for (const response of responses) {
       // 5.5.2.1
-      const responseObject = _fromInnerResponse(_cloneResponse(response), 'immutable');
+      const responseObject = fromInnerResponse(cloneResponse(response), 'immutable');
       responseList.push(responseObject);
       if (responseList.length >= maxResponses) {
         break;
@@ -753,34 +784,34 @@ Object.defineProperties(Cache.prototype, {
     value: 'Cache',
     configurable: true
   },
-  match: _kEnumerableProperty,
-  matchAll: _kEnumerableProperty,
-  add: _kEnumerableProperty,
-  addAll: _kEnumerableProperty,
-  put: _kEnumerableProperty,
-  delete: _kEnumerableProperty,
-  keys: _kEnumerableProperty
+  match: kEnumerableProperty,
+  matchAll: kEnumerableProperty,
+  add: kEnumerableProperty,
+  addAll: kEnumerableProperty,
+  put: kEnumerableProperty,
+  delete: kEnumerableProperty,
+  keys: kEnumerableProperty
 });
 const cacheQueryOptionConverters = [{
   key: 'ignoreSearch',
-  converter: _webidl.converters.boolean,
+  converter: webidl.converters.boolean,
   defaultValue: () => false
 }, {
   key: 'ignoreMethod',
-  converter: _webidl.converters.boolean,
+  converter: webidl.converters.boolean,
   defaultValue: () => false
 }, {
   key: 'ignoreVary',
-  converter: _webidl.converters.boolean,
+  converter: webidl.converters.boolean,
   defaultValue: () => false
 }];
-_webidl.converters.CacheQueryOptions = _webidl.dictionaryConverter(cacheQueryOptionConverters);
-_webidl.converters.MultiCacheQueryOptions = _webidl.dictionaryConverter([...cacheQueryOptionConverters, {
+webidl.converters.CacheQueryOptions = webidl.dictionaryConverter(cacheQueryOptionConverters);
+webidl.converters.MultiCacheQueryOptions = webidl.dictionaryConverter([...cacheQueryOptionConverters, {
   key: 'cacheName',
-  converter: _webidl.converters.DOMString
+  converter: webidl.converters.DOMString
 }]);
-_webidl.converters.Response = _webidl.interfaceConverter(_webidl.is.Response, 'Response');
-_webidl.converters['sequence<RequestInfo>'] = _webidl.sequenceConverter(_webidl.converters.RequestInfo);
+webidl.converters.Response = webidl.interfaceConverter(webidl.is.Response, 'Response');
+webidl.converters['sequence<RequestInfo>'] = webidl.sequenceConverter(webidl.converters.RequestInfo);
 const _cjs_default = {
   Cache
 };

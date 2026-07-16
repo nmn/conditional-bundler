@@ -1,5 +1,5 @@
-import { has as _has } from "../internals/weak-map-helpers";
-var has = _has;
+import _cjs_import from "../internals/weak-map-helpers";
+var has = _cjs_import.has;
 
 // Perform ? RequireInternalSlot(M, [[WeakMapData]])
 const _cjs_default = function (it) {

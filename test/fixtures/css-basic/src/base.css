@@ -1,3 +1,9 @@
+.before-import {
+  --order-proof: before;
+}
+
+@import "./print.css" print;
+
 body {
   color: red;
 }

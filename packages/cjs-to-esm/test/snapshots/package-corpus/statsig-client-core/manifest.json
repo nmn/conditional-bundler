@@ -4,8 +4,8 @@
   "mode": "production",
   "files": 54,
   "strategies": {
-    "static": 52,
+    "static": 51,
     "conditional": 0,
-    "compatibility": 2
+    "compatibility": 3
   }
 }

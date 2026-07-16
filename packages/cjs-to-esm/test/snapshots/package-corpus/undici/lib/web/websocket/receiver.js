@@ -1,14 +1,43 @@
 import * as _cjs_import from "node:stream";
 import * as assert from "node:assert";
-import { parserStates as _parserStates, opcodes as _opcodes, states as _states, emptyBuffer as _emptyBuffer, sentCloseFrameState as _sentCloseFrameState } from "./constants";
-import { isValidStatusCode as _isValidStatusCode, isValidOpcode as _isValidOpcode, websocketMessageReceived as _websocketMessageReceived, utf8Decode as _utf8Decode, isControlFrame as _isControlFrame, isTextBinaryFrame as _isTextBinaryFrame, isContinuationFrame as _isContinuationFrame } from "./util";
-import { failWebsocketConnection as _failWebsocketConnection } from "./connection";
-import { WebsocketFrameSend as _WebsocketFrameSend } from "./frame";
-import { PerMessageDeflate as _PerMessageDeflate } from "./permessage-deflate";
-import { MessageSizeExceededError as _MessageSizeExceededError } from "../../core/errors";
+import _cjs_import2 from "./constants";
+import _cjs_import3 from "./util";
+import _cjs_import4 from "./connection";
+import _cjs_import5 from "./frame";
+import _cjs_import6 from "./permessage-deflate";
+import _cjs_import7 from "../../core/errors";
 const {
   Writable
 } = _cjs_import;
+const {
+  parserStates,
+  opcodes,
+  states,
+  emptyBuffer,
+  sentCloseFrameState
+} = _cjs_import2;
+const {
+  isValidStatusCode,
+  isValidOpcode,
+  websocketMessageReceived,
+  utf8Decode,
+  isControlFrame,
+  isTextBinaryFrame,
+  isContinuationFrame
+} = _cjs_import3;
+const {
+  failWebsocketConnection
+} = _cjs_import4;
+const {
+  WebsocketFrameSend
+} = _cjs_import5;
+const {
+  PerMessageDeflate
+} = _cjs_import6;
+const {
+  MessageSizeExceededError
+} = _cjs_import7;
+
 // This code was influenced by ws released under the MIT license.
 // Copyright (c) 2011 Einar Otto Stangvik <einaros@gmail.com>
 // Copyright (c) 2013 Arnout Kazemier and contributors
@@ -19,7 +48,7 @@ class ByteParser extends Writable {
   #fragmentsBytes = 0;
   #byteOffset = 0;
   #loop = false;
-  #state = _parserStates.INFO;
+  #state = parserStates.INFO;
   #info = {};
   #fragments = [];
 
@@ -47,7 +76,7 @@ class ByteParser extends Writable {
     this.#maxFragments = options.maxFragments ?? 0;
     this.#maxPayloadSize = options.maxPayloadSize ?? 0;
     if (this.#extensions.has('permessage-deflate')) {
-      this.#extensions.set('permessage-deflate', new _PerMessageDeflate(extensions, options));
+      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions, options));
     }
   }
 
@@ -62,8 +91,8 @@ class ByteParser extends Writable {
     this.run(callback);
   }
   #validatePayloadLength() {
-    if (this.#maxPayloadSize > 0 && !_isControlFrame(this.#info.opcode) && this.#info.payloadLength + this.#fragmentsBytes > this.#maxPayloadSize) {
-      _failWebsocketConnection(this.#handler, 1009, 'Payload size exceeds maximum allowed size');
+    if (this.#maxPayloadSize > 0 && !isControlFrame(this.#info.opcode) && this.#info.payloadLength + this.#fragmentsBytes > this.#maxPayloadSize) {
+      failWebsocketConnection(this.#handler, 1009, 'Payload size exceeds maximum allowed size');
       return false;
     }
     return true;
@@ -76,7 +105,7 @@ class ByteParser extends Writable {
    */
   run(callback) {
     while (this.#loop) {
-      if (this.#state === _parserStates.INFO) {
+      if (this.#state === parserStates.INFO) {
         // If there aren't enough bytes to parse the payload length, etc.
         if (this.#byteOffset < 2) {
           return callback();
@@ -85,17 +114,17 @@ class ByteParser extends Writable {
         const fin = (buffer[0] & 0x80) !== 0;
         const opcode = buffer[0] & 0x0F;
         const masked = (buffer[1] & 0x80) === 0x80;
-        const fragmented = !fin && opcode !== _opcodes.CONTINUATION;
+        const fragmented = !fin && opcode !== opcodes.CONTINUATION;
         const payloadLength = buffer[1] & 0x7F;
         const rsv1 = buffer[0] & 0x40;
         const rsv2 = buffer[0] & 0x20;
         const rsv3 = buffer[0] & 0x10;
-        if (!_isValidOpcode(opcode)) {
-          _failWebsocketConnection(this.#handler, 1002, 'Invalid opcode received');
+        if (!isValidOpcode(opcode)) {
+          failWebsocketConnection(this.#handler, 1002, 'Invalid opcode received');
           return callback();
         }
         if (masked) {
-          _failWebsocketConnection(this.#handler, 1002, 'Frame cannot be masked');
+          failWebsocketConnection(this.#handler, 1002, 'Frame cannot be masked');
           return callback();
         }
 
@@ -109,53 +138,53 @@ class ByteParser extends Writable {
         // WebSocket connection where a PMCE is in use, this bit indicates
         // whether a message is compressed or not.
         if (rsv1 !== 0 && !this.#extensions.has('permessage-deflate')) {
-          _failWebsocketConnection(this.#handler, 1002, 'Expected RSV1 to be clear.');
+          failWebsocketConnection(this.#handler, 1002, 'Expected RSV1 to be clear.');
           return;
         }
         if (rsv2 !== 0 || rsv3 !== 0) {
-          _failWebsocketConnection(this.#handler, 1002, 'RSV1, RSV2, RSV3 must be clear');
+          failWebsocketConnection(this.#handler, 1002, 'RSV1, RSV2, RSV3 must be clear');
           return;
         }
-        if (fragmented && !_isTextBinaryFrame(opcode)) {
+        if (fragmented && !isTextBinaryFrame(opcode)) {
           // Only text and binary frames can be fragmented
-          _failWebsocketConnection(this.#handler, 1002, 'Invalid frame type was fragmented.');
+          failWebsocketConnection(this.#handler, 1002, 'Invalid frame type was fragmented.');
           return;
         }
 
         // If we are already parsing a text/binary frame and do not receive either
         // a continuation frame or close frame, fail the connection.
-        if (_isTextBinaryFrame(opcode) && this.#fragments.length > 0) {
-          _failWebsocketConnection(this.#handler, 1002, 'Expected continuation frame');
+        if (isTextBinaryFrame(opcode) && this.#fragments.length > 0) {
+          failWebsocketConnection(this.#handler, 1002, 'Expected continuation frame');
           return;
         }
         if (this.#info.fragmented && fragmented) {
           // A fragmented frame can't be fragmented itself
-          _failWebsocketConnection(this.#handler, 1002, 'Fragmented frame exceeded 125 bytes.');
+          failWebsocketConnection(this.#handler, 1002, 'Fragmented frame exceeded 125 bytes.');
           return;
         }
 
         // "All control frames MUST have a payload length of 125 bytes or less
         // and MUST NOT be fragmented."
-        if ((payloadLength > 125 || fragmented) && _isControlFrame(opcode)) {
-          _failWebsocketConnection(this.#handler, 1002, 'Control frame either too large or fragmented');
+        if ((payloadLength > 125 || fragmented) && isControlFrame(opcode)) {
+          failWebsocketConnection(this.#handler, 1002, 'Control frame either too large or fragmented');
           return;
         }
-        if (_isContinuationFrame(opcode) && this.#fragments.length === 0 && !this.#info.compressed) {
-          _failWebsocketConnection(this.#handler, 1002, 'Unexpected continuation frame');
+        if (isContinuationFrame(opcode) && this.#fragments.length === 0 && !this.#info.compressed) {
+          failWebsocketConnection(this.#handler, 1002, 'Unexpected continuation frame');
           return;
         }
         if (payloadLength <= 125) {
           this.#info.payloadLength = payloadLength;
-          this.#state = _parserStates.READ_DATA;
+          this.#state = parserStates.READ_DATA;
           if (!this.#validatePayloadLength()) {
             return;
           }
         } else if (payloadLength === 126) {
-          this.#state = _parserStates.PAYLOADLENGTH_16;
+          this.#state = parserStates.PAYLOADLENGTH_16;
         } else if (payloadLength === 127) {
-          this.#state = _parserStates.PAYLOADLENGTH_64;
+          this.#state = parserStates.PAYLOADLENGTH_64;
         }
-        if (_isTextBinaryFrame(opcode)) {
+        if (isTextBinaryFrame(opcode)) {
           this.#info.binaryType = opcode;
           this.#info.compressed = rsv1 !== 0;
         }
@@ -163,17 +192,17 @@ class ByteParser extends Writable {
         this.#info.masked = masked;
         this.#info.fin = fin;
         this.#info.fragmented = fragmented;
-      } else if (this.#state === _parserStates.PAYLOADLENGTH_16) {
+      } else if (this.#state === parserStates.PAYLOADLENGTH_16) {
         if (this.#byteOffset < 2) {
           return callback();
         }
         const buffer = this.consume(2);
         this.#info.payloadLength = buffer.readUInt16BE(0);
-        this.#state = _parserStates.READ_DATA;
+        this.#state = parserStates.READ_DATA;
         if (!this.#validatePayloadLength()) {
           return;
         }
-      } else if (this.#state === _parserStates.PAYLOADLENGTH_64) {
+      } else if (this.#state === parserStates.PAYLOADLENGTH_64) {
         if (this.#byteOffset < 8) {
           return callback();
         }
@@ -188,22 +217,22 @@ class ByteParser extends Writable {
         // https://source.chromium.org/chromium/chromium/src/+/main:v8/src/common/globals.h;drc=1946212ac0100668f14eb9e2843bdd846e510a1e;bpv=1;bpt=1;l=1275
         // https://source.chromium.org/chromium/chromium/src/+/main:v8/src/objects/js-array-buffer.h;l=34;drc=1946212ac0100668f14eb9e2843bdd846e510a1e
         if (upper !== 0 || lower > 2 ** 31 - 1) {
-          _failWebsocketConnection(this.#handler, 1009, 'Received payload length > 2^31 bytes.');
+          failWebsocketConnection(this.#handler, 1009, 'Received payload length > 2^31 bytes.');
           return;
         }
         this.#info.payloadLength = lower;
-        this.#state = _parserStates.READ_DATA;
+        this.#state = parserStates.READ_DATA;
         if (!this.#validatePayloadLength()) {
           return;
         }
-      } else if (this.#state === _parserStates.READ_DATA) {
+      } else if (this.#state === parserStates.READ_DATA) {
         if (this.#byteOffset < this.#info.payloadLength) {
           return callback();
         }
         const body = this.consume(this.#info.payloadLength);
-        if (_isControlFrame(this.#info.opcode)) {
+        if (isControlFrame(this.#info.opcode)) {
           this.#loop = this.parseControlFrame(body);
-          this.#state = _parserStates.INFO;
+          this.#state = parserStates.INFO;
         } else {
           if (!this.#info.compressed) {
             if (!this.writeFragments(body)) {
@@ -215,14 +244,14 @@ class ByteParser extends Writable {
             // and an opcode of 0 (continuation), therefore we handle that when
             // parsing continuation frames, not here.
             if (!this.#info.fragmented && this.#info.fin) {
-              _websocketMessageReceived(this.#handler, this.#info.binaryType, this.consumeFragments());
+              websocketMessageReceived(this.#handler, this.#info.binaryType, this.consumeFragments());
             }
-            this.#state = _parserStates.INFO;
+            this.#state = parserStates.INFO;
           } else {
             this.#extensions.get('permessage-deflate').decompress(body, this.#info.fin, (error, data) => {
               if (error) {
-                const code = error instanceof _MessageSizeExceededError ? 1009 : 1007;
-                _failWebsocketConnection(this.#handler, code, error.message);
+                const code = error instanceof MessageSizeExceededError ? 1009 : 1007;
+                failWebsocketConnection(this.#handler, code, error.message);
                 return;
               }
               if (!this.writeFragments(data)) {
@@ -231,18 +260,18 @@ class ByteParser extends Writable {
 
               // Check cumulative fragment size
               if (this.#maxPayloadSize > 0 && this.#fragmentsBytes > this.#maxPayloadSize) {
-                _failWebsocketConnection(this.#handler, 1009, new _MessageSizeExceededError().message);
+                failWebsocketConnection(this.#handler, 1009, new MessageSizeExceededError().message);
                 return;
               }
               if (!this.#info.fin) {
-                this.#state = _parserStates.INFO;
+                this.#state = parserStates.INFO;
                 this.#loop = true;
                 this.run(callback);
                 return;
               }
-              _websocketMessageReceived(this.#handler, this.#info.binaryType, this.consumeFragments());
+              websocketMessageReceived(this.#handler, this.#info.binaryType, this.consumeFragments());
               this.#loop = true;
-              this.#state = _parserStates.INFO;
+              this.#state = parserStates.INFO;
               this.run(callback);
             }, this.#fragmentsBytes);
             this.#loop = false;
@@ -262,7 +291,7 @@ class ByteParser extends Writable {
     if (n > this.#byteOffset) {
       throw new Error('Called consume() before buffers satiated.');
     } else if (n === 0) {
-      return _emptyBuffer;
+      return emptyBuffer;
     }
     this.#byteOffset -= n;
     const first = this.#buffers[0];
@@ -297,7 +326,7 @@ class ByteParser extends Writable {
   }
   writeFragments(fragment) {
     if (this.#maxFragments > 0 && this.#fragments.length === this.#maxFragments) {
-      _failWebsocketConnection(this.#handler, 1008, 'Too many message fragments');
+      failWebsocketConnection(this.#handler, 1008, 'Too many message fragments');
       return false;
     }
     this.#fragmentsBytes += fragment.length;
@@ -335,7 +364,7 @@ class ByteParser extends Writable {
       // control frame received by the application
       code = data.readUInt16BE(0);
     }
-    if (code !== undefined && !_isValidStatusCode(code)) {
+    if (code !== undefined && !isValidStatusCode(code)) {
       return {
         code: 1002,
         reason: 'Invalid status code',
@@ -352,7 +381,7 @@ class ByteParser extends Writable {
       reason = reason.subarray(3);
     }
     try {
-      reason = _utf8Decode(reason);
+      reason = utf8Decode(reason);
     } catch {
       return {
         code: 1007,
@@ -376,9 +405,9 @@ class ByteParser extends Writable {
       opcode,
       payloadLength
     } = this.#info;
-    if (opcode === _opcodes.CLOSE) {
+    if (opcode === opcodes.CLOSE) {
       if (payloadLength === 1) {
-        _failWebsocketConnection(this.#handler, 1002, 'Received close frame with a 1-byte body.');
+        failWebsocketConnection(this.#handler, 1002, 'Received close frame with a 1-byte body.');
         return false;
       }
       this.#info.closeInfo = this.parseCloseBody(body);
@@ -387,45 +416,45 @@ class ByteParser extends Writable {
           code,
           reason
         } = this.#info.closeInfo;
-        _failWebsocketConnection(this.#handler, code, reason);
+        failWebsocketConnection(this.#handler, code, reason);
         return false;
       }
 
       // Upon receiving such a frame, the other peer sends a
       // Close frame in response, if it hasn't already sent one.
-      if (!this.#handler.closeState.has(_sentCloseFrameState.SENT) && !this.#handler.closeState.has(_sentCloseFrameState.RECEIVED)) {
+      if (!this.#handler.closeState.has(sentCloseFrameState.SENT) && !this.#handler.closeState.has(sentCloseFrameState.RECEIVED)) {
         // If an endpoint receives a Close frame and did not previously send a
         // Close frame, the endpoint MUST send a Close frame in response.  (When
         // sending a Close frame in response, the endpoint typically echos the
         // status code it received.)
-        let body = _emptyBuffer;
+        let body = emptyBuffer;
         if (this.#info.closeInfo.code) {
           body = Buffer.allocUnsafe(2);
           body.writeUInt16BE(this.#info.closeInfo.code, 0);
         }
-        const closeFrame = new _WebsocketFrameSend(body);
-        this.#handler.socket.write(closeFrame.createFrame(_opcodes.CLOSE));
-        this.#handler.closeState.add(_sentCloseFrameState.SENT);
+        const closeFrame = new WebsocketFrameSend(body);
+        this.#handler.socket.write(closeFrame.createFrame(opcodes.CLOSE));
+        this.#handler.closeState.add(sentCloseFrameState.SENT);
       }
 
       // Upon either sending or receiving a Close control frame, it is said
       // that _The WebSocket Closing Handshake is Started_ and that the
       // WebSocket connection is in the CLOSING state.
-      this.#handler.readyState = _states.CLOSING;
-      this.#handler.closeState.add(_sentCloseFrameState.RECEIVED);
+      this.#handler.readyState = states.CLOSING;
+      this.#handler.closeState.add(sentCloseFrameState.RECEIVED);
       return false;
-    } else if (opcode === _opcodes.PING) {
+    } else if (opcode === opcodes.PING) {
       // Upon receipt of a Ping frame, an endpoint MUST send a Pong frame in
       // response, unless it already received a Close frame.
       // A Pong frame sent in response to a Ping frame must have identical
       // "Application data"
 
-      if (!this.#handler.closeState.has(_sentCloseFrameState.RECEIVED)) {
-        const frame = new _WebsocketFrameSend(body);
-        this.#handler.socket.write(frame.createFrame(_opcodes.PONG));
+      if (!this.#handler.closeState.has(sentCloseFrameState.RECEIVED)) {
+        const frame = new WebsocketFrameSend(body);
+        this.#handler.socket.write(frame.createFrame(opcodes.PONG));
         this.#handler.onPing(body);
       }
-    } else if (opcode === _opcodes.PONG) {
+    } else if (opcode === opcodes.PONG) {
       // A Pong frame MAY be sent unsolicited.  This serves as a
       // unidirectional heartbeat.  A response to an unsolicited Pong frame is
       // not expected.

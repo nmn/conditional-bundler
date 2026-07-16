@@ -1,4 +1,4 @@
 import "../../modules/es.symbol.dispose";
-import { f as _f } from "../../internals/well-known-symbol-wrapped";
-const _cjs_default = _f('dispose');
+import WrappedWellKnownSymbolModule from "../../internals/well-known-symbol-wrapped";
+const _cjs_default = WrappedWellKnownSymbolModule.f('dispose');
 export default _cjs_default;

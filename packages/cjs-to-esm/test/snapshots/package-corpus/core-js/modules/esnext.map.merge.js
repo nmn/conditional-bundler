@@ -1,8 +1,8 @@
 import $ from "../internals/export";
 import aMap from "../internals/a-map";
 import iterate from "../internals/iterate";
-import { set as _set } from "../internals/map-helpers";
-var set = _set;
+import _cjs_import from "../internals/map-helpers";
+var set = _cjs_import.set;
 
 // `Map.prototype.merge` method
 // https://github.com/tc39/proposal-collection-methods

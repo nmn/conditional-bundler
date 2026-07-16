@@ -1,6 +1,5 @@
 import type { ModuleNode, IRHeader } from "@bundler/shared";
 import type { ConditionExpr } from "@bundler/shared";
-import type { Resolver } from "../resolver.js";
 import { combineOr } from "@bundler/shared";
 import { sourceLookupKey } from "./source-key.js";
 
@@ -13,7 +12,6 @@ export type ModuleGraph = {
 export type BuildGraphInput = {
   envId: string;
   headers: IRHeader[];
-  resolver: Resolver;
 };
 
 export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
@@ -23,7 +21,6 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
     nodes.set(header.id, {
       id: header.id,
       filePath: header.filePath,
-      virtual: header.virtual,
       prefix: header.prefix,
       deps: [],
       unconditionalDeps: new Set<string>(),
@@ -38,26 +35,22 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
 
   for (const node of nodes.values()) {
     for (const importEntry of node.irHeader.imports) {
-      if (importEntry.kind === "type" || importEntry.external) {
+      if (
+        importEntry.kind === "type" ||
+        importEntry.target.kind === "runtime"
+      ) {
         continue;
       }
-      const resolved = await input.resolver(
-        node.irHeader.id,
-        node.irHeader.filePath,
-        importEntry.request ?? importEntry.source,
-        input.envId,
-        importEntry.condition ? "conditional-import" : "import",
-        importEntry.attributes ??
-          (typeof importEntry.condition === "string"
-            ? { condition: importEntry.condition }
-            : undefined),
+      const resolvedId = resolveGraphModuleId(
+        importEntry.target.moduleId,
+        moduleIdentities,
       );
-      node.deps.push(resolved.id);
-      node.resolvedSources.set(sourceLookupKey(importEntry), resolved.id);
+      node.deps.push(resolvedId);
+      node.resolvedSources.set(sourceLookupKey(importEntry), resolvedId);
       if (importEntry.condition) {
-        const existing = node.conditionalDeps.get(resolved.id);
+        const existing = node.conditionalDeps.get(resolvedId);
         node.conditionalDeps.set(
-          resolved.id,
+          resolvedId,
           existing
             ? combineOr([existing, importEntry.condition])
             : importEntry.condition,
@@ -66,64 +59,56 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
           (item) => item.source === importEntry.source,
         );
         const elseSource = conditionalImport?.elseSource;
-        if (elseSource && !conditionalImport?.elseExternal) {
-          const elseResolved = await input.resolver(
-            node.irHeader.id,
-            node.irHeader.filePath,
-            conditionalImport?.elseRequest ?? elseSource,
-            input.envId,
-            "conditional-else",
-            typeof importEntry.condition === "string"
-              ? { condition: importEntry.condition }
-              : undefined,
+        if (elseSource && conditionalImport?.elseTarget?.kind === "file") {
+          const elseResolvedId = resolveGraphModuleId(
+            conditionalImport.elseTarget.moduleId,
+            moduleIdentities,
           );
-          node.deps.push(elseResolved.id);
+          node.deps.push(elseResolvedId);
           node.resolvedSources.set(
-            conditionalImport.elseRequest ?? elseSource,
-            elseResolved.id,
+            sourceLookupKey({
+              source: elseSource,
+              request: conditionalImport.elseRequest,
+              target: conditionalImport.elseTarget,
+            }),
+            elseResolvedId,
           );
           const elseCondition = { NOT: importEntry.condition };
-          const existingElse = node.conditionalDeps.get(elseResolved.id);
+          const existingElse = node.conditionalDeps.get(elseResolvedId);
           node.conditionalDeps.set(
-            elseResolved.id,
+            elseResolvedId,
             existingElse
               ? combineOr([existingElse, elseCondition])
               : elseCondition,
           );
         }
       } else {
-        node.unconditionalDeps.add(resolved.id);
+        node.unconditionalDeps.add(resolvedId);
       }
     }
     for (const star of node.irHeader.exportStars) {
-      if (star.external) {
+      if (star.target.kind === "runtime") {
         continue;
       }
-      const resolved = await input.resolver(
-        node.irHeader.id,
-        node.irHeader.filePath,
-        star.request ?? star.source,
-        input.envId,
-        "reexport",
+      const resolvedId = resolveGraphModuleId(
+        star.target.moduleId,
+        moduleIdentities,
       );
-      node.deps.push(resolved.id);
-      node.unconditionalDeps.add(resolved.id);
-      node.resolvedSources.set(sourceLookupKey(star), resolved.id);
+      node.deps.push(resolvedId);
+      node.unconditionalDeps.add(resolvedId);
+      node.resolvedSources.set(sourceLookupKey(star), resolvedId);
     }
     for (const reexport of node.irHeader.reexportsNamed) {
-      if (reexport.external) {
+      if (reexport.target.kind === "runtime") {
         continue;
       }
-      const resolved = await input.resolver(
-        node.irHeader.id,
-        node.irHeader.filePath,
-        reexport.request ?? reexport.source,
-        input.envId,
-        "reexport",
+      const resolvedId = resolveGraphModuleId(
+        reexport.target.moduleId,
+        moduleIdentities,
       );
-      node.deps.push(resolved.id);
-      node.unconditionalDeps.add(resolved.id);
-      node.resolvedSources.set(sourceLookupKey(reexport), resolved.id);
+      node.deps.push(resolvedId);
+      node.unconditionalDeps.add(resolvedId);
+      node.resolvedSources.set(sourceLookupKey(reexport), resolvedId);
     }
   }
 
@@ -133,4 +118,11 @@ export async function buildGraph(input: BuildGraphInput): Promise<ModuleGraph> {
   }
 
   return { envId: input.envId, nodes, moduleIdentities };
+}
+
+function resolveGraphModuleId(
+  moduleId: string,
+  moduleIdentities: Map<string, string>,
+): string {
+  return moduleIdentities.get(moduleId) ?? moduleId;
 }

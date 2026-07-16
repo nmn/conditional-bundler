@@ -1,11 +1,7 @@
 import { createRequire } from "node:module";
 import path from "node:path";
-import {
-  decodeCjsVirtualId,
-  encodeCjsVirtualId,
-  createCjsModuleIdentity,
-  isCjsVirtualId,
-} from "@bundler/cjs-to-esm";
+import { fileURLToPath } from "node:url";
+import { createCjsModuleIdentity } from "@bundler/cjs-to-esm";
 
 const requireFromPlugin = createRequire(import.meta.url);
 const reactPackageRequests = new Set([
@@ -55,7 +51,7 @@ export function createReactRscPlugin(options) {
     options.runtimeEntry === false || options.client?.runtimeEntry === false
       ? undefined
       : options.runtimeEntry === true || options.client?.runtimeEntry === true
-        ? path.join(root, ".conditional-bundler", "client.jsx")
+        ? fileURLToPath(new URL("./runtime-client.js", import.meta.url))
         : resolveProjectPath(
             root,
             options.runtimeEntry ?? options.client?.runtimeEntry,
@@ -66,8 +62,6 @@ export function createReactRscPlugin(options) {
       ? { runtime: "classic" }
       : { runtime: "automatic", importSource: "react" };
   const projectRequire = createRequire(path.join(root, "package.json"));
-  const nodeEnv =
-    process.env.NODE_ENV ?? process.env.BUNDLER_MODE ?? "development";
   return {
     name: options.name ?? "react-rsc-example",
     buildStart({ addEntry }) {
@@ -90,20 +84,12 @@ export function createReactRscPlugin(options) {
       }
     },
     resolveImport(context) {
-      if (
-        isCjsVirtualId(context.request) ||
-        !reactPackageRequests.has(context.request)
-      ) {
+      if (!reactPackageRequests.has(context.request)) {
         return undefined;
       }
 
-      const parent = isCjsVirtualId(context.fromId)
-        ? decodeCjsVirtualId(context.fromId)
-        : null;
-      const parentEnv = parent?.envId ?? context.envId;
-      const cjsEnv = parent
-        ? parentEnv
-        : getReactCjsEnvId(context.request, parentEnv, clientEnv);
+      const parentEnv = context.importerMeta?.reactCjsEnv ?? context.envId;
+      const cjsEnv = getReactCjsEnvId(context.request, parentEnv, clientEnv);
       const filePath = resolveReactImplementation(
         projectRequire,
         context.request,
@@ -111,17 +97,12 @@ export function createReactRscPlugin(options) {
         rscEnv,
       );
       return {
-        id: encodeCjsVirtualId(cjsEnv, filePath, undefined, nodeEnv),
+        id: filePath,
         filePath,
         moduleIdentity: createCjsModuleIdentity(filePath),
-        virtual: true,
+        type: "javascript",
+        meta: { format: "commonjs", reactCjsEnv: cjsEnv },
       };
-    },
-    load({ id }) {
-      if (runtimeEntry && id === runtimeEntry) {
-        return { code: createRscRuntimeSource(options) };
-      }
-      return undefined;
     },
     transform: [
       [
@@ -130,7 +111,17 @@ export function createReactRscPlugin(options) {
       ],
       [
         "./transform.mjs",
-        { root, clientEnv, rscEnv, discoverClientEntrypoints },
+        {
+          root,
+          clientEnv,
+          rscEnv,
+          discoverClientEntrypoints,
+          runtimeTemplatePath: fileURLToPath(
+            new URL("./runtime-client.js", import.meta.url),
+          ),
+          rscEndpoint: options.rscEndpoint ?? "/rsc",
+          clientReferenceEntry,
+        },
       ],
       ["./webpack-shim-transform.mjs", { clientEnv }],
     ],
@@ -252,131 +243,6 @@ function resolveProjectPath(root, value) {
     return undefined;
   }
   return path.isAbsolute(value) ? value : path.join(root, value);
-}
-
-function createRscRuntimeSource(options) {
-  const endpoint = options.rscEndpoint ?? "/rsc";
-  const clientReferenceEntry = resolveProjectPath(
-    options.root,
-    options.clientReferenceEntry ?? options.client?.referenceEntry,
-  );
-  const clientReferenceExports = clientReferenceEntry
-    ? `export * from ${JSON.stringify(clientReferenceEntry)};\n`
-    : "";
-  return `import React, { startTransition, use, useEffect, useState } from "react";
-import { createRoot, hydrateRoot } from "react-dom/client";
-import { createFromFetch, createFromReadableStream } from "react-server-dom-webpack/client.browser";
-${clientReferenceExports}
-
-function RscView({ response }) {
-  return use(response);
-}
-
-function ClientApp({ initialRoute }) {
-  const [route, setRoute] = useState(
-    () => initialRoute ?? createRouteState(currentPath()),
-  );
-
-  useEffect(() => {
-    const navigate = (to) => {
-      const next = normalizePath(to);
-      if (next === currentPath()) {
-        return;
-      }
-      window.history.pushState(null, "", next);
-      startTransition(() => setRoute(createRouteState(next)));
-    };
-    const refresh = (path = currentPath()) => {
-      startTransition(() => setRoute(createRouteState(normalizePath(path))));
-    };
-    const onNavigate = (event) => {
-      event.preventDefault();
-      navigate(event.detail?.path ?? currentPath());
-    };
-    const onPopState = () => refresh();
-    const onRscRefresh = (event) => {
-      event.preventDefault();
-      refresh();
-    };
-    window.addEventListener("bundler:rsc-navigate", onNavigate);
-    window.addEventListener("bundler:rsc-refresh", onRscRefresh);
-    window.addEventListener("popstate", onPopState);
-    return () => {
-      window.removeEventListener("bundler:rsc-navigate", onNavigate);
-      window.removeEventListener("bundler:rsc-refresh", onRscRefresh);
-      window.removeEventListener("popstate", onPopState);
-    };
-  }, []);
-
-  return React.createElement(RscView, { response: route.response });
-}
-
-function createRouteState(path) {
-  return {
-    path,
-    response: createFromFetch(
-      fetch(${JSON.stringify(endpoint)} + "?path=" + encodeURIComponent(path), {
-        headers: { accept: "text/x-component" },
-      }),
-    ),
-  };
-}
-
-function readInitialRouteState() {
-  const script = document.getElementById("__BUNDLER_RSC_DATA__");
-  if (!script) {
-    return null;
-  }
-  const payload = JSON.parse(script.textContent || '""');
-  const path = normalizePath(script.dataset.path || currentPath());
-  script.remove();
-  return {
-    path,
-    response: createFromReadableStream(createFlightStream(payload)),
-  };
-}
-
-function installInitialChunkMap() {
-  const script = document.getElementById("__BUNDLER_RSC_CHUNKS__");
-  if (!script) {
-    return;
-  }
-  const chunks = globalThis.__BUNDLER_RSC_CHUNKS__ ??= {};
-  Object.assign(chunks, JSON.parse(script.textContent || "{}"));
-  script.remove();
-}
-
-function createFlightStream(payload) {
-  const bytes = new TextEncoder().encode(payload);
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(bytes);
-      controller.close();
-    },
-  });
-}
-
-function currentPath() {
-  return normalizePath(window.location.pathname + window.location.search);
-}
-
-function normalizePath(path) {
-  return path && path.startsWith("/") ? path : "/" + (path || "");
-}
-
-if (typeof document !== "undefined") {
-  installInitialChunkMap();
-  const rootElement = document.getElementById("root");
-  const app = React.createElement(ClientApp, {
-    initialRoute: readInitialRouteState(),
-  });
-  if (rootElement.hasChildNodes()) {
-    hydrateRoot(rootElement, app);
-  } else {
-    createRoot(rootElement).render(app);
-  }
-}
-`;
 }
 
 function findClientReferenceBundle(

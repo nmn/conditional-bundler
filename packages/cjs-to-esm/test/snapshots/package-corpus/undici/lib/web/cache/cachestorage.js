@@ -1,7 +1,19 @@
-import { Cache as _Cache } from "./cache";
-import { webidl as _webidl } from "../webidl";
-import { kEnumerableProperty as _kEnumerableProperty } from "../../core/util";
-import { kConstruct as _kConstruct } from "../../core/symbols";
+import _cjs_import from "./cache";
+import _cjs_import2 from "../webidl";
+import _cjs_import3 from "../../core/util";
+import _cjs_import4 from "../../core/symbols";
+const {
+  Cache
+} = _cjs_import;
+const {
+  webidl
+} = _cjs_import2;
+const {
+  kEnumerableProperty
+} = _cjs_import3;
+const {
+  kConstruct
+} = _cjs_import4;
 class CacheStorage {
   /**
    * @see https://w3c.github.io/ServiceWorker/#dfn-relevant-name-to-cache-map
@@ -9,16 +21,16 @@ class CacheStorage {
    */
   #caches = new Map();
   constructor() {
-    if (arguments[0] !== _kConstruct) {
-      _webidl.illegalConstructor();
+    if (arguments[0] !== kConstruct) {
+      webidl.illegalConstructor();
     }
-    _webidl.util.markAsUncloneable(this);
+    webidl.util.markAsUncloneable(this);
   }
   async match(request, options = {}) {
-    _webidl.brandCheck(this, CacheStorage);
-    _webidl.argumentLengthCheck(arguments, 1, 'CacheStorage.match');
-    request = _webidl.converters.RequestInfo(request);
-    options = _webidl.converters.MultiCacheQueryOptions(options);
+    webidl.brandCheck(this, CacheStorage);
+    webidl.argumentLengthCheck(arguments, 1, 'CacheStorage.match');
+    request = webidl.converters.RequestInfo(request);
+    options = webidl.converters.MultiCacheQueryOptions(options);
 
     // 1.
     if (options.cacheName != null) {
@@ -26,14 +38,14 @@ class CacheStorage {
       if (this.#caches.has(options.cacheName)) {
         // 1.1.1.1.1
         const cacheList = this.#caches.get(options.cacheName);
-        const cache = new _Cache(_kConstruct, cacheList);
+        const cache = new Cache(kConstruct, cacheList);
         return await cache.match(request, options);
       }
     } else {
       // 2.
       // 2.2
       for (const cacheList of this.#caches.values()) {
-        const cache = new _Cache(_kConstruct, cacheList);
+        const cache = new Cache(kConstruct, cacheList);
 
         // 2.2.1.2
         const response = await cache.match(request, options);
@@ -50,10 +62,10 @@ class CacheStorage {
    * @returns {Promise<boolean>}
    */
   async has(cacheName) {
-    _webidl.brandCheck(this, CacheStorage);
+    webidl.brandCheck(this, CacheStorage);
     const prefix = 'CacheStorage.has';
-    _webidl.argumentLengthCheck(arguments, 1, prefix);
-    cacheName = _webidl.converters.DOMString(cacheName, prefix, 'cacheName');
+    webidl.argumentLengthCheck(arguments, 1, prefix);
+    cacheName = webidl.converters.DOMString(cacheName, prefix, 'cacheName');
 
     // 2.1.1
     // 2.2
@@ -66,10 +78,10 @@ class CacheStorage {
    * @returns {Promise<Cache>}
    */
   async open(cacheName) {
-    _webidl.brandCheck(this, CacheStorage);
+    webidl.brandCheck(this, CacheStorage);
     const prefix = 'CacheStorage.open';
-    _webidl.argumentLengthCheck(arguments, 1, prefix);
-    cacheName = _webidl.converters.DOMString(cacheName, prefix, 'cacheName');
+    webidl.argumentLengthCheck(arguments, 1, prefix);
+    cacheName = webidl.converters.DOMString(cacheName, prefix, 'cacheName');
 
     // 2.1
     if (this.#caches.has(cacheName)) {
@@ -79,7 +91,7 @@ class CacheStorage {
       const cache = this.#caches.get(cacheName);
 
       // 2.1.1.1
-      return new _Cache(_kConstruct, cache);
+      return new Cache(kConstruct, cache);
     }
 
     // 2.2
@@ -89,7 +101,7 @@ class CacheStorage {
     this.#caches.set(cacheName, cache);
 
     // 2.4
-    return new _Cache(_kConstruct, cache);
+    return new Cache(kConstruct, cache);
   }
 
   /**
@@ -98,10 +110,10 @@ class CacheStorage {
    * @returns {Promise<boolean>}
    */
   async delete(cacheName) {
-    _webidl.brandCheck(this, CacheStorage);
+    webidl.brandCheck(this, CacheStorage);
     const prefix = 'CacheStorage.delete';
-    _webidl.argumentLengthCheck(arguments, 1, prefix);
-    cacheName = _webidl.converters.DOMString(cacheName, prefix, 'cacheName');
+    webidl.argumentLengthCheck(arguments, 1, prefix);
+    cacheName = webidl.converters.DOMString(cacheName, prefix, 'cacheName');
     return this.#caches.delete(cacheName);
   }
 
@@ -110,7 +122,7 @@ class CacheStorage {
    * @returns {Promise<string[]>}
    */
   async keys() {
-    _webidl.brandCheck(this, CacheStorage);
+    webidl.brandCheck(this, CacheStorage);
 
     // 2.1
     const keys = this.#caches.keys();
@@ -124,11 +136,11 @@ Object.defineProperties(CacheStorage.prototype, {
     value: 'CacheStorage',
     configurable: true
   },
-  match: _kEnumerableProperty,
-  has: _kEnumerableProperty,
-  open: _kEnumerableProperty,
-  delete: _kEnumerableProperty,
-  keys: _kEnumerableProperty
+  match: kEnumerableProperty,
+  has: kEnumerableProperty,
+  open: kEnumerableProperty,
+  delete: kEnumerableProperty,
+  keys: kEnumerableProperty
 });
 const _cjs_default = {
   CacheStorage

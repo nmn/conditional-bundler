@@ -512,5 +512,3 @@ if (!__cjs_default__) {
   __cjs_cache__.set("undici@8.7.0::lib/web/eventsource/eventsource.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
-export const EventSource = __cjs_default__["EventSource"];
-export const defaultReconnectionTime = __cjs_default__["defaultReconnectionTime"];

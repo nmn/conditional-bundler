@@ -1,9 +1,9 @@
 import uncurryThis from "../internals/function-uncurry-this";
 import hasOwn from "../internals/has-own-property";
 import toIndexedObject from "../internals/to-indexed-object";
-import { indexOf as _indexOf } from "../internals/array-includes";
+import _cjs_import from "../internals/array-includes";
 import hiddenKeys from "../internals/hidden-keys";
-var indexOf = _indexOf;
+var indexOf = _cjs_import.indexOf;
 var push = uncurryThis([].push);
 const _cjs_default = function (object, names) {
   var O = toIndexedObject(object);

@@ -18,15 +18,15 @@ import wellKnownSymbol from "../internals/well-known-symbol";
 import speciesConstructor from "../internals/species-constructor";
 import advanceStringIndex from "../internals/advance-string-index";
 import regExpExec from "../internals/regexp-exec-abstract";
-import { set as _set, getterFor as _getterFor } from "../internals/internal-state";
+import InternalStateModule from "../internals/internal-state";
 import IS_PURE from "../internals/is-pure";
 /* eslint-disable es/no-string-prototype-matchall -- safe */
 
 var MATCH_ALL = wellKnownSymbol('matchAll');
 var REGEXP_STRING = 'RegExp String';
 var REGEXP_STRING_ITERATOR = REGEXP_STRING + ' Iterator';
-var setInternalState = _set;
-var getInternalState = _getterFor(REGEXP_STRING_ITERATOR);
+var setInternalState = InternalStateModule.set;
+var getInternalState = InternalStateModule.getterFor(REGEXP_STRING_ITERATOR);
 var RegExpPrototype = RegExp.prototype;
 var $TypeError = TypeError;
 var stringIndexOf = uncurryThis(''.indexOf);

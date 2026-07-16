@@ -1,25 +1,16 @@
 import { buildGraph } from "../dist/graph/build.js";
 
-test("forwards condition attributes when resolving conditional graph edges", async () => {
-  const calls = [];
-  const resolver = async (
-    _fromId,
-    _fromPath,
-    request,
-    _envId,
-    kind,
-    importAttributes,
-  ) => {
-    calls.push({ request, kind, importAttributes });
-    const mode = kind === "conditional-else" ? "development" : "production";
-    return {
-      id: `virtual:cjs:${mode}:${request}`,
-      filePath: `/project/${request}`,
-      external: false,
-      virtual: true,
-    };
+test("uses portable targets already resolved by the coordinator", async () => {
+  const productionTarget = {
+    kind: "file",
+    moduleId: "project@0.0.0::production.js",
+    canonicalPath: "project@0.0.0::production.js",
   };
-
+  const developmentTarget = {
+    kind: "file",
+    moduleId: "project@0.0.0::development.js",
+    canonicalPath: "project@0.0.0::development.js",
+  };
   const graph = await buildGraph({
     envId: "rsc",
     headers: [
@@ -31,7 +22,7 @@ test("forwards condition attributes when resolving conditional graph edges", asy
           {
             source: "./production.js",
             request: "./production.js",
-            external: false,
+            target: productionTarget,
             kind: "value",
             condition: "env:NODE_ENV=production",
           },
@@ -40,8 +31,10 @@ test("forwards condition attributes when resolving conditional graph edges", asy
           {
             source: "./production.js",
             request: "./production.js",
+            target: productionTarget,
             elseSource: "./development.js",
             elseRequest: "./development.js",
+            elseTarget: developmentTarget,
             condition: "env:NODE_ENV=production",
           },
         ],
@@ -49,23 +42,10 @@ test("forwards condition attributes when resolving conditional graph edges", asy
         reexportsNamed: [],
       },
     ],
-    resolver,
   });
 
-  expect(calls).toEqual([
-    {
-      request: "./production.js",
-      kind: "conditional-import",
-      importAttributes: { condition: "env:NODE_ENV=production" },
-    },
-    {
-      request: "./development.js",
-      kind: "conditional-else",
-      importAttributes: { condition: "env:NODE_ENV=production" },
-    },
-  ]);
   expect(graph.nodes.get("/project/index.js").deps).toEqual([
-    "virtual:cjs:production:./production.js",
-    "virtual:cjs:development:./development.js",
+    "project@0.0.0::production.js",
+    "project@0.0.0::development.js",
   ]);
 });

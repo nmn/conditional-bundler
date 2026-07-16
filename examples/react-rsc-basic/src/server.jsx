@@ -49,11 +49,9 @@ export async function handleBasicRequest({
     return;
   }
 
-  if (url.pathname.startsWith("/assets/")) {
-    const fileName = path.basename(url.pathname);
-    const asset = context.manifest.assets?.find(
-      (candidate) => candidate.fileName === fileName,
-    );
+  const staticAsset = resolveStaticAssetRequest(context.manifest, url.pathname);
+  if (staticAsset) {
+    const { fileName, asset } = staticAsset;
     response.setHeader(
       "content-type",
       asset?.contentType ?? "application/octet-stream",
@@ -67,7 +65,10 @@ export async function handleBasicRequest({
 }
 
 async function readStaticAsset(dist, fileName, asset) {
-  const contents = fs.readFileSync(path.join(dist, fileName), "utf8");
+  const contents = fs.readFileSync(
+    path.join(dist, fileName),
+    asset?.type === "script" ? "utf8" : undefined,
+  );
   if (asset?.type !== "script") {
     return contents;
   }
@@ -99,7 +100,9 @@ function loadBasicContext({ dist = distDir, clientBundle } = {}) {
     clientBundle ??
     manifest.bundles.find(
       (bundle) =>
-        bundle.envId === "client" && bundle.entryId.endsWith("client.jsx"),
+        bundle.envId === "client" &&
+        (bundle.entryId.endsWith("runtime-client.js") ||
+          bundle.entryId.endsWith("client.jsx")),
     );
   const clientManifest = JSON.parse(
     fs.readFileSync(path.join(dist, "rsc-client-manifest.json"), "utf8"),
@@ -139,14 +142,50 @@ async function renderHtml(url, context, dist) {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>conditional-bundler RSC</title>
     <style>${style}</style>
+    ${renderStyleLinks(context.manifest)}
   </head>
   <body>
     <div id="root">${initialRoute.markup}</div>
     <script id="__BUNDLER_RSC_CHUNKS__" type="application/json">${serializeJsonForScript(createRscChunkMap(context.clientManifest))}</script>
     <script id="__BUNDLER_RSC_DATA__" type="application/json" data-path="${escapeAttribute(routePath)}">${serializeJsonForScript(initialRoute.flight)}</script>
-    <script type="module" src="/assets/${context.clientBundle.fileName}"></script>
+    <script type="module" src="/${context.clientBundle.fileName}"></script>
   </body>
 </html>`;
+}
+
+function renderStyleLinks(manifest) {
+  return (manifest.assets ?? [])
+    .filter((asset) => asset.type === "style")
+    .map(
+      (asset) =>
+        `<link rel="stylesheet" href="/${escapeAttribute(asset.fileName)}">`,
+    )
+    .join("\n    ");
+}
+
+function resolveStaticAssetRequest(manifest, pathname) {
+  const requested = decodeURIComponent(pathname.replace(/^\/+/, ""));
+  if (
+    !requested ||
+    requested.startsWith("/") ||
+    requested.includes("\\") ||
+    requested.split("/").includes("..")
+  ) {
+    return null;
+  }
+  const candidates = [requested];
+  if (requested.startsWith("assets/")) {
+    candidates.push(requested.slice("assets/".length));
+  }
+  for (const fileName of candidates) {
+    const asset = manifest.assets?.find(
+      (candidate) => candidate.fileName === fileName,
+    );
+    if (asset) {
+      return { fileName, asset };
+    }
+  }
+  return null;
 }
 
 async function renderInitialRoute({ context, dist }) {

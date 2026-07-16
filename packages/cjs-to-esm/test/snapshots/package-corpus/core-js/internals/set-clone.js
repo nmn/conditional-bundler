@@ -1,7 +1,7 @@
-import { Set as _Set, add as _add } from "../internals/set-helpers";
+import SetHelpers from "../internals/set-helpers";
 import iterate from "../internals/set-iterate";
-var Set = _Set;
-var add = _add;
+var Set = SetHelpers.Set;
+var add = SetHelpers.add;
 const _cjs_default = function (set) {
   var result = new Set();
   iterate(set, function (it) {

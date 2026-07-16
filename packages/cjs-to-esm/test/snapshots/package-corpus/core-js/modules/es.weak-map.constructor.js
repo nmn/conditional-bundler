@@ -2,14 +2,14 @@ import FREEZING from "../internals/freezing";
 import globalThis from "../internals/global-this";
 import uncurryThis from "../internals/function-uncurry-this";
 import defineBuiltIns from "../internals/define-built-ins";
-import { enable as _enable } from "../internals/internal-metadata";
+import InternalMetadataModule from "../internals/internal-metadata";
 import collection from "../internals/collection";
 import collectionWeak from "../internals/collection-weak";
 import isObject from "../internals/is-object";
-import { enforce as _enforce } from "../internals/internal-state";
+import _cjs_import from "../internals/internal-state";
 import fails from "../internals/fails";
 import NATIVE_WEAK_MAP from "../internals/weak-map-basic-detection";
-var enforceInternalState = _enforce;
+var enforceInternalState = _cjs_import.enforce;
 var $Object = Object;
 // eslint-disable-next-line es/no-array-isarray -- safe
 var isArray = Array.isArray;
@@ -51,7 +51,7 @@ var hasMSEdgeFreezingBug = function () {
 // https://github.com/zloirock/core-js/issues/485
 if (NATIVE_WEAK_MAP) if (IS_IE11) {
   InternalWeakMap = collectionWeak.getConstructor(wrapper, 'WeakMap', true);
-  _enable();
+  InternalMetadataModule.enable();
   var nativeDelete = uncurryThis(WeakMapPrototype['delete']);
   var nativeHas = uncurryThis(WeakMapPrototype.has);
   var nativeGet = uncurryThis(WeakMapPrototype.get);

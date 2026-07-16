@@ -1,6 +1,6 @@
 import $ from "../internals/export";
-import { toArray as _toArray } from "../internals/async-iterator-iteration";
-var $toArray = _toArray;
+import _cjs_import from "../internals/async-iterator-iteration";
+var $toArray = _cjs_import.toArray;
 
 // `AsyncIterator.prototype.toArray` method
 // https://github.com/tc39/proposal-async-iterator-helpers

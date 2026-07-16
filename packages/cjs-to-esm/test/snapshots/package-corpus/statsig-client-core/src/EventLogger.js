@@ -1,17 +1,17 @@
-import { BatchQueue as _BatchQueue } from "./BatchedEventsQueue";
-import { _getUserStorageKey } from "./CacheKey";
-import { EventRetryConstants as _EventRetryConstants } from "./EventRetryConstants";
-import { FlushCoordinator as _FlushCoordinator } from "./FlushCoordinator";
-import { _DJB2 as _DJB } from "./Hashing";
-import { Log as _Log } from "./Log";
-import { Endpoint as _Endpoint } from "./NetworkConfig";
-import { PendingEvents as _PendingEvents } from "./PendingEvents";
-import { _isServerEnv, _getCurrentPageUrlSafe } from "./SafeJs";
-import { _isExposureEvent } from "./StatsigEvent";
-import { LoggingEnabledOption as _LoggingEnabledOption } from "./StatsigOptionsCommon";
-import { _setObjectInStorage, _getObjectFromStorage, Storage as _Storage } from "./StorageProvider";
-import { UrlConfiguration as _UrlConfiguration } from "./UrlConfiguration";
-import { _subscribeToVisiblityChanged } from "./VisibilityObserving";
+import BatchedEventsQueue_1 from "./BatchedEventsQueue";
+import CacheKey_1 from "./CacheKey";
+import EventRetryConstants_1 from "./EventRetryConstants";
+import FlushCoordinator_1 from "./FlushCoordinator";
+import Hashing_1 from "./Hashing";
+import Log_1 from "./Log";
+import NetworkConfig_1 from "./NetworkConfig";
+import PendingEvents_1 from "./PendingEvents";
+import SafeJs_1 from "./SafeJs";
+import StatsigEvent_1 from "./StatsigEvent";
+import StatsigOptionsCommon_1 from "./StatsigOptionsCommon";
+import StorageProvider_1 from "./StorageProvider";
+import UrlConfiguration_1 from "./UrlConfiguration";
+import VisibilityObserving_1 from "./VisibilityObserving";
 var __awaiter = this && this.__awaiter || function (thisArg, _arguments, P, generator) {
   function adopt(value) {
     return value instanceof P ? value : new P(function (resolve) {
@@ -64,12 +64,12 @@ export class EventLogger {
     this._isShuttingDown = false;
     this._storageKey = null;
     this._pendingCompressionMode = null;
-    this._loggingEnabled = (_a = _options === null || _options === void 0 ? void 0 : _options.loggingEnabled) !== null && _a !== void 0 ? _a : (_options === null || _options === void 0 ? void 0 : _options.disableLogging) === true ? _LoggingEnabledOption.disabled : _LoggingEnabledOption.browserOnly;
+    this._loggingEnabled = (_a = _options === null || _options === void 0 ? void 0 : _options.loggingEnabled) !== null && _a !== void 0 ? _a : (_options === null || _options === void 0 ? void 0 : _options.disableLogging) === true ? StatsigOptionsCommon_1.LoggingEnabledOption.disabled : StatsigOptionsCommon_1.LoggingEnabledOption.browserOnly;
     if ((_options === null || _options === void 0 ? void 0 : _options.loggingEnabled) && _options.disableLogging !== undefined) {
-      _Log.warn('Detected both loggingEnabled and disableLogging options. loggingEnabled takes precedence - please remove disableLogging.');
+      Log_1.Log.warn('Detected both loggingEnabled and disableLogging options. loggingEnabled takes precedence - please remove disableLogging.');
     }
     const config = _options === null || _options === void 0 ? void 0 : _options.networkConfig;
-    this._logEventUrlConfig = new _UrlConfiguration(_Endpoint._rgstr, config === null || config === void 0 ? void 0 : config.logEventUrl, config === null || config === void 0 ? void 0 : config.api, config === null || config === void 0 ? void 0 : config.logEventFallbackUrls);
+    this._logEventUrlConfig = new UrlConfiguration_1.UrlConfiguration(NetworkConfig_1.Endpoint._rgstr, config === null || config === void 0 ? void 0 : config.logEventUrl, config === null || config === void 0 ? void 0 : config.api, config === null || config === void 0 ? void 0 : config.logEventFallbackUrls);
   }
   setLogEventCompressionMode(mode) {
     if (this._flushCoordinator) {
@@ -87,13 +87,13 @@ export class EventLogger {
     }
     if (wasDisabled && isNowEnabled) {
       const events = this._loadStoredEvents();
-      _Log.debug(`Loaded ${events.length} stored event(s) from storage`);
+      Log_1.Log.debug(`Loaded ${events.length} stored event(s) from storage`);
       if (events.length > 0) {
         events.forEach(event => {
           this._initFlushCoordinator().addEvent(event);
         });
         this.flush().catch(error => {
-          _Log.warn('Failed to flush events after enabling logging:', error);
+          Log_1.Log.warn('Failed to flush events after enabling logging:', error);
         });
       }
     }
@@ -125,14 +125,14 @@ export class EventLogger {
   }
   start() {
     var _a;
-    const isServerEnv = (0, _isServerEnv)();
+    const isServerEnv = (0, SafeJs_1._isServerEnv)();
     if (isServerEnv && ((_a = this._options) === null || _a === void 0 ? void 0 : _a.loggingEnabled) !== 'always') {
       return;
     }
     const flushCoordinator = this._initFlushCoordinator();
     EVENT_LOGGER_MAP[this._sdkKey] = this;
     if (!isServerEnv) {
-      (0, _subscribeToVisiblityChanged)(visibility => {
+      (0, VisibilityObserving_1._subscribeToVisiblityChanged)(visibility => {
         if (visibility === 'background') {
           EventLogger._safeFlushAndForget(this._sdkKey);
         } else if (visibility === 'foreground') {
@@ -141,7 +141,7 @@ export class EventLogger {
       });
     }
     flushCoordinator.loadAndRetryShutdownFailedEvents().catch(error => {
-      _Log.warn('Failed to load failed shutdown events:', error);
+      Log_1.Log.warn('Failed to load failed shutdown events:', error);
     });
     flushCoordinator.startScheduledFlushCycle();
   }
@@ -186,16 +186,16 @@ export class EventLogger {
   }
   _shouldLogEvent(event) {
     var _a;
-    if (((_a = this._options) === null || _a === void 0 ? void 0 : _a.loggingEnabled) !== 'always' && (0, _isServerEnv)()) {
+    if (((_a = this._options) === null || _a === void 0 ? void 0 : _a.loggingEnabled) !== 'always' && (0, SafeJs_1._isServerEnv)()) {
       return false;
     }
-    if (!(0, _isExposureEvent)(event)) {
+    if (!(0, StatsigEvent_1._isExposureEvent)(event)) {
       return true;
     }
     const user = event.user ? event.user : {
       statsigEnvironment: undefined
     };
-    const userKey = (0, _getUserStorageKey)(this._sdkKey, user);
+    const userKey = (0, CacheKey_1._getUserStorageKey)(this._sdkKey, user);
     const metadata = event.metadata ? event.metadata : {};
     const key = [event.eventName, userKey, metadata['gate'], metadata['config'], metadata['ruleID'], metadata['allocatedExperiment'], metadata['parameterName'], String(metadata['isExplicitParameter']), metadata['reason']].join('|');
     const previous = this._lastExposureTimeMap[key];
@@ -214,11 +214,11 @@ export class EventLogger {
     if (((_a = this._options) === null || _a === void 0 ? void 0 : _a.includeCurrentPageUrlWithEvents) === false) {
       return;
     }
-    return (0, _getCurrentPageUrlSafe)();
+    return (0, SafeJs_1._getCurrentPageUrlSafe)();
   }
   _getStorageKey() {
     if (!this._storageKey) {
-      this._storageKey = `statsig.pending_events.${(0, _DJB)(this._sdkKey)}`;
+      this._storageKey = `statsig.pending_events.${(0, Hashing_1._DJB2)(this._sdkKey)}`;
     }
     return this._storageKey;
   }
@@ -227,10 +227,10 @@ export class EventLogger {
     if (this._flushCoordinator) {
       return this._flushCoordinator;
     }
-    const batchSize = (_b = (_a = this._options) === null || _a === void 0 ? void 0 : _a.loggingBufferMaxSize) !== null && _b !== void 0 ? _b : _EventRetryConstants.DEFAULT_BATCH_SIZE;
-    this._pendingEvents = new _PendingEvents(batchSize);
-    this._batchQueue = new _BatchQueue(batchSize);
-    this._flushCoordinator = new _FlushCoordinator(this._batchQueue, this._pendingEvents, () => this.appendAndResetNonExposedChecks(), this._sdkKey, this._network, this._emitter, this._logEventUrlConfig, this._options, this._loggingEnabled, this._errorBoundary);
+    const batchSize = (_b = (_a = this._options) === null || _a === void 0 ? void 0 : _a.loggingBufferMaxSize) !== null && _b !== void 0 ? _b : EventRetryConstants_1.EventRetryConstants.DEFAULT_BATCH_SIZE;
+    this._pendingEvents = new PendingEvents_1.PendingEvents(batchSize);
+    this._batchQueue = new BatchedEventsQueue_1.BatchQueue(batchSize);
+    this._flushCoordinator = new FlushCoordinator_1.FlushCoordinator(this._batchQueue, this._pendingEvents, () => this.appendAndResetNonExposedChecks(), this._sdkKey, this._network, this._emitter, this._logEventUrlConfig, this._options, this._loggingEnabled, this._errorBoundary);
     if (this._pendingCompressionMode) {
       this._flushCoordinator.setLogEventCompressionMode(this._pendingCompressionMode);
       this._pendingCompressionMode = null;
@@ -242,17 +242,17 @@ export class EventLogger {
     try {
       let existingEvents = this._getEventsFromStorage(storageKey);
       existingEvents.push(event);
-      if (existingEvents.length > _EventRetryConstants.MAX_LOCAL_STORAGE) {
-        existingEvents = existingEvents.slice(-_EventRetryConstants.MAX_LOCAL_STORAGE);
+      if (existingEvents.length > EventRetryConstants_1.EventRetryConstants.MAX_LOCAL_STORAGE) {
+        existingEvents = existingEvents.slice(-EventRetryConstants_1.EventRetryConstants.MAX_LOCAL_STORAGE);
       }
-      (0, _setObjectInStorage)(storageKey, existingEvents);
+      (0, StorageProvider_1._setObjectInStorage)(storageKey, existingEvents);
     } catch (error) {
-      _Log.warn('Unable to save events to storage');
+      Log_1.Log.warn('Unable to save events to storage');
     }
   }
   _getEventsFromStorage(storageKey) {
     try {
-      const events = (0, _getObjectFromStorage)(storageKey);
+      const events = (0, StorageProvider_1._getObjectFromStorage)(storageKey);
       if (Array.isArray(events)) {
         return events;
       }
@@ -265,7 +265,7 @@ export class EventLogger {
     const storageKey = this._getStorageKey();
     const events = this._getEventsFromStorage(storageKey);
     if (events.length > 0) {
-      _Storage.removeItem(storageKey);
+      StorageProvider_1.Storage.removeItem(storageKey);
     }
     return events;
   }

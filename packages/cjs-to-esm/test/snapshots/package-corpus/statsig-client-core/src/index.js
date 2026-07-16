@@ -1,166 +1,253 @@
-import { _getInstance, _getStatsigGlobal, _getStatsigGlobalFlag } from "./$_StatsigGlobal";
-import { _getStorageKey, _getUserStorageKey } from "./CacheKey";
-import { PrecomputedEvaluationsContextHandle as _PrecomputedEvaluationsContextHandle } from "./ClientInterfaces";
-import { DataAdapterCore as _DataAdapterCore, _makeDataAdapterResult } from "./DataAdapterCore";
-import { EXCEPTION_ENDPOINT as _EXCEPTION_ENDPOINT, ErrorBoundary as _ErrorBoundary } from "./ErrorBoundary";
-import { _DJB2 as _DJB, _DJB2Object, _getSortedObject } from "./Hashing";
-import { LogLevel as _LogLevel, Log as _Log } from "./Log";
-import { MemoPrefix as _MemoPrefix, createMemoKey as _createMemoKey } from "./MemoKey";
-import { Endpoint as _Endpoint, NetworkDefault as _NetworkDefault, NetworkParam as _NetworkParam } from "./NetworkConfig";
-import { NetworkCore as _NetworkCore, RETRYABLE_CODES as _RETRYABLE_CODES } from "./NetworkCore";
-import { _addDocumentEventListenerSafe, _addWindowEventListenerSafe, _cloneObject, _getCurrentPageUrlSafe, _getDocumentSafe, _getUnloadEvent, _getWindowSafe, _isServerEnv } from "./SafeJs";
-import { SDKType as _SDKType } from "./SDKType";
-import { SessionID as _SessionID, StatsigSession as _StatsigSession } from "./SessionID";
-import { _fastApproxSizeOf } from "./SizeOf";
-import { StableID as _StableID, getCookieName as _getCookieName } from "./StableID";
-import { StatsigClientBase as _StatsigClientBase } from "./StatsigClientBase";
-import { ErrorTag as _ErrorTag } from "./StatsigClientEventEmitter";
-import { DataAdapterCachePrefix as _DataAdapterCachePrefix } from "./StatsigDataAdapter";
-import { _createConfigExposure, _createGateExposure, _createLayerParameterExposure, _isExposureEvent, _mapExposures } from "./StatsigEvent";
-import { SDK_VERSION as _SDK_VERSION, StatsigMetadataProvider as _StatsigMetadataProvider } from "./StatsigMetadata";
-import { LogEventCompressionMode as _LogEventCompressionMode, LoggingEnabledOption as _LoggingEnabledOption } from "./StatsigOptionsCommon";
-import { _makeDynamicConfig, _makeExperiment, _makeFeatureGate, _makeLayer, _makeTypedGet, _mergeOverride } from "./StatsigTypeFactories";
-import { _getFullUserHash, _getUnitIDFromUser, _normalizeUser } from "./StatsigUser";
-import { _getObjectFromStorage, _setObjectInStorage, Storage as _Storage } from "./StorageProvider";
-import { _typedJsonParse } from "./TypedJsonParse";
-import { _isTypeMatch, _typeOf } from "./TypingUtils";
-import { UrlConfiguration as _UrlConfiguration } from "./UrlConfiguration";
-import { getUUID as _getUUID } from "./UUID";
-import { _isCurrentlyVisible, _isUnloading, _notifyVisibilityChanged, _subscribeToVisiblityChanged } from "./VisibilityObserving";
-import { UPDATE_DETAIL_ERROR_MESSAGES as _UPDATE_DETAIL_ERROR_MESSAGES, createUpdateDetails as _createUpdateDetails } from "./StatsigUpdateDetails";
-import { SDKFlags as _SDKFlags } from "./SDKFlags";
-import { Diagnostics as _Diagnostics } from "./Diagnostics";
-import { EventLogger as _EventLogger } from "./EventLogger";
-var __createBinding = this && this.__createBinding || (Object.create ? function (o, m, k, k2) {
-  if (k2 === undefined) k2 = k;
-  var desc = Object.getOwnPropertyDescriptor(m, k);
-  if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-    desc = {
+import __cjs_dep_0 from "./$_StatsigGlobal";
+import __cjs_dep_1 from "./Diagnostics";
+import __cjs_dep_2 from "./EventLogger";
+import __cjs_dep_3 from "./Log";
+import __cjs_dep_4 from "./StatsigMetadata";
+import __cjs_dep_5 from "./StorageProvider";
+import __cjs_dep_6 from "./CacheKey";
+import __cjs_dep_7 from "./ClientInterfaces";
+import __cjs_dep_8 from "./DataAdapterCore";
+import __cjs_dep_9 from "./DownloadConfigSpecsResponse";
+import __cjs_dep_10 from "./ErrorBoundary";
+import __cjs_dep_11 from "./EvaluationOptions";
+import __cjs_dep_12 from "./EvaluationTypes";
+import __cjs_dep_13 from "./Hashing";
+import __cjs_dep_14 from "./InitializeResponse";
+import __cjs_dep_15 from "./MemoKey";
+import __cjs_dep_16 from "./NetworkConfig";
+import __cjs_dep_17 from "./NetworkCore";
+import __cjs_dep_18 from "./OverrideAdapter";
+import __cjs_dep_19 from "./ParamStoreTypes";
+import __cjs_dep_20 from "./SafeJs";
+import __cjs_dep_21 from "./SDKType";
+import __cjs_dep_22 from "./SessionID";
+import __cjs_dep_23 from "./SizeOf";
+import __cjs_dep_24 from "./StableID";
+import __cjs_dep_25 from "./StatsigClientBase";
+import __cjs_dep_26 from "./StatsigClientEventEmitter";
+import __cjs_dep_27 from "./StatsigDataAdapter";
+import __cjs_dep_28 from "./StatsigEvent";
+import __cjs_dep_29 from "./StatsigOptionsCommon";
+import __cjs_dep_30 from "./StatsigPlugin";
+import __cjs_dep_31 from "./StatsigTypeFactories";
+import __cjs_dep_32 from "./StatsigTypes";
+import __cjs_dep_33 from "./StatsigUser";
+import __cjs_dep_34 from "./TypedJsonParse";
+import __cjs_dep_35 from "./TypingUtils";
+import __cjs_dep_36 from "./UrlConfiguration";
+import __cjs_dep_37 from "./UUID";
+import __cjs_dep_38 from "./VisibilityObserving";
+import __cjs_dep_39 from "./StatsigUpdateDetails";
+import __cjs_dep_40 from "./SDKFlags";
+const __cjs_process__ = {
+  env: {
+    NODE_ENV: "production"
+  }
+};
+function __cjs_require__(request) {
+  switch (request) {
+    case "./$_StatsigGlobal":
+      return __cjs_dep_0;
+    case "./Diagnostics":
+      return __cjs_dep_1;
+    case "./EventLogger":
+      return __cjs_dep_2;
+    case "./Log":
+      return __cjs_dep_3;
+    case "./StatsigMetadata":
+      return __cjs_dep_4;
+    case "./StorageProvider":
+      return __cjs_dep_5;
+    case "./CacheKey":
+      return __cjs_dep_6;
+    case "./ClientInterfaces":
+      return __cjs_dep_7;
+    case "./DataAdapterCore":
+      return __cjs_dep_8;
+    case "./DownloadConfigSpecsResponse":
+      return __cjs_dep_9;
+    case "./ErrorBoundary":
+      return __cjs_dep_10;
+    case "./EvaluationOptions":
+      return __cjs_dep_11;
+    case "./EvaluationTypes":
+      return __cjs_dep_12;
+    case "./Hashing":
+      return __cjs_dep_13;
+    case "./InitializeResponse":
+      return __cjs_dep_14;
+    case "./MemoKey":
+      return __cjs_dep_15;
+    case "./NetworkConfig":
+      return __cjs_dep_16;
+    case "./NetworkCore":
+      return __cjs_dep_17;
+    case "./OverrideAdapter":
+      return __cjs_dep_18;
+    case "./ParamStoreTypes":
+      return __cjs_dep_19;
+    case "./SafeJs":
+      return __cjs_dep_20;
+    case "./SDKType":
+      return __cjs_dep_21;
+    case "./SessionID":
+      return __cjs_dep_22;
+    case "./SizeOf":
+      return __cjs_dep_23;
+    case "./StableID":
+      return __cjs_dep_24;
+    case "./StatsigClientBase":
+      return __cjs_dep_25;
+    case "./StatsigClientEventEmitter":
+      return __cjs_dep_26;
+    case "./StatsigDataAdapter":
+      return __cjs_dep_27;
+    case "./StatsigEvent":
+      return __cjs_dep_28;
+    case "./StatsigOptionsCommon":
+      return __cjs_dep_29;
+    case "./StatsigPlugin":
+      return __cjs_dep_30;
+    case "./StatsigTypeFactories":
+      return __cjs_dep_31;
+    case "./StatsigTypes":
+      return __cjs_dep_32;
+    case "./StatsigUser":
+      return __cjs_dep_33;
+    case "./TypedJsonParse":
+      return __cjs_dep_34;
+    case "./TypingUtils":
+      return __cjs_dep_35;
+    case "./UrlConfiguration":
+      return __cjs_dep_36;
+    case "./UUID":
+      return __cjs_dep_37;
+    case "./VisibilityObserving":
+      return __cjs_dep_38;
+    case "./StatsigUpdateDetails":
+      return __cjs_dep_39;
+    case "./SDKFlags":
+      return __cjs_dep_40;
+    default:
+      throw new Error("Cannot require " + request + " from @statsig/client-core@3.33.3::src/index.js");
+  }
+}
+const __cjs_cache__ = globalThis.__BUNDLER_CJS_CACHE__ ??= new Map();
+let __cjs_default__ = __cjs_cache__.get("@statsig/client-core@3.33.3::src/index.js::env=snapshot::NODE_ENV=production");
+if (!__cjs_default__) {
+  const __cjs_module__ = {
+    exports: {}
+  };
+  const __cjs_exports__ = __cjs_module__.exports;
+  __cjs_cache__.set("@statsig/client-core@3.33.3::src/index.js::env=snapshot::NODE_ENV=production", __cjs_exports__);
+  ((module, exports, require, process, __filename, __dirname) => {
+    "use strict";
+
+    var __createBinding = this && this.__createBinding || (Object.create ? function (o, m, k, k2) {
+      if (k2 === undefined) k2 = k;
+      var desc = Object.getOwnPropertyDescriptor(m, k);
+      if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+        desc = {
+          enumerable: true,
+          get: function () {
+            return m[k];
+          }
+        };
+      }
+      Object.defineProperty(o, k2, desc);
+    } : function (o, m, k, k2) {
+      if (k2 === undefined) k2 = k;
+      o[k2] = m[k];
+    });
+    var __exportStar = this && this.__exportStar || function (m, exports) {
+      for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+    };
+    Object.defineProperty(exports, "__esModule", {
+      value: true
+    });
+    exports.Storage = exports.Log = exports.EventLogger = exports.Diagnostics = void 0;
+    /** Statsig Global should go first */
+    require("./$_StatsigGlobal");
+    const __StatsigGlobal_1 = require("./$_StatsigGlobal");
+    const Diagnostics_1 = require("./Diagnostics");
+    Object.defineProperty(exports, "Diagnostics", {
       enumerable: true,
       get: function () {
-        return m[k];
+        return Diagnostics_1.Diagnostics;
       }
-    };
-  }
-  Object.defineProperty(o, k2, desc);
-} : function (o, m, k, k2) {
-  if (k2 === undefined) k2 = k;
-  o[k2] = m[k];
-});
-/** Statsig Global should go first */
-export { _Diagnostics as Diagnostics };
-export { _EventLogger as EventLogger };
-export { _Log as Log };
-export { _Storage as Storage };
-export { _getInstance, _getStatsigGlobal, _getStatsigGlobalFlag };
-export { _getStorageKey, _getUserStorageKey };
-export { _PrecomputedEvaluationsContextHandle as PrecomputedEvaluationsContextHandle };
-export { _DataAdapterCore as DataAdapterCore, _makeDataAdapterResult };
-export { _EXCEPTION_ENDPOINT as EXCEPTION_ENDPOINT, _ErrorBoundary as ErrorBoundary };
-export { _DJB as _DJB2, _DJB2Object, _getSortedObject };
-export { _LogLevel as LogLevel };
-export { _MemoPrefix as MemoPrefix, _createMemoKey as createMemoKey };
-export { _Endpoint as Endpoint, _NetworkDefault as NetworkDefault, _NetworkParam as NetworkParam };
-export { _NetworkCore as NetworkCore, _RETRYABLE_CODES as RETRYABLE_CODES };
-export { _addDocumentEventListenerSafe, _addWindowEventListenerSafe, _cloneObject, _getCurrentPageUrlSafe, _getDocumentSafe, _getUnloadEvent, _getWindowSafe, _isServerEnv };
-export { _SDKType as SDKType };
-export { _SessionID as SessionID, _StatsigSession as StatsigSession };
-export { _fastApproxSizeOf };
-export { _StableID as StableID, _getCookieName as getCookieName };
-export { _StatsigClientBase as StatsigClientBase };
-export { _ErrorTag as ErrorTag };
-export { _DataAdapterCachePrefix as DataAdapterCachePrefix };
-export { _createConfigExposure, _createGateExposure, _createLayerParameterExposure, _isExposureEvent, _mapExposures };
-export { _SDK_VERSION as SDK_VERSION, _StatsigMetadataProvider as StatsigMetadataProvider };
-export { _LogEventCompressionMode as LogEventCompressionMode, _LoggingEnabledOption as LoggingEnabledOption };
-export { _makeDynamicConfig, _makeExperiment, _makeFeatureGate, _makeLayer, _makeTypedGet, _mergeOverride };
-export { _getFullUserHash, _getUnitIDFromUser, _normalizeUser };
-export { _getObjectFromStorage, _setObjectInStorage };
-export { _typedJsonParse };
-export { _isTypeMatch, _typeOf };
-export { _UrlConfiguration as UrlConfiguration };
-export { _getUUID as getUUID };
-export { _isCurrentlyVisible, _isUnloading, _notifyVisibilityChanged, _subscribeToVisiblityChanged };
-export { _UPDATE_DETAIL_ERROR_MESSAGES as UPDATE_DETAIL_ERROR_MESSAGES, _createUpdateDetails as createUpdateDetails };
-export { _SDKFlags as SDKFlags };
-Object.assign((0, _getStatsigGlobal)(), {
-  Log: _Log,
-  SDK_VERSION: _SDK_VERSION
-});
-const _cjs_default = {
-  ["_getInstance"]: _getInstance,
-  ["_getStatsigGlobal"]: _getStatsigGlobal,
-  ["_getStatsigGlobalFlag"]: _getStatsigGlobalFlag,
-  ["_getStorageKey"]: _getStorageKey,
-  ["_getUserStorageKey"]: _getUserStorageKey,
-  ["PrecomputedEvaluationsContextHandle"]: _PrecomputedEvaluationsContextHandle,
-  ["DataAdapterCore"]: _DataAdapterCore,
-  ["_makeDataAdapterResult"]: _makeDataAdapterResult,
-  ["EXCEPTION_ENDPOINT"]: _EXCEPTION_ENDPOINT,
-  ["ErrorBoundary"]: _ErrorBoundary,
-  ["_DJB2"]: _DJB,
-  ["_DJB2Object"]: _DJB2Object,
-  ["_getSortedObject"]: _getSortedObject,
-  ["LogLevel"]: _LogLevel,
-  ["MemoPrefix"]: _MemoPrefix,
-  ["createMemoKey"]: _createMemoKey,
-  ["Endpoint"]: _Endpoint,
-  ["NetworkDefault"]: _NetworkDefault,
-  ["NetworkParam"]: _NetworkParam,
-  ["NetworkCore"]: _NetworkCore,
-  ["RETRYABLE_CODES"]: _RETRYABLE_CODES,
-  ["_addDocumentEventListenerSafe"]: _addDocumentEventListenerSafe,
-  ["_addWindowEventListenerSafe"]: _addWindowEventListenerSafe,
-  ["_cloneObject"]: _cloneObject,
-  ["_getCurrentPageUrlSafe"]: _getCurrentPageUrlSafe,
-  ["_getDocumentSafe"]: _getDocumentSafe,
-  ["_getUnloadEvent"]: _getUnloadEvent,
-  ["_getWindowSafe"]: _getWindowSafe,
-  ["_isServerEnv"]: _isServerEnv,
-  ["SDKType"]: _SDKType,
-  ["SessionID"]: _SessionID,
-  ["StatsigSession"]: _StatsigSession,
-  ["_fastApproxSizeOf"]: _fastApproxSizeOf,
-  ["StableID"]: _StableID,
-  ["getCookieName"]: _getCookieName,
-  ["StatsigClientBase"]: _StatsigClientBase,
-  ["ErrorTag"]: _ErrorTag,
-  ["DataAdapterCachePrefix"]: _DataAdapterCachePrefix,
-  ["_createConfigExposure"]: _createConfigExposure,
-  ["_createGateExposure"]: _createGateExposure,
-  ["_createLayerParameterExposure"]: _createLayerParameterExposure,
-  ["_isExposureEvent"]: _isExposureEvent,
-  ["_mapExposures"]: _mapExposures,
-  ["SDK_VERSION"]: _SDK_VERSION,
-  ["StatsigMetadataProvider"]: _StatsigMetadataProvider,
-  ["LogEventCompressionMode"]: _LogEventCompressionMode,
-  ["LoggingEnabledOption"]: _LoggingEnabledOption,
-  ["_makeDynamicConfig"]: _makeDynamicConfig,
-  ["_makeExperiment"]: _makeExperiment,
-  ["_makeFeatureGate"]: _makeFeatureGate,
-  ["_makeLayer"]: _makeLayer,
-  ["_makeTypedGet"]: _makeTypedGet,
-  ["_mergeOverride"]: _mergeOverride,
-  ["_getFullUserHash"]: _getFullUserHash,
-  ["_getUnitIDFromUser"]: _getUnitIDFromUser,
-  ["_normalizeUser"]: _normalizeUser,
-  ["_getObjectFromStorage"]: _getObjectFromStorage,
-  ["_setObjectInStorage"]: _setObjectInStorage,
-  ["_typedJsonParse"]: _typedJsonParse,
-  ["_isTypeMatch"]: _isTypeMatch,
-  ["_typeOf"]: _typeOf,
-  ["UrlConfiguration"]: _UrlConfiguration,
-  ["getUUID"]: _getUUID,
-  ["_isCurrentlyVisible"]: _isCurrentlyVisible,
-  ["_isUnloading"]: _isUnloading,
-  ["_notifyVisibilityChanged"]: _notifyVisibilityChanged,
-  ["_subscribeToVisiblityChanged"]: _subscribeToVisiblityChanged,
-  ["UPDATE_DETAIL_ERROR_MESSAGES"]: _UPDATE_DETAIL_ERROR_MESSAGES,
-  ["createUpdateDetails"]: _createUpdateDetails,
-  ["SDKFlags"]: _SDKFlags,
-  ["Diagnostics"]: _Diagnostics,
-  ["EventLogger"]: _EventLogger,
-  ["Log"]: _Log,
-  ["Storage"]: _Storage
-};
-export default _cjs_default;
+    });
+    const EventLogger_1 = require("./EventLogger");
+    Object.defineProperty(exports, "EventLogger", {
+      enumerable: true,
+      get: function () {
+        return EventLogger_1.EventLogger;
+      }
+    });
+    const Log_1 = require("./Log");
+    Object.defineProperty(exports, "Log", {
+      enumerable: true,
+      get: function () {
+        return Log_1.Log;
+      }
+    });
+    const StatsigMetadata_1 = require("./StatsigMetadata");
+    const StorageProvider_1 = require("./StorageProvider");
+    Object.defineProperty(exports, "Storage", {
+      enumerable: true,
+      get: function () {
+        return StorageProvider_1.Storage;
+      }
+    });
+    __exportStar(require("./$_StatsigGlobal"), exports);
+    __exportStar(require("./CacheKey"), exports);
+    __exportStar(require("./ClientInterfaces"), exports);
+    __exportStar(require("./DataAdapterCore"), exports);
+    __exportStar(require("./Diagnostics"), exports);
+    __exportStar(require("./DownloadConfigSpecsResponse"), exports);
+    __exportStar(require("./ErrorBoundary"), exports);
+    __exportStar(require("./EvaluationOptions"), exports);
+    __exportStar(require("./EvaluationTypes"), exports);
+    __exportStar(require("./Hashing"), exports);
+    __exportStar(require("./InitializeResponse"), exports);
+    __exportStar(require("./Log"), exports);
+    __exportStar(require("./MemoKey"), exports);
+    __exportStar(require("./NetworkConfig"), exports);
+    __exportStar(require("./NetworkCore"), exports);
+    __exportStar(require("./OverrideAdapter"), exports);
+    __exportStar(require("./ParamStoreTypes"), exports);
+    __exportStar(require("./SafeJs"), exports);
+    __exportStar(require("./SDKType"), exports);
+    __exportStar(require("./SessionID"), exports);
+    __exportStar(require("./SizeOf"), exports);
+    __exportStar(require("./StableID"), exports);
+    __exportStar(require("./StatsigClientBase"), exports);
+    __exportStar(require("./StatsigClientEventEmitter"), exports);
+    __exportStar(require("./StatsigDataAdapter"), exports);
+    __exportStar(require("./StatsigEvent"), exports);
+    __exportStar(require("./StatsigMetadata"), exports);
+    __exportStar(require("./StatsigOptionsCommon"), exports);
+    __exportStar(require("./StatsigPlugin"), exports);
+    __exportStar(require("./StatsigTypeFactories"), exports);
+    __exportStar(require("./StatsigTypes"), exports);
+    __exportStar(require("./StatsigUser"), exports);
+    __exportStar(require("./StorageProvider"), exports);
+    __exportStar(require("./TypedJsonParse"), exports);
+    __exportStar(require("./TypingUtils"), exports);
+    __exportStar(require("./UrlConfiguration"), exports);
+    __exportStar(require("./UUID"), exports);
+    __exportStar(require("./VisibilityObserving"), exports);
+    __exportStar(require("./StatsigUpdateDetails"), exports);
+    __exportStar(require("./SDKFlags"), exports);
+    Object.assign((0, __StatsigGlobal_1._getStatsigGlobal)(), {
+      Log: Log_1.Log,
+      SDK_VERSION: StatsigMetadata_1.SDK_VERSION
+    });
+  })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__, "@statsig/client-core@3.33.3::src/index.js", "@statsig/client-core@3.33.3::src");
+  __cjs_default__ = __cjs_module__.exports;
+  __cjs_cache__.set("@statsig/client-core@3.33.3::src/index.js::env=snapshot::NODE_ENV=production", __cjs_default__);
+}
+export default __cjs_default__;
+export const Diagnostics = __cjs_default__["Diagnostics"];
+export const EventLogger = __cjs_default__["EventLogger"];
+export const Log = __cjs_default__["Log"];
+export const Storage = __cjs_default__["Storage"];

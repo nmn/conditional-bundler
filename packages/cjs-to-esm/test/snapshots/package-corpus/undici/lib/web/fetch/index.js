@@ -2404,7 +2404,3 @@ if (!__cjs_default__) {
   __cjs_cache__.set("undici@8.7.0::lib/web/fetch/index.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
-export const Fetch = __cjs_default__["Fetch"];
-export const fetch = __cjs_default__["fetch"];
-export const fetching = __cjs_default__["fetching"];
-export const finalizeAndReportTiming = __cjs_default__["finalizeAndReportTiming"];

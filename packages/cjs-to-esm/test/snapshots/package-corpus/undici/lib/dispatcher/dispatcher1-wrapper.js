@@ -1,6 +1,12 @@
 import Dispatcher from "./dispatcher";
-import { InvalidArgumentError as _InvalidArgumentError } from "../core/errors";
-import { toRawHeaders as _toRawHeaders } from "../core/util";
+import _cjs_import from "../core/errors";
+import _cjs_import2 from "../core/util";
+const {
+  InvalidArgumentError
+} = _cjs_import;
+const {
+  toRawHeaders
+} = _cjs_import2;
 class LegacyHandlerWrapper {
   #handler;
   constructor(handler) {
@@ -10,11 +16,11 @@ class LegacyHandlerWrapper {
     this.#handler.onConnect?.(reason => controller.abort(reason), context);
   }
   onRequestUpgrade(controller, statusCode, headers, socket) {
-    const rawHeaders = controller?.rawHeaders ?? _toRawHeaders(headers ?? {});
+    const rawHeaders = controller?.rawHeaders ?? toRawHeaders(headers ?? {});
     this.#handler.onUpgrade?.(statusCode, rawHeaders, socket);
   }
   onResponseStart(controller, statusCode, headers, statusMessage) {
-    const rawHeaders = controller?.rawHeaders ?? _toRawHeaders(headers ?? {});
+    const rawHeaders = controller?.rawHeaders ?? toRawHeaders(headers ?? {});
     if (this.#handler.onHeaders?.(statusCode, rawHeaders, () => controller.resume(), statusMessage) === false) {
       controller.pause();
     }
@@ -25,7 +31,7 @@ class LegacyHandlerWrapper {
     }
   }
   onResponseEnd(controller, trailers) {
-    const rawTrailers = controller?.rawTrailers ?? _toRawHeaders(trailers ?? {});
+    const rawTrailers = controller?.rawTrailers ?? toRawHeaders(trailers ?? {});
     this.#handler.onComplete?.(rawTrailers);
   }
   onResponseError(_controller, err) {
@@ -49,13 +55,13 @@ class Dispatcher1Wrapper extends Dispatcher {
   constructor(dispatcher) {
     super();
     if (!dispatcher || typeof dispatcher.dispatch !== 'function') {
-      throw new _InvalidArgumentError('Argument dispatcher must implement dispatch');
+      throw new InvalidArgumentError('Argument dispatcher must implement dispatch');
     }
     this.#dispatcher = dispatcher;
   }
   static wrapHandler(handler) {
     if (!handler || typeof handler !== 'object') {
-      throw new _InvalidArgumentError('handler must be an object');
+      throw new InvalidArgumentError('handler must be an object');
     }
     if (typeof handler.onRequestStart === 'function') {
       return handler;

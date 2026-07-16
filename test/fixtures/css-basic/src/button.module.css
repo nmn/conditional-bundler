@@ -1,4 +1,5 @@
 .card {
+  composes: shared from "./shared.module.css";
   color: blue;
 }
 

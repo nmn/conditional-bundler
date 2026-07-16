@@ -1,6 +1,6 @@
 import $ from "../internals/export";
-import { find as _find } from "../internals/async-iterator-iteration";
-var $find = _find;
+import _cjs_import from "../internals/async-iterator-iteration";
+var $find = _cjs_import.find;
 
 // `AsyncIterator.prototype.find` method
 // https://github.com/tc39/proposal-async-iterator-helpers

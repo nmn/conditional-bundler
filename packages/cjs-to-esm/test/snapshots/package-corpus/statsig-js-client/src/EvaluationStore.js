@@ -1,6 +1,6 @@
-import { _typedJsonParse, SDKFlags as _SDKFlags, StableID as _StableID, _getFullUserHash } from "@statsig/client-core";
-import { V1InitializeContainer as _V1InitializeContainer } from "./V1InitializeContainer";
-import { V2InitializeContainer as _V2InitializeContainer } from "./V2InitializeContainer";
+import client_core_1 from "@statsig/client-core";
+import V1InitializeContainer_1 from "./V1InitializeContainer";
+import V2InitializeContainer_1 from "./V2InitializeContainer";
 class EvaluationStore {
   constructor(_sdkKey, _options) {
     this._sdkKey = _sdkKey;
@@ -37,7 +37,7 @@ class EvaluationStore {
     if (!result) {
       return false;
     }
-    const values = (0, _typedJsonParse)(result.data, 'has_updates', 'EvaluationResponse');
+    const values = (0, client_core_1._typedJsonParse)(result.data, 'has_updates', 'EvaluationResponse');
     if (values == null) {
       return false;
     }
@@ -49,19 +49,19 @@ class EvaluationStore {
     if (updatedLcut < this._lcut) {
       return true;
     }
-    this._valuesForExternalUse = (0, _typedJsonParse)(result.data, 'has_updates', 'EvaluationResponse');
+    this._valuesForExternalUse = (0, client_core_1._typedJsonParse)(result.data, 'has_updates', 'EvaluationResponse');
     this._lcut = values.time;
     this._receivedAt = result.receivedAt;
     if (values.response_format === 'init-v2') {
-      this._values = new _V2InitializeContainer(values);
+      this._values = new V2InitializeContainer_1.V2InitializeContainer(values);
     } else {
-      this._values = new _V1InitializeContainer(values);
+      this._values = new V1InitializeContainer_1.V1InitializeContainer(values);
     }
     this._bootstrapMetadata = this._extractBootstrapMetadata(result.source, values);
     if (result.source && values.user) {
       this._setWarningState(user, values);
     }
-    _SDKFlags.setFlags(this._sdkKey, (_b = values.sdk_flags) !== null && _b !== void 0 ? _b : {});
+    client_core_1.SDKFlags.setFlags(this._sdkKey, (_b = values.sdk_flags) !== null && _b !== void 0 ? _b : {});
     return true;
   }
   getWarnings() {
@@ -121,7 +121,7 @@ class EvaluationStore {
   }
   _setWarningState(user, values) {
     var _a, _b, _c;
-    const stableID = _StableID.get(this._sdkKey);
+    const stableID = client_core_1.StableID.get(this._sdkKey);
     if (((_a = user.customIDs) === null || _a === void 0 ? void 0 : _a.stableID) !== stableID && (
     // don't throw if they're both undefined
     ((_b = user.customIDs) === null || _b === void 0 ? void 0 : _b.stableID) || stableID)) {
@@ -146,7 +146,7 @@ class EvaluationStore {
           })
         });
       }
-      if ((0, _getFullUserHash)(userForComparison) !== (0, _getFullUserHash)(bootstrapUser)) {
+      if ((0, client_core_1._getFullUserHash)(userForComparison) !== (0, client_core_1._getFullUserHash)(bootstrapUser)) {
         this._warnings.add('PartialUserMatch');
       }
     }

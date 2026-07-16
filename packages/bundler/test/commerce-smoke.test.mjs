@@ -12,28 +12,11 @@ const exampleDir = path.join(rootDir, "examples/react-rsc-commerce");
 jest.setTimeout(120_000);
 
 test("react-rsc-commerce production server serves HTML and RSC routes", async () => {
-  await execFileAsync(process.execPath, ["scripts/clean.mjs"], {
+  await execFileAsync("corepack", ["pnpm", "run", "build"], {
     cwd: exampleDir,
-    timeout: 10_000,
+    env: process.env,
+    timeout: 60_000,
   });
-  await execFileAsync(
-    process.execPath,
-    [
-      "../../packages/bundler/bin/bundler.js",
-      "build",
-      "--config",
-      "bundler.config.mjs",
-    ],
-    {
-      cwd: exampleDir,
-      env: {
-        ...process.env,
-        NODE_ENV: "production",
-        BUNDLER_MODE: "production",
-      },
-      timeout: 60_000,
-    },
-  );
   const clientManifest = JSON.parse(
     await fs.readFile(
       path.join(exampleDir, "dist/rsc-client-manifest.json"),
@@ -44,6 +27,20 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     await fs.readFile(path.join(exampleDir, "dist/manifest.json"), "utf8"),
   );
   expectCjsNodeEnv(buildManifest, "production");
+  const showcaseAssets = await expectShowcaseAssets(buildManifest);
+  expect(
+    buildManifest.bundles.filter(
+      (bundle) =>
+        bundle.envId === "rsc" &&
+        bundle.entryId.startsWith("bundler:common:rsc"),
+    ),
+  ).toHaveLength(1);
+  for (const envId of ["rsc", "client"]) {
+    const modules = buildManifest.bundles
+      .filter((bundle) => bundle.envId === envId)
+      .flatMap((bundle) => bundle.modules);
+    expect(new Set(modules).size).toBe(modules.length);
+  }
   const cachedModuleIdentities = await findCachedModuleIdentities(
     path.join(exampleDir, ".cache/conditional-bundler"),
   );
@@ -76,7 +73,7 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
       expect.stringMatching(/^HomeCounter\.client\.[a-z0-9]+\.js$/),
       expect.stringMatching(/^ProductActions\.client\.[a-z0-9]+\.js$/),
       expect.stringMatching(/^bundler-common-client\.client\.[a-z0-9]+\.js$/),
-      expect.stringMatching(/^client\.client\.[a-z0-9]+\.js$/),
+      expect.stringMatching(/^runtime-client\.client\.[a-z0-9]+\.js$/),
     ]),
   );
   expect(clientBundleFiles).not.toEqual(
@@ -119,6 +116,11 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     ),
   ).toBe(true);
   for (const bundle of buildManifest.bundles) {
+    const code = await fs.readFile(
+      path.join(exampleDir, "dist", bundle.fileName),
+      "utf8",
+    );
+    expect(code).toContain(`//# sourceMappingURL=${bundle.mapFileName}`);
     const sourceMap = JSON.parse(
       await fs.readFile(
         path.join(exampleDir, "dist", bundle.mapFileName),
@@ -223,27 +225,31 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     expect(html).not.toContain("importmap");
     expect(html).not.toContain("esm.sh");
     expect(html).toMatch(
-      /<script type="module" src="\/assets\/client\.client\.[a-z0-9]+\.js"><\/script>/,
+      /<script type="module" src="\/runtime-client\.client\.[a-z0-9]+\.js"><\/script>/,
     );
     const clientBundle = buildManifest.bundles.find(
       (bundle) =>
-        bundle.envId === "client" && bundle.entryId.endsWith("client.jsx"),
+        bundle.envId === "client" &&
+        bundle.entryId.endsWith("runtime-client.js"),
     );
-    const clientAsset = await fetchAsset(
-      `${baseUrl}/assets/${clientBundle.fileName}`,
-    );
+    const clientAsset = await fetchAsset(`${baseUrl}/${clientBundle.fileName}`);
     expect(clientAsset.contentType).toContain("text/javascript");
     expect(clientAsset.text).toContain(
       `//# sourceMappingURL=${clientBundle.mapFileName}`,
     );
     const clientMapAsset = await fetchAsset(
-      `${baseUrl}/assets/${clientBundle.mapFileName}`,
+      `${baseUrl}/${clientBundle.mapFileName}`,
     );
     expect(clientMapAsset.contentType).toContain("application/json");
     expect(JSON.parse(clientMapAsset.text)).toMatchObject({
       version: 3,
       file: clientBundle.fileName,
     });
+    const markAsset = await fetchAsset(
+      `${baseUrl}/${showcaseAssets.mark.fileName}`,
+    );
+    expect(markAsset.contentType).toContain("image/svg+xml");
+    expect(markAsset.text).toContain("<svg");
 
     const home = await fetchText(`${baseUrl}/rsc?path=%2F`);
     expect(home).toContain("src/client/HomeCounter.jsx");
@@ -329,21 +335,22 @@ test("react-rsc-commerce dev server serves linked source maps", async () => {
     const baseUrl = `http://127.0.0.1:${port}`;
     await waitForHttp(`${baseUrl}/`, () => childOutput);
     const html = await fetchText(`${baseUrl}/`);
+    expect(html).toContain("HomeCounter.client.");
+    expect(html).toContain("CategoryPicker.client.");
+    expect(html).toContain("DeliveryEstimator.client.");
     const scriptMatch = html.match(
-      /<script type="module" src="\/assets\/(client\.client\.[a-z0-9]+\.js)"><\/script>/,
+      /<script type="module" src="\/(runtime-client\.client\.[a-z0-9]+\.js)"><\/script>/,
     );
     expect(scriptMatch).not.toBeNull();
 
     const bundleFileName = scriptMatch[1];
-    const bundleAsset = await fetchAsset(`${baseUrl}/assets/${bundleFileName}`);
+    const bundleAsset = await fetchAsset(`${baseUrl}/${bundleFileName}`);
     expect(bundleAsset.contentType).toContain("text/javascript");
     expect(bundleAsset.text).toContain(
       `//# sourceMappingURL=${bundleFileName}.map`,
     );
 
-    const mapAsset = await fetchAsset(
-      `${baseUrl}/assets/${bundleFileName}.map`,
-    );
+    const mapAsset = await fetchAsset(`${baseUrl}/${bundleFileName}.map`);
     expect(mapAsset.contentType).toContain("application/json");
     expect(JSON.parse(mapAsset.text)).toMatchObject({
       version: 3,
@@ -367,6 +374,11 @@ test("react-rsc-commerce dev server serves linked source maps", async () => {
       await fs.readFile(path.join(exampleDir, "dist/manifest.json"), "utf8"),
     );
     expectCjsNodeEnv(manifest, "development");
+    const showcaseAssets = await expectShowcaseAssets(manifest);
+    const markAsset = await fetchAsset(
+      `${baseUrl}/${showcaseAssets.mark.fileName}`,
+    );
+    expect(markAsset.contentType).toContain("image/svg+xml");
     const clientBundles = manifest.bundles.filter(
       (bundle) => bundle.envId === "client",
     );
@@ -421,35 +433,61 @@ test("react-rsc-commerce dev server serves linked source maps", async () => {
   }
 });
 
+async function expectShowcaseAssets(manifest) {
+  const mark = manifest.assets.find(
+    (asset) =>
+      asset.type === "asset" && asset.fileName.includes("monarch-mark"),
+  );
+  const texture = manifest.assets.find(
+    (asset) =>
+      asset.type === "asset" && asset.fileName.includes("monarch-texture"),
+  );
+  const style = manifest.assets.find((asset) => asset.type === "style");
+  expect(mark).toBeDefined();
+  expect(texture).toBeDefined();
+  expect(style).toBeDefined();
+
+  const css = await fs.readFile(
+    path.join(exampleDir, "dist", style.fileName),
+    "utf8",
+  );
+  expect(css).toContain(`url("/${texture.fileName}")`);
+  expect(css).not.toContain("/assets/assets/");
+  expect(css).toContain("@layer example-import");
+  expect(css).toContain("@supports (display: grid)");
+  expect(css.indexOf("isolation: isolate")).toBeLessThan(
+    css.indexOf("position: relative"),
+  );
+  expect(css.indexOf("position: relative")).toBeLessThan(
+    css.indexOf("background: var(--"),
+  );
+
+  const serverBundle = manifest.bundles.find(
+    (bundle) => bundle.envId === "rsc" && bundle.entryId.endsWith("server.jsx"),
+  );
+  const serverCode = await fs.readFile(
+    path.join(exampleDir, "dist", serverBundle.fileName),
+    "utf8",
+  );
+  expect(serverCode).toContain(`"/${mark.fileName}"`);
+  expect(serverCode).toMatch(
+    /src: __bundler_[a-z0-9]+_asset_url,\s+width: 64,\s+height: 64/,
+  );
+  return { mark, texture, style };
+}
+
 function expectCjsNodeEnv(manifest, expected) {
-  const prefix = "virtual:cjs-to-esm:";
   const records = Array.from(
-    new Set(
-      manifest.bundles
-        .flatMap((bundle) => bundle.modules)
-        .filter((id) => id.startsWith(prefix)),
-    ),
-    (id) => {
-      const [envId, nodeEnv, encodedPath] = id.slice(prefix.length).split(":");
-      return {
-        envId: decodeURIComponent(envId),
-        nodeEnv: decodeURIComponent(nodeEnv),
-        filePath: Buffer.from(encodedPath, "base64url").toString("utf8"),
-      };
-    },
+    new Set(manifest.bundles.flatMap((bundle) => bundle.modules)),
+  ).filter(
+    (id) =>
+      id.includes("/cjs/") && /\.(?:production|development)\.js$/.test(id),
   );
   const opposite = expected === "production" ? "development" : "production";
 
   expect(records.length).toBeGreaterThan(0);
-  expect(new Set(records.map((record) => record.nodeEnv))).toEqual(
-    new Set([expected]),
-  );
-  expect(
-    records.some((record) => record.filePath.includes(`.${expected}.js`)),
-  ).toBe(true);
-  expect(
-    records.some((record) => record.filePath.includes(`.${opposite}.js`)),
-  ).toBe(false);
+  expect(records.some((id) => id.includes(`.${expected}.js`))).toBe(true);
+  expect(records.some((id) => id.includes(`.${opposite}.js`))).toBe(false);
 }
 
 async function withCommerceServer(extraEnv, run) {
@@ -571,7 +609,7 @@ async function expectMappedServerStack(fileName, query = "") {
   );
 
   expect(stdout).toMatch(
-    /examples\/react-rsc-commerce\/src\/server\.jsx:\d+:\d+/,
+    /bundler:\/react-rsc-commerce%400\.1\.0%3A%3Asrc\/server\.jsx:\d+:\d+/,
   );
   expect(stdout).not.toContain(`/dist/${fileName}`);
 }

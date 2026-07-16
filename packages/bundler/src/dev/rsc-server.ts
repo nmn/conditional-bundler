@@ -6,16 +6,18 @@ import type { Socket } from "node:net";
 import { buildProject, type BuildResult } from "../builder.js";
 import type { BundlerConfig } from "../config.js";
 import { resolveDevOptions } from "./options.js";
-import { readDevAsset, resolveConditionalPatch } from "./conditional-assets.js";
+import { readDevAsset } from "./conditional-assets.js";
 import {
   acceptWebSocket,
   broadcast,
   createPatch,
+  hmrUpdatePrefix,
+  HmrUpdateStore,
   watchProject,
   type Client,
   type DevServer,
+  type HmrPatchPlan,
 } from "./server.js";
-import type { HmrMessage } from "./server.js";
 
 export type RscDevBundle = {
   envId: string;
@@ -45,7 +47,7 @@ export type RscDevServerOptions = {
 };
 
 export type RscDevChangeAction =
-  | { type: "patch"; patch: Extract<HmrMessage, { type: "patch" }> }
+  | { type: "patch"; patch: HmrPatchPlan }
   | { type: "reload"; reason: string }
   | { type: "noop" };
 
@@ -76,12 +78,14 @@ export async function startRscDevServer(
     | { version: number; promise: Promise<Record<string, unknown>> }
     | undefined;
   const clients = new Set<Client>();
+  const hmrUpdates = new HmrUpdateStore();
 
   const server = http.createServer((request, response) => {
     void handleRscDevRequest(
       options,
       devConfig,
       current,
+      hmrUpdates,
       () =>
         loadServerModule({
           config: devConfig,
@@ -116,7 +120,9 @@ export async function startRscDevServer(
   const watcher = watchProject(devConfig, async () => {
     try {
       const next = await buildProject(devConfig, []);
-      const patch = createPatch(current, next);
+      const patch = createPatch(current, next, {
+        ignoreManifestResources: true,
+      });
       const action = classifyRscDevChange({
         previous: current,
         next,
@@ -138,7 +144,7 @@ export async function startRscDevServer(
           options.clientEntryId,
           ++clientPatchVersion,
         );
-        broadcast(clients, await resolveConditionalPatch(patchWithImports));
+        broadcast(clients, await hmrUpdates.publish(patchWithImports));
       } else if (action.type === "reload") {
         broadcast(clients, { type: "rsc-refresh" });
       }
@@ -161,6 +167,7 @@ export async function startRscDevServer(
     url: `http://${devOptions.host}:${port}`,
     close: async () => {
       watcher?.close();
+      hmrUpdates.clear();
       await disposeLoadedServerModule(loadedServerModule, options);
       for (const client of clients) {
         client.socket.destroy();
@@ -176,21 +183,44 @@ async function handleRscDevRequest(
   options: RscDevServerOptions,
   config: BundlerConfig,
   build: BuildResult,
+  hmrUpdates: HmrUpdateStore,
   loadServerModuleForVersion: () => Promise<Record<string, unknown>>,
   request: http.IncomingMessage,
   response: http.ServerResponse,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
-  const assetName = matchAssetRequest(url.pathname);
-  if (assetName) {
-    await serveAsset(config, build, assetName, response);
+  if (url.pathname.startsWith(hmrUpdatePrefix)) {
+    const body = hmrUpdates.read(url.pathname);
+    if (body == null) {
+      response.statusCode = 404;
+      response.end("HMR update not found");
+      return;
+    }
+    response.setHeader("cache-control", "no-store");
+    response.setHeader("content-type", "text/javascript; charset=utf-8");
+    response.setHeader("x-content-type-options", "nosniff");
+    response.end(body);
     return;
+  }
+  for (const assetName of matchAssetRequests(url.pathname)) {
+    const served = await readDevAsset(config, build, assetName);
+    if (served) {
+      response.setHeader("content-type", served.contentType);
+      response.end(served.body);
+      return;
+    }
   }
 
   const clientBundle = findBundle(build, options.clientEntryId);
   const serverBundle = findBundle(build, options.serverEntryId);
-  const readAsset = (fileName: string) =>
-    fsp.readFile(path.join(config.outputs.outDir, path.basename(fileName)));
+  const readAsset = (fileName: string) => {
+    const root = path.resolve(config.outputs.outDir);
+    const candidate = path.resolve(root, fileName);
+    if (candidate !== root && !candidate.startsWith(`${root}${path.sep}`)) {
+      throw new Error(`Refusing to read output outside '${root}'.`);
+    }
+    return fsp.readFile(candidate);
+  };
 
   try {
     await options.render({
@@ -221,7 +251,7 @@ export function classifyRscDevChange({
 }: {
   previous: BuildResult;
   next: BuildResult;
-  patch: Extract<HmrMessage, { type: "patch" }> | null;
+  patch: HmrPatchPlan | null;
   clientEntryId: string;
   serverEntryId: string;
 }): RscDevChangeAction {
@@ -259,11 +289,11 @@ export function classifyRscDevChange({
 }
 
 export function addClientPatchImports(
-  patch: Extract<HmrMessage, { type: "patch" }>,
+  patch: HmrPatchPlan,
   build: BuildResult,
   clientEntryId: string,
   version?: number,
-): Extract<HmrMessage, { type: "patch" }> {
+): HmrPatchPlan {
   const importedBundles = patch.changedBundles
     .map((key) =>
       build.manifest.bundles.find(
@@ -287,31 +317,20 @@ export function addClientPatchImports(
   const importedBundleKeys = new Set(
     importedBundles.map((bundle) => `${bundle.envId}:${bundle.entryId}`),
   );
-  const patchRecords =
-    patch.recordBundles && patch.recordBundles.length === patch.records.length
-      ? patch.records.filter(
-          (_record, index) =>
-            !importedBundleKeys.has(patch.recordBundles![index]),
-        )
-      : patch.records;
+  const updates = patch.updates.filter(
+    (update) => !importedBundleKeys.has(update.bundleKey),
+  );
   const chunkUpdates = Object.fromEntries(
     importedBundles.map((bundle) => [bundle.entryId, bundle.fileName]),
   );
-  const records =
-    Object.keys(chunkUpdates).length > 0
-      ? [
-          ...patchRecords,
-          `Object.assign(globalThis.__BUNDLER_RSC_CHUNKS__ ??= {}, ${JSON.stringify(chunkUpdates)});`,
-        ]
-      : patchRecords;
-  if (imports.length === 0 && records === patch.records) {
+  if (imports.length === 0) {
     return patch;
   }
   return {
     ...patch,
-    recordBundles: undefined,
-    records,
+    updates,
     imports,
+    rscChunks: chunkUpdates,
   };
 }
 
@@ -420,41 +439,38 @@ async function disposeLoadedServerModule(
   }
 }
 
-async function serveAsset(
-  config: BundlerConfig,
-  build: BuildResult,
-  fileName: string,
-  response: http.ServerResponse,
-): Promise<void> {
-  const served = await readDevAsset(config, build, fileName);
-  if (!served) {
-    response.statusCode = 404;
-    response.end("Not found");
-    return;
+function matchAssetRequests(pathname: string): string[] {
+  const requested = decodeURIComponent(pathname.replace(/^\/+/, ""));
+  if (
+    !requested ||
+    requested.startsWith("/") ||
+    requested.includes("\\") ||
+    requested.split("/").includes("..")
+  ) {
+    return [];
   }
-  response.setHeader("content-type", served.contentType);
-  response.end(served.body);
-}
-
-function matchAssetRequest(pathname: string): string | null {
-  if (pathname.startsWith("/assets/")) {
-    return path.basename(pathname);
-  }
-  if (pathname.endsWith(".js")) {
-    return path.basename(pathname);
-  }
-  return null;
+  return requested.startsWith("assets/")
+    ? [requested, requested.slice("assets/".length)]
+    : [requested];
 }
 
 function findBundle(
   build: BuildResult,
   entryId: string,
 ): RscDevBundle | undefined {
-  return build.bundles.find(
+  const direct = build.bundles.find(
     (bundle) =>
       bundle.entryId === entryId ||
-      bundle.entryId.endsWith(entryId) ||
+      bundle.entryId.endsWith(`${path.sep}${entryId}`) ||
       entryBasenameMatches(bundle.entryId, entryId),
+  );
+  if (direct) {
+    return direct;
+  }
+  return build.bundles.find(
+    (bundle) =>
+      bundle.envId === entryId &&
+      path.basename(bundle.entryId) === "runtime-client.js",
   );
 }
 

@@ -1,12 +1,12 @@
 import $ from "../internals/export";
 import uncurryThis from "../internals/function-uncurry-this-clause";
 import fails from "../internals/fails";
-import { ArrayBuffer as _ArrayBuffer, DataView as _DataView } from "../internals/array-buffer";
+import ArrayBufferModule from "../internals/array-buffer";
 import anObject from "../internals/an-object";
 import toAbsoluteIndex from "../internals/to-absolute-index";
 import toLength from "../internals/to-length";
-var ArrayBuffer = _ArrayBuffer;
-var DataView = _DataView;
+var ArrayBuffer = ArrayBufferModule.ArrayBuffer;
+var DataView = ArrayBufferModule.DataView;
 var DataViewPrototype = DataView.prototype;
 var nativeArrayBufferSlice = uncurryThis(ArrayBuffer.prototype.slice);
 var getUint8 = uncurryThis(DataViewPrototype.getUint8);

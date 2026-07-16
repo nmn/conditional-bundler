@@ -1,4 +1,4 @@
 import "../../modules/es.symbol.species";
-import { f as _f } from "../../internals/well-known-symbol-wrapped";
-const _cjs_default = _f('species');
+import WrappedWellKnownSymbolModule from "../../internals/well-known-symbol-wrapped";
+const _cjs_default = WrappedWellKnownSymbolModule.f('species');
 export default _cjs_default;

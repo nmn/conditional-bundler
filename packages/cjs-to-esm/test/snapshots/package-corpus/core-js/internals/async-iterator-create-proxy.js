@@ -5,7 +5,7 @@ import create from "../internals/object-create";
 import createNonEnumerableProperty from "../internals/create-non-enumerable-property";
 import defineBuiltIns from "../internals/define-built-ins";
 import wellKnownSymbol from "../internals/well-known-symbol";
-import { set as _set, getterFor as _getterFor } from "../internals/internal-state";
+import InternalStateModule from "../internals/internal-state";
 import getBuiltIn from "../internals/get-built-in";
 import getMethod from "../internals/get-method";
 import AsyncIteratorPrototype from "../internals/async-iterator-prototype";
@@ -14,10 +14,10 @@ var Promise = getBuiltIn('Promise');
 var TO_STRING_TAG = wellKnownSymbol('toStringTag');
 var ASYNC_ITERATOR_HELPER = 'AsyncIteratorHelper';
 var WRAP_FOR_VALID_ASYNC_ITERATOR = 'WrapForValidAsyncIterator';
-var setInternalState = _set;
+var setInternalState = InternalStateModule.set;
 var createAsyncIteratorProxyPrototype = function (IS_ITERATOR) {
   var IS_GENERATOR = !IS_ITERATOR;
-  var getInternalState = _getterFor(IS_ITERATOR ? WRAP_FOR_VALID_ASYNC_ITERATOR : ASYNC_ITERATOR_HELPER);
+  var getInternalState = InternalStateModule.getterFor(IS_ITERATOR ? WRAP_FOR_VALID_ASYNC_ITERATOR : ASYNC_ITERATOR_HELPER);
   var getStateOrEarlyExit = function (that) {
     var stateCompletion = perform(function () {
       return getInternalState(that);

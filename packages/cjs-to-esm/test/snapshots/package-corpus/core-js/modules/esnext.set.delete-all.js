@@ -1,7 +1,7 @@
 import $ from "../internals/export";
 import aSet from "../internals/a-set";
-import { remove as _remove } from "../internals/set-helpers";
-var remove = _remove;
+import _cjs_import from "../internals/set-helpers";
+var remove = _cjs_import.remove;
 
 // `Set.prototype.deleteAll` method
 // https://github.com/tc39/proposal-collection-methods

@@ -1,10 +1,10 @@
-import { _DJB2Object } from "./Hashing";
-import { Log as _Log } from "./Log";
-import { _cloneObject } from "./SafeJs";
+import Hashing_1 from "./Hashing";
+import Log_1 from "./Log";
+import SafeJs_1 from "./SafeJs";
 export function _normalizeUser(original, options, fallbackEnvironment) {
-  const copy = (0, _cloneObject)('StatsigUser', original);
+  const copy = (0, SafeJs_1._cloneObject)('StatsigUser', original);
   if (copy == null) {
-    _Log.error('Failed to clone user');
+    Log_1.Log.error('Failed to clone user');
     return {
       statsigEnvironment: undefined
     };
@@ -19,7 +19,7 @@ export function _normalizeUser(original, options, fallbackEnvironment) {
   return copy;
 }
 export function _getFullUserHash(user) {
-  return user ? (0, _DJB2Object)(user) : null;
+  return user ? (0, Hashing_1._DJB2Object)(user) : null;
 }
 export function _getUnitIDFromUser(user, idType) {
   var _a, _b, _c;

@@ -1,7 +1,10 @@
 import isStream from "is-stream";
-import { MESSAGE as _MESSAGE } from "triple-beam";
+import _cjs_import from "triple-beam";
 import * as os from "node:os";
 import TransportStream from "winston-transport";
+const {
+  MESSAGE
+} = _cjs_import;
 /**
  * Transport for outputting to any arbitrary stream.
  * @type {Stream}
@@ -42,7 +45,7 @@ const _cjs_default = class Stream extends TransportStream {
       }
       return;
     }
-    this._stream.write(`${info[_MESSAGE]}${this.eol}`);
+    this._stream.write(`${info[MESSAGE]}${this.eol}`);
     if (callback) {
       callback(); // eslint-disable-line callback-return
     }

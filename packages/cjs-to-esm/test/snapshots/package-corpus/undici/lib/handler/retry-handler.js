@@ -1,7 +1,18 @@
 import * as assert from "node:assert";
-import { kRetryHandlerDefaultRetry as _kRetryHandlerDefaultRetry } from "../core/symbols";
-import { RequestRetryError as _RequestRetryError } from "../core/errors";
-import { isDisturbed as _isDisturbed, parseRangeHeader as _parseRangeHeader, wrapRequestBody as _wrapRequestBody } from "../core/util";
+import _cjs_import from "../core/symbols";
+import _cjs_import2 from "../core/errors";
+import _cjs_import3 from "../core/util";
+const {
+  kRetryHandlerDefaultRetry
+} = _cjs_import;
+const {
+  RequestRetryError
+} = _cjs_import2;
+const {
+  isDisturbed,
+  parseRangeHeader,
+  wrapRequestBody
+} = _cjs_import3;
 function calculateRetryAfterHeader(retryAfter) {
   const retryTime = new Date(retryAfter).getTime();
   return isNaN(retryTime) ? 0 : retryTime - Date.now();
@@ -71,11 +82,11 @@ class RetryHandler {
     this.handler = handler;
     this.opts = {
       ...dispatchOpts,
-      body: _wrapRequestBody(opts.body)
+      body: wrapRequestBody(opts.body)
     };
     this.retryOpts = {
       throwOnError: throwOnError ?? true,
-      retry: retryFn ?? RetryHandler[_kRetryHandlerDefaultRetry],
+      retry: retryFn ?? RetryHandler[kRetryHandlerDefaultRetry],
       retryAfter: retryAfter ?? true,
       maxTimeout: maxTimeout ?? 30 * 1000,
       // 30s,
@@ -111,7 +122,7 @@ class RetryHandler {
       }
       return;
     }
-    if (_isDisturbed(this.opts.body)) {
+    if (isDisturbed(this.opts.body)) {
       this.headersSent = true;
       this.handler.onResponseStart?.(this.controllerProxy, statusCode, headers, statusMessage);
       return;
@@ -159,7 +170,7 @@ class RetryHandler {
   onRequestUpgrade(_controller, statusCode, headers, socket) {
     this.handler.onRequestUpgrade?.(this.controllerProxy, statusCode, headers, socket);
   }
-  static [_kRetryHandlerDefaultRetry](err, {
+  static [kRetryHandlerDefaultRetry](err, {
     state,
     opts
   }, cb) {
@@ -222,7 +233,7 @@ class RetryHandler {
     this.statusCode = statusCode;
     this.headers = headers;
     if (statusCode >= 300) {
-      const err = new _RequestRetryError('Request failed', statusCode, {
+      const err = new RequestRetryError('Request failed', statusCode, {
         headers,
         data: {
           count: this.retryCount
@@ -239,18 +250,18 @@ class RetryHandler {
       // should not be retried because it would result in downstream
       // wrongly concatenate multiple responses.
       if (statusCode !== 206 && (this.start > 0 || statusCode !== 200)) {
-        throw new _RequestRetryError('server does not support the range header and the payload was partially consumed', statusCode, {
+        throw new RequestRetryError('server does not support the range header and the payload was partially consumed', statusCode, {
           headers,
           data: {
             count: this.retryCount
           }
         });
       }
-      const contentRange = _parseRangeHeader(headers['content-range']);
+      const contentRange = parseRangeHeader(headers['content-range']);
       // If no content range
       if (!contentRange) {
         // We always throw here as we want to indicate that we entred unexpected path
-        throw new _RequestRetryError('Content-Range mismatch', statusCode, {
+        throw new RequestRetryError('Content-Range mismatch', statusCode, {
           headers,
           data: {
             count: this.retryCount
@@ -261,7 +272,7 @@ class RetryHandler {
       // Let's start with a weak etag check
       if (this.etag != null && this.etag !== headers.etag) {
         // We always throw here as we want to indicate that we entred unexpected path
-        throw new _RequestRetryError('ETag mismatch', statusCode, {
+        throw new RequestRetryError('ETag mismatch', statusCode, {
           headers,
           data: {
             count: this.retryCount
@@ -280,7 +291,7 @@ class RetryHandler {
     if (this.end == null) {
       if (statusCode === 206) {
         // First time we receive 206
-        const range = _parseRangeHeader(headers['content-range']);
+        const range = parseRangeHeader(headers['content-range']);
         if (range == null) {
           this.headersSent = true;
           this.handler.onResponseStart?.(this.controllerProxy, statusCode, headers, statusMessage);
@@ -316,7 +327,7 @@ class RetryHandler {
       this.headersSent = true;
       this.handler.onResponseStart?.(this.controllerProxy, statusCode, headers, statusMessage);
     } else {
-      throw new _RequestRetryError('Request failed', statusCode, {
+      throw new RequestRetryError('Request failed', statusCode, {
         headers,
         data: {
           count: this.retryCount
@@ -340,7 +351,7 @@ class RetryHandler {
       // when we have a finite end position (from Content-Length or Content-Range)
       if (this.end != null && Number.isFinite(this.end)) {
         if (this.start !== this.end + 1) {
-          throw new _RequestRetryError('Content-Range mismatch', this.statusCode, {
+          throw new RequestRetryError('Content-Range mismatch', this.statusCode, {
             headers: this.headers,
             data: {
               count: this.retryCount
@@ -381,7 +392,7 @@ class RetryHandler {
   onResponseError(controller, err) {
     // controller is THIS failed connection (not the proxy): we inspect whether
     // the consumer aborted it to decide retry-vs-propagate.
-    if (controller?.aborted || _isDisturbed(this.opts.body)) {
+    if (controller?.aborted || isDisturbed(this.opts.body)) {
       this.handler.onResponseError?.(this.controllerProxy, err);
       return;
     }

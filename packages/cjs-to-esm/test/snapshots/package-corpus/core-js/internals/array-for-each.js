@@ -1,6 +1,6 @@
-import { forEach as _forEach } from "../internals/array-iteration";
+import _cjs_import from "../internals/array-iteration";
 import arrayMethodIsStrict from "../internals/array-method-is-strict";
-var $forEach = _forEach;
+var $forEach = _cjs_import.forEach;
 var STRICT_METHOD = arrayMethodIsStrict('forEach');
 
 // `Array.prototype.forEach` method implementation

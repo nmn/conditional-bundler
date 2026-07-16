@@ -1,5 +1,5 @@
 import isCallable from "../internals/is-callable";
-import { f as _f } from "../internals/object-define-property";
+import definePropertyModule from "../internals/object-define-property";
 import makeBuiltIn from "../internals/make-built-in";
 import defineGlobalProperty from "../internals/define-global-property";
 const _cjs_default = function (O, key, value, options) {
@@ -13,7 +13,7 @@ const _cjs_default = function (O, key, value, options) {
     try {
       if (!options.unsafe) delete O[key];else if (O[key]) simple = true;
     } catch (error) {/* empty */}
-    if (simple) O[key] = value;else _f(O, key, {
+    if (simple) O[key] = value;else definePropertyModule.f(O, key, {
       value: value,
       enumerable: false,
       configurable: !options.nonConfigurable,

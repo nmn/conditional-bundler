@@ -1,10 +1,14 @@
-import { Writable as _Writable } from "readable-stream";
+import _cjs_import from "readable-stream";
+const {
+  Writable
+} = _cjs_import;
+
 /**
  * TODO: add class description.
  * @type {ExceptionStream}
  * @extends {Writable}
  */
-const _cjs_default = class ExceptionStream extends _Writable {
+const _cjs_default = class ExceptionStream extends Writable {
   /**
    * Constructor function for the ExceptionStream responsible for wrapping a
    * TransportStream; only allowing writes of `info` objects with

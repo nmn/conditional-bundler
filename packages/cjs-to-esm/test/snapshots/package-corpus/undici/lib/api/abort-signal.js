@@ -1,12 +1,18 @@
-import { addAbortListener as _addAbortListener } from "../core/util";
-import { RequestAbortedError as _RequestAbortedError } from "../core/errors";
+import _cjs_import from "../core/util";
+import _cjs_import2 from "../core/errors";
+const {
+  addAbortListener
+} = _cjs_import;
+const {
+  RequestAbortedError
+} = _cjs_import2;
 const kListener = Symbol('kListener');
 const kSignal = Symbol('kSignal');
 function abort(self) {
   if (self.abort) {
     self.abort(self[kSignal]?.reason);
   } else {
-    self.reason = self[kSignal]?.reason ?? new _RequestAbortedError();
+    self.reason = self[kSignal]?.reason ?? new RequestAbortedError();
   }
   removeSignal(self);
 }
@@ -25,7 +31,7 @@ function addSignal(self, signal) {
   self[kListener] = () => {
     abort(self);
   };
-  _addAbortListener(self[kSignal], self[kListener]);
+  addAbortListener(self[kSignal], self[kListener]);
 }
 function removeSignal(self) {
   if (!self[kSignal]) {

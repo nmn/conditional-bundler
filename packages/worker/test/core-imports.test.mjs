@@ -3,19 +3,59 @@ import path from "node:path";
 const pkgRoot = "/fixture";
 const defaultFilePath = path.posix.join(pkgRoot, "src/index.js");
 
+const fileTarget = (relativePath) => ({
+  kind: "file",
+  moduleId: `fixture@0.0.0::${relativePath}`,
+  canonicalPath: `fixture@0.0.0::${relativePath}`,
+});
+
 async function transform(code, filePath = defaultFilePath, root = pkgRoot) {
-  const { transformWithCore } = await import("../dist/transform/core.js");
+  const { scanImportRequests, transformWithCore } =
+    await import("../dist/transform/core.js");
+  const moduleIdentity = `fixture@0.0.0::${path.posix.relative(root, filePath)}`;
+  const input = {
+    code,
+    moduleIdentity,
+    canonicalPath: moduleIdentity,
+    realPath: filePath,
+    pkg: { name: "fixture", version: "0.0.0", root },
+    syntax: { jsx: false, ts: false },
+    envs: ["browser"],
+  };
   return transformWithCore(
     {
-      code,
-      realPath: filePath,
-      pkg: { name: "fixture", version: "0.0.0", root },
-      syntax: { jsx: false, ts: false },
-      envs: ["browser"],
+      ...input,
+      resolvedImports: resolveRequests(
+        scanImportRequests(input),
+        filePath,
+        root,
+      ),
     },
     {
       importAttrAllow: ["json"],
     },
+  );
+}
+
+function resolveRequests(requests, filePath, root) {
+  return Object.fromEntries(
+    requests.map(({ key, request }) => {
+      const relative = request.startsWith(".")
+        ? path.posix.relative(
+            root,
+            path.posix.resolve(path.posix.dirname(filePath), request),
+          )
+        : request;
+      const canonicalPath = `fixture@0.0.0::${relative}`;
+      return [
+        key,
+        {
+          target: { kind: "file", moduleId: canonicalPath, canonicalPath },
+          type: "javascript",
+          intent: "module",
+        },
+      ];
+    }),
   );
 }
 
@@ -50,8 +90,7 @@ test("records import use ranges", async () => {
       expect.objectContaining({
         request: "./dep.js",
         source: "src/dep.js",
-        moduleId: "fixture@0.0.0::src/dep.js",
-        external: false,
+        target: fileTarget("src/dep.js"),
         kind: "value",
         isNamespace: false,
         isDefault: false,
@@ -82,8 +121,7 @@ const ji19ybwd_value = ji19ybwd_foo;"
         condition: "COND_A",
         request: "./dep.js",
         source: "src/dep.js",
-        moduleId: "fixture@0.0.0::src/dep.js",
-        external: false,
+        target: fileTarget("src/dep.js"),
       }),
     ],
     exportsLocal: [{ exported: "value", kind: "var", local: "value" }],
@@ -92,8 +130,7 @@ const ji19ybwd_value = ji19ybwd_foo;"
         condition: "COND_A",
         request: "./dep.js",
         source: "src/dep.js",
-        moduleId: "fixture@0.0.0::src/dep.js",
-        external: false,
+        target: fileTarget("src/dep.js"),
       }),
     ],
   });
@@ -119,12 +156,10 @@ const ji19ybwd_value = ji19ybwd_foo;"
         condition: "COND_A",
         request: "./dep.js",
         source: "src/dep.js",
-        moduleId: "fixture@0.0.0::src/dep.js",
+        target: fileTarget("src/dep.js"),
         elseRequest: "./alt.js",
         elseSource: "src/alt.js",
-        elseModuleId: "fixture@0.0.0::src/alt.js",
-        external: false,
-        elseExternal: false,
+        elseTarget: fileTarget("src/alt.js"),
       }),
     ],
     exportsLocal: [{ exported: "value", kind: "var", local: "value" }],
@@ -147,8 +182,7 @@ test("marks namespace dynamic usage", async () => {
         namespaceUsage: "dynamic",
         request: "./dep.js",
         source: "src/dep.js",
-        moduleId: "fixture@0.0.0::src/dep.js",
-        external: false,
+        target: fileTarget("src/dep.js"),
       }),
     ],
   });
@@ -172,8 +206,7 @@ test("captures namespace import static usage", async () => {
         namespaceUsage: "static",
         request: "./dep.js",
         source: "src/dep.js",
-        moduleId: "fixture@0.0.0::src/dep.js",
-        external: false,
+        target: fileTarget("src/dep.js"),
         specifiers: [
           { imported: "foo", local: "ns", useRanges: [] },
           { imported: "bar", local: "ns", useRanges: [] },

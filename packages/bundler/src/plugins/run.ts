@@ -5,9 +5,10 @@ import type {
   BeforeCombineContext,
   BuildEndContext,
   BuildStartContext,
+  GenerateBundleResourcesContext,
   BundlePlanDraft,
-  LoadContext,
-  LoadResult,
+  DocumentTransformContext,
+  DocumentTransformResult,
   NormalizedPlugin,
   ResolveImportContext,
   ResolveImportResult,
@@ -40,13 +41,13 @@ export async function runResolveImport(
   return undefined;
 }
 
-export async function runLoad(
+export async function runTransformDocument(
   plugins: NormalizedPlugin[],
   envId: string,
-  context: LoadContext,
-): Promise<LoadResult | undefined> {
+  context: DocumentTransformContext,
+): Promise<DocumentTransformResult | undefined> {
   for (const plugin of plugins) {
-    const hook = getEnvValue(plugin.load, envId);
+    const hook = getEnvValue(plugin.transformDocument, envId);
     if (!hook) {
       continue;
     }
@@ -127,5 +128,14 @@ export async function runBuildEnd(
 ): Promise<void> {
   for (const plugin of plugins) {
     await plugin.buildEnd?.(context);
+  }
+}
+
+export async function runGenerateBundleResources(
+  plugins: NormalizedPlugin[],
+  context: GenerateBundleResourcesContext,
+): Promise<void> {
+  for (const plugin of plugins) {
+    await plugin.generateBundleResources?.(context);
   }
 }

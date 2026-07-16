@@ -1,8 +1,8 @@
 import $ from "../internals/export";
-import { includes as _includes } from "../internals/array-includes";
+import _cjs_import from "../internals/array-includes";
 import fails from "../internals/fails";
 import addToUnscopables from "../internals/add-to-unscopables";
-var $includes = _includes;
+var $includes = _cjs_import.includes;
 // FF99+ bug
 var BROKEN_ON_SPARSE = fails(function () {
   // eslint-disable-next-line es/no-array-prototype-includes -- detection

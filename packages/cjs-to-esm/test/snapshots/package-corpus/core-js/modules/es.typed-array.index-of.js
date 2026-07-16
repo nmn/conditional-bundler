@@ -1,8 +1,8 @@
-import { aTypedArray as _aTypedArray, exportTypedArrayMethod as _exportTypedArrayMethod } from "../internals/array-buffer-view-core";
-import { indexOf as _indexOf } from "../internals/array-includes";
-var $indexOf = _indexOf;
-var aTypedArray = _aTypedArray;
-var exportTypedArrayMethod = _exportTypedArrayMethod;
+import ArrayBufferViewCore from "../internals/array-buffer-view-core";
+import _cjs_import from "../internals/array-includes";
+var $indexOf = _cjs_import.indexOf;
+var aTypedArray = ArrayBufferViewCore.aTypedArray;
+var exportTypedArrayMethod = ArrayBufferViewCore.exportTypedArrayMethod;
 
 // `%TypedArray%.prototype.indexOf` method
 // https://tc39.es/ecma262/#sec-%typedarray%.prototype.indexof

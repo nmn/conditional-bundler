@@ -1,19 +1,19 @@
 import uncurryThis from "../internals/function-uncurry-this";
 import defineBuiltIns from "../internals/define-built-ins";
-import { getWeakData as _getWeakData } from "../internals/internal-metadata";
+import _cjs_import from "../internals/internal-metadata";
 import anInstance from "../internals/an-instance";
 import anObject from "../internals/an-object";
 import isNullOrUndefined from "../internals/is-null-or-undefined";
 import isObject from "../internals/is-object";
 import iterate from "../internals/iterate";
-import { find as _find, findIndex as _findIndex } from "../internals/array-iteration";
+import ArrayIterationModule from "../internals/array-iteration";
 import hasOwn from "../internals/has-own-property";
-import { set as _set, getterFor as _getterFor } from "../internals/internal-state";
-var getWeakData = _getWeakData;
-var setInternalState = _set;
-var internalStateGetterFor = _getterFor;
-var find = _find;
-var findIndex = _findIndex;
+import InternalStateModule from "../internals/internal-state";
+var getWeakData = _cjs_import.getWeakData;
+var setInternalState = InternalStateModule.set;
+var internalStateGetterFor = InternalStateModule.getterFor;
+var find = ArrayIterationModule.find;
+var findIndex = ArrayIterationModule.findIndex;
 var splice = uncurryThis([].splice);
 var id = 0;
 

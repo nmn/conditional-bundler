@@ -1,7 +1,7 @@
 import $ from "../internals/export";
-import { findLastIndex as _findLastIndex } from "../internals/array-iteration-from-last";
+import _cjs_import from "../internals/array-iteration-from-last";
 import addToUnscopables from "../internals/add-to-unscopables";
-var $findLastIndex = _findLastIndex;
+var $findLastIndex = _cjs_import.findLastIndex;
 // `Array.prototype.findLastIndex` method
 // https://tc39.es/ecma262/#sec-array.prototype.findlastindex
 $({

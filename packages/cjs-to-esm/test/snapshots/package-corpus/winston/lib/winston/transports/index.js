@@ -91,7 +91,3 @@ if (!__cjs_default__) {
   __cjs_cache__.set("winston@3.19.0::lib/winston/transports/index.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
-export const Console = __cjs_default__["Console"];
-export const File = __cjs_default__["File"];
-export const Http = __cjs_default__["Http"];
-export const Stream = __cjs_default__["Stream"];

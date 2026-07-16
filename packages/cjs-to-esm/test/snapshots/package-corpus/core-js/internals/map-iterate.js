@@ -1,8 +1,8 @@
 import uncurryThis from "../internals/function-uncurry-this";
 import iterateSimple from "../internals/iterate-simple";
-import { Map as _Map, proto as _proto } from "../internals/map-helpers";
-var Map = _Map;
-var MapPrototype = _proto;
+import MapHelpers from "../internals/map-helpers";
+var Map = MapHelpers.Map;
+var MapPrototype = MapHelpers.proto;
 var forEach = uncurryThis(MapPrototype.forEach);
 var entries = uncurryThis(MapPrototype.entries);
 var next = entries(new Map()).next;

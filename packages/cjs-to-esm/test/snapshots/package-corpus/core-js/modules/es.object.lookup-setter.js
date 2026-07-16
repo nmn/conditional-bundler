@@ -4,8 +4,8 @@ import FORCED from "../internals/object-prototype-accessors-forced";
 import toObject from "../internals/to-object";
 import toPropertyKey from "../internals/to-property-key";
 import getPrototypeOf from "../internals/object-get-prototype-of";
-import { f as _f } from "../internals/object-get-own-property-descriptor";
-var getOwnPropertyDescriptor = _f;
+import _cjs_import from "../internals/object-get-own-property-descriptor";
+var getOwnPropertyDescriptor = _cjs_import.f;
 
 // `Object.prototype.__lookupSetter__` method
 // https://tc39.es/ecma262/#sec-object.prototype.__lookupSetter__

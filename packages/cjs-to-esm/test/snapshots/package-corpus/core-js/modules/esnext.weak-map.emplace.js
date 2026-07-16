@@ -1,9 +1,9 @@
 import $ from "../internals/export";
 import aWeakMap from "../internals/a-weak-map";
-import { get as _get, has as _has, set as _set } from "../internals/weak-map-helpers";
-var get = _get;
-var has = _has;
-var set = _set;
+import WeakMapHelpers from "../internals/weak-map-helpers";
+var get = WeakMapHelpers.get;
+var has = WeakMapHelpers.has;
+var set = WeakMapHelpers.set;
 
 // `WeakMap.prototype.emplace` method
 // https://github.com/tc39/proposal-upsert

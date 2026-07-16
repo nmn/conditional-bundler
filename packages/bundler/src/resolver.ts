@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
+import { builtinModules } from "node:module";
 import { createHash } from "node:crypto";
 import {
   findPkgRoot,
@@ -10,6 +11,8 @@ import {
 import { runResolveImport } from "./plugins/run.js";
 import type { BundlerConfig } from "./config.js";
 import type {
+  ImportIntent,
+  ModuleType,
   ModuleResolution,
   NormalizedPlugin,
   ResolveImportContext,
@@ -24,6 +27,7 @@ export type Resolver = (
   envId: string,
   kind?: ResolveImportKind,
   importAttributes?: Record<string, string>,
+  importerMeta?: Record<string, unknown>,
 ) => Promise<ModuleResolution>;
 
 type ResolverOptions = {
@@ -69,6 +73,9 @@ type AliasIdentityInput = {
 };
 
 const extensions = [".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs", ".json"];
+const runtimeBuiltins = new Set(
+  builtinModules.flatMap((name) => [name, `node:${name}`]),
+);
 
 export function createResolver(options: ResolverOptions): Resolver {
   const aliasState = createAliasState();
@@ -79,6 +86,7 @@ export function createResolver(options: ResolverOptions): Resolver {
     envId: string,
     kind: ResolveImportKind = "import",
     importAttributes,
+    importerMeta,
   ) => {
     const envConfig = options.config.envs[envId];
     if (!envConfig) {
@@ -93,7 +101,9 @@ export function createResolver(options: ResolverOptions): Resolver {
       conditions: envConfig.conditions,
       target: envConfig.target,
       kind,
+      intent: resolveImportIntent(kind, importAttributes),
       importAttributes,
+      importerMeta,
       resolveDefault: async () =>
         resolveDefault(fromFilePath, source, {
           conditions: envConfig.conditions,
@@ -111,29 +121,60 @@ export function createResolver(options: ResolverOptions): Resolver {
         ? await context.resolveDefault()
         : pluginResult;
 
-    if (resolved === null) {
+    if (resolved == null || typeof resolved !== "object") {
+      throw new Error(
+        `Resolver for '${source}' returned ${String(resolved)}. Return undefined to decline or { preserve: true } to preserve a runtime dependency.`,
+      );
+    }
+
+    if ("preserve" in resolved) {
       const pkgRoot = findPkgRoot(fromFilePath) ?? path.dirname(fromFilePath);
       return {
         id: source,
-        moduleIdentity: `external::${source}`,
+        moduleIdentity: `runtime::${source}`,
         filePath: source,
         pkg: readPkgSafe(pkgRoot),
-        external: true,
+        target: { kind: "runtime", specifier: source },
+        type: "javascript",
+        intent: context.intent,
       };
     }
 
+    if ("virtual" in resolved || "code" in resolved || "source" in resolved) {
+      throw new Error(
+        `Resolver for '${source}' attempted to return virtual or source-backed module data. Resolutions must point to an existing regular file.`,
+      );
+    }
+
     const filePath = path.resolve(resolved.filePath);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(filePath);
+    } catch {
+      throw new Error(
+        `Resolver returned missing file '${filePath}' for '${source}' from '${fromFilePath}'.`,
+      );
+    }
+    if (!stat.isFile()) {
+      throw new Error(
+        `Resolver must return a regular file, received '${filePath}' for '${source}'.`,
+      );
+    }
     const pkgRoot = findPkgRoot(filePath) ?? path.dirname(filePath);
     const pkg = readPkg(pkgRoot);
+    const canonicalPath = packagePathIdentity(pkg, filePath);
     return {
       id: resolved.id,
-      moduleIdentity:
-        resolved.moduleIdentity ??
-        (resolved.virtual ? resolved.id : packagePathIdentity(pkg, filePath)),
+      moduleIdentity: resolved.moduleIdentity ?? canonicalPath,
       filePath,
       pkg,
-      external: false,
-      virtual: resolved.virtual,
+      target: {
+        kind: "file",
+        moduleId: resolved.moduleIdentity ?? canonicalPath,
+        canonicalPath,
+      },
+      type: resolved.type ?? inferModuleType(filePath),
+      intent: resolved.intent ?? context.intent,
       meta: resolved.meta,
     };
   };
@@ -163,12 +204,41 @@ export function resolveDefault(
 ): Promise<ResolveImportResult> {
   const resolvedPath = resolvePath(fromFilePath, source, options);
   if (resolvedPath == null) {
-    return Promise.resolve(null);
+    if (runtimeBuiltins.has(source)) {
+      return Promise.resolve({ preserve: true });
+    }
+    throw new Error(
+      `Could not resolve '${source}' from '${fromFilePath}' to an existing regular file. A resolver plugin must return { preserve: true } to keep a runtime dependency.`,
+    );
   }
   return Promise.resolve({
     id: resolvedPath,
     filePath: resolvedPath,
   });
+}
+
+function resolveImportIntent(
+  kind: ResolveImportKind,
+  attributes?: Record<string, string>,
+): ImportIntent {
+  if (kind === "css-url") return "assetPath";
+  const requested = attributes?.type;
+  if (
+    requested === "url" ||
+    requested === "raw" ||
+    requested === "base64" ||
+    requested === "assetPath"
+  ) {
+    return requested;
+  }
+  return "module";
+}
+
+function inferModuleType(filePath: string): ModuleType {
+  const lower = filePath.toLowerCase();
+  if (lower.endsWith(".css")) return "css";
+  if (/\.(?:[cm]?js|jsx|tsx?|mts|cts)$/.test(lower)) return "javascript";
+  return "asset";
 }
 
 function resolvePath(

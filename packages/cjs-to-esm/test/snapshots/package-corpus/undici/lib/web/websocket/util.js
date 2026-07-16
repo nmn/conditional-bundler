@@ -392,21 +392,3 @@ if (!__cjs_default__) {
   __cjs_cache__.set("undici@8.7.0::lib/web/websocket/util.js::env=snapshot::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;
-export const fireEvent = __cjs_default__["fireEvent"];
-export const getURLRecord = __cjs_default__["getURLRecord"];
-export const isClosed = __cjs_default__["isClosed"];
-export const isClosing = __cjs_default__["isClosing"];
-export const isConnecting = __cjs_default__["isConnecting"];
-export const isContinuationFrame = __cjs_default__["isContinuationFrame"];
-export const isControlFrame = __cjs_default__["isControlFrame"];
-export const isEstablished = __cjs_default__["isEstablished"];
-export const isTextBinaryFrame = __cjs_default__["isTextBinaryFrame"];
-export const isValidClientWindowBits = __cjs_default__["isValidClientWindowBits"];
-export const isValidOpcode = __cjs_default__["isValidOpcode"];
-export const isValidStatusCode = __cjs_default__["isValidStatusCode"];
-export const isValidSubprotocol = __cjs_default__["isValidSubprotocol"];
-export const parseExtensions = __cjs_default__["parseExtensions"];
-export const toArrayBuffer = __cjs_default__["toArrayBuffer"];
-export const utf8Decode = __cjs_default__["utf8Decode"];
-export const validateCloseCodeAndReason = __cjs_default__["validateCloseCodeAndReason"];
-export const websocketMessageReceived = __cjs_default__["websocketMessageReceived"];

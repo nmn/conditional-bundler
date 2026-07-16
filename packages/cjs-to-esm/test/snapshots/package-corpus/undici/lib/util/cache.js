@@ -1,4 +1,13 @@
-import { safeHTTPMethods as _safeHTTPMethods, pathHasQueryOrFragment as _pathHasQueryOrFragment, hasSafeIterator as _hasSafeIterator, serializePathWithQuery as _serializePathWithQuery } from "../core/util";
+import _cjs_import from "../core/util";
+const {
+  safeHTTPMethods,
+  pathHasQueryOrFragment,
+  hasSafeIterator
+} = _cjs_import;
+const {
+  serializePathWithQuery
+} = _cjs_import;
+
 /**
  * @param {import('../../types/dispatcher.d.ts').default.DispatchOptions} opts
  */
@@ -7,8 +16,8 @@ function makeCacheKey(opts) {
     throw new Error('opts.origin is undefined');
   }
   let fullPath = opts.path || '/';
-  if (opts.query && !_pathHasQueryOrFragment(fullPath)) {
-    fullPath = _serializePathWithQuery(fullPath, opts.query);
+  if (opts.query && !pathHasQueryOrFragment(fullPath)) {
+    fullPath = serializePathWithQuery(fullPath, opts.query);
   }
   return {
     origin: opts.origin.toString(),
@@ -28,7 +37,7 @@ function normalizeHeaders(opts) {
     headers = {};
   } else if (typeof opts.headers === 'object') {
     headers = {};
-    if (_hasSafeIterator(opts.headers)) {
+    if (hasSafeIterator(opts.headers)) {
       for (const x of opts.headers) {
         if (!Array.isArray(x)) {
           throw new Error('opts.headers is not a valid header map');
@@ -311,8 +320,8 @@ function assertCacheMethods(methods, name = 'CacheMethods') {
     throw new TypeError(`${name} needs to have at least one method`);
   }
   for (const method of methods) {
-    if (!_safeHTTPMethods.includes(method)) {
-      throw new TypeError(`element of ${name}-array needs to be one of following values: ${_safeHTTPMethods.join(', ')}, got ${method}`);
+    if (!safeHTTPMethods.includes(method)) {
+      throw new TypeError(`element of ${name}-array needs to be one of following values: ${safeHTTPMethods.join(', ')}, got ${method}`);
     }
   }
 }

@@ -1,18 +1,30 @@
 import Dispatcher from "./dispatcher";
-import { ClientDestroyedError as _ClientDestroyedError, ClientClosedError as _ClientClosedError, InvalidArgumentError as _InvalidArgumentError } from "../core/errors";
-import { kDestroy as _kDestroy, kClose as _kClose, kClosed as _kClosed, kDestroyed as _kDestroyed, kDispatch as _kDispatch } from "../core/symbols";
+import _cjs_import from "../core/errors";
+import _cjs_import2 from "../core/symbols";
+const {
+  ClientDestroyedError,
+  ClientClosedError,
+  InvalidArgumentError
+} = _cjs_import;
+const {
+  kDestroy,
+  kClose,
+  kClosed,
+  kDestroyed,
+  kDispatch
+} = _cjs_import2;
 const kOnDestroyed = Symbol('onDestroyed');
 const kOnClosed = Symbol('onClosed');
 const kWebSocketOptions = Symbol('webSocketOptions');
 class DispatcherBase extends Dispatcher {
   /** @type {boolean} */
-  [_kDestroyed] = false;
+  [kDestroyed] = false;
 
   /** @type {Array<Function|null} */
   [kOnDestroyed] = null;
 
   /** @type {boolean} */
-  [_kClosed] = false;
+  [kClosed] = false;
 
   /** @type {Array<Function>|null} */
   [kOnClosed] = null;
@@ -37,12 +49,12 @@ class DispatcherBase extends Dispatcher {
 
   /** @returns {boolean} */
   get destroyed() {
-    return this[_kDestroyed];
+    return this[kDestroyed];
   }
 
   /** @returns {boolean} */
   get closed() {
-    return this[_kClosed];
+    return this[kClosed];
   }
   close(callback) {
     if (callback === undefined) {
@@ -53,14 +65,14 @@ class DispatcherBase extends Dispatcher {
       });
     }
     if (typeof callback !== 'function') {
-      throw new _InvalidArgumentError('invalid callback');
+      throw new InvalidArgumentError('invalid callback');
     }
-    if (this[_kDestroyed]) {
-      const err = new _ClientDestroyedError();
+    if (this[kDestroyed]) {
+      const err = new ClientDestroyedError();
       queueMicrotask(() => callback(err, null));
       return;
     }
-    if (this[_kClosed]) {
+    if (this[kClosed]) {
       if (this[kOnClosed]) {
         this[kOnClosed].push(callback);
       } else {
@@ -68,7 +80,7 @@ class DispatcherBase extends Dispatcher {
       }
       return;
     }
-    this[_kClosed] = true;
+    this[kClosed] = true;
     this[kOnClosed] ??= [];
     this[kOnClosed].push(callback);
     const onClosed = () => {
@@ -80,7 +92,7 @@ class DispatcherBase extends Dispatcher {
     };
 
     // Should not error.
-    this[_kClose]().then(() => this.destroy()).then(() => queueMicrotask(onClosed));
+    this[kClose]().then(() => this.destroy()).then(() => queueMicrotask(onClosed));
   }
   destroy(err, callback) {
     if (typeof err === 'function') {
@@ -95,9 +107,9 @@ class DispatcherBase extends Dispatcher {
       });
     }
     if (typeof callback !== 'function') {
-      throw new _InvalidArgumentError('invalid callback');
+      throw new InvalidArgumentError('invalid callback');
     }
-    if (this[_kDestroyed]) {
+    if (this[kDestroyed]) {
       if (this[kOnDestroyed]) {
         this[kOnDestroyed].push(callback);
       } else {
@@ -106,9 +118,9 @@ class DispatcherBase extends Dispatcher {
       return;
     }
     if (!err) {
-      err = new _ClientDestroyedError();
+      err = new ClientDestroyedError();
     }
-    this[_kDestroyed] = true;
+    this[kDestroyed] = true;
     this[kOnDestroyed] ??= [];
     this[kOnDestroyed].push(callback);
     const onDestroyed = () => {
@@ -120,26 +132,26 @@ class DispatcherBase extends Dispatcher {
     };
 
     // Should not error.
-    this[_kDestroy](err).then(() => queueMicrotask(onDestroyed));
+    this[kDestroy](err).then(() => queueMicrotask(onDestroyed));
   }
   dispatch(opts, handler) {
     if (!handler || typeof handler !== 'object') {
-      throw new _InvalidArgumentError('handler must be an object');
+      throw new InvalidArgumentError('handler must be an object');
     }
     try {
       if (!opts || typeof opts !== 'object') {
-        throw new _InvalidArgumentError('opts must be an object.');
+        throw new InvalidArgumentError('opts must be an object.');
       }
       if (opts.dispatcher) {
-        throw new _InvalidArgumentError('opts.dispatcher is not supported by instance methods. Pass opts.dispatcher to the top-level undici functions or call the dispatcher instance method directly.');
+        throw new InvalidArgumentError('opts.dispatcher is not supported by instance methods. Pass opts.dispatcher to the top-level undici functions or call the dispatcher instance method directly.');
       }
-      if (this[_kDestroyed] || this[kOnDestroyed]) {
-        throw new _ClientDestroyedError();
+      if (this[kDestroyed] || this[kOnDestroyed]) {
+        throw new ClientDestroyedError();
       }
-      if (this[_kClosed]) {
-        throw new _ClientClosedError();
+      if (this[kClosed]) {
+        throw new ClientClosedError();
       }
-      return this[_kDispatch](opts, handler);
+      return this[kDispatch](opts, handler);
     } catch (err) {
       if (typeof handler.onResponseError !== 'function') {
         throw err;

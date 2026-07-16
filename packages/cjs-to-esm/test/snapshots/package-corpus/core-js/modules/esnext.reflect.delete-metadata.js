@@ -1,9 +1,9 @@
 import $ from "../internals/export";
-import { toKey as _toKey, getMap as _getMap, store as _store } from "../internals/reflect-metadata";
+import ReflectMetadataModule from "../internals/reflect-metadata";
 import anObject from "../internals/an-object";
-var toMetadataKey = _toKey;
-var getOrCreateMetadataMap = _getMap;
-var store = _store;
+var toMetadataKey = ReflectMetadataModule.toKey;
+var getOrCreateMetadataMap = ReflectMetadataModule.getMap;
+var store = ReflectMetadataModule.store;
 
 // `Reflect.deleteMetadata` method
 // https://github.com/rbuckton/reflect-metadata

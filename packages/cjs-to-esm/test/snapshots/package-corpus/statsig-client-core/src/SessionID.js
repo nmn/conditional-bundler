@@ -1,13 +1,13 @@
-import { _getStorageKey } from "./CacheKey";
-import { Log as _Log } from "./Log";
-import { _setObjectInStorage, _getObjectFromStorage } from "./StorageProvider";
-import { getUUID as _getUUID } from "./UUID";
-import { _subscribeToVisiblityChanged } from "./VisibilityObserving";
+import CacheKey_1 from "./CacheKey";
+import Log_1 from "./Log";
+import StorageProvider_1 from "./StorageProvider";
+import UUID_1 from "./UUID";
+import VisibilityObserving_1 from "./VisibilityObserving";
 const MAX_SESSION_IDLE_TIME = 30 * 60 * 1000; // 30 minutes
 const MAX_SESSION_AGE = 4 * 60 * 60 * 1000; // 4 hours
 const PERSIST_THROTTLE_MS = 15000;
 const SESSION_MAP = {};
-(0, _subscribeToVisiblityChanged)(visibility => {
+(0, VisibilityObserving_1._subscribeToVisiblityChanged)(visibility => {
   if (visibility === 'background') {
     Object.values(SESSION_MAP).forEach(session => _persistNow(session));
   }
@@ -87,14 +87,14 @@ function _hasRunTooLong({
   return Date.now() - startTime > MAX_SESSION_AGE;
 }
 function _getSessionIDStorageKey(sdkKey) {
-  return `statsig.session_id.${(0, _getStorageKey)(sdkKey)}`;
+  return `statsig.session_id.${(0, CacheKey_1._getStorageKey)(sdkKey)}`;
 }
 function _persistNow(session) {
   try {
-    (0, _setObjectInStorage)(session.storageKey, session.data);
+    (0, StorageProvider_1._setObjectInStorage)(session.storageKey, session.data);
     session.lastPersistedAt = Date.now();
   } catch (e) {
-    _Log.warn('Failed to save SessionID');
+    Log_1.Log.warn('Failed to save SessionID');
   }
 }
 function _persistThrottled(session) {
@@ -104,7 +104,7 @@ function _persistThrottled(session) {
   }
 }
 function _loadSessionFromStorage(storageKey) {
-  const data = (0, _getObjectFromStorage)(storageKey);
+  const data = (0, StorageProvider_1._getObjectFromStorage)(storageKey);
   return data;
 }
 function _loadOrCreateSharedSession(sdkKey) {
@@ -127,7 +127,7 @@ function _loadOrCreateSharedSession(sdkKey) {
 }
 function _newSessionData() {
   return {
-    sessionID: (0, _getUUID)(),
+    sessionID: (0, UUID_1.getUUID)(),
     startTime: Date.now(),
     lastUpdate: Date.now()
   };

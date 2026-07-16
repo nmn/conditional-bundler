@@ -1,4 +1,4 @@
-import { enumToMap as _enumToMap } from "./utils";
+import utils_1 from "./utils";
 // Emums
 const _ERROR = {
   OK: 0,
@@ -300,7 +300,7 @@ const _METHODS_RTSP = [_METHODS.OPTIONS, _METHODS.DESCRIBE, _METHODS.ANNOUNCE, _
 // For AirPlay
 _METHODS.GET, _METHODS.POST];
 export { _METHODS_RTSP as METHODS_RTSP };
-const _METHOD_MAP = (0, _enumToMap)(_METHODS);
+const _METHOD_MAP = (0, utils_1.enumToMap)(_METHODS);
 export { _METHOD_MAP as METHOD_MAP };
 const _H_METHOD_MAP = Object.fromEntries(Object.entries(_METHODS).filter(([k]) => k.startsWith('H')));
 export { _H_METHOD_MAP as H_METHOD_MAP };

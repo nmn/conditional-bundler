@@ -1,7 +1,7 @@
-import { PROPER as _PROPER } from "../internals/function-name";
+import _cjs_import from "../internals/function-name";
 import fails from "../internals/fails";
 import whitespaces from "../internals/whitespaces";
-var PROPER_FUNCTION_NAME = _PROPER;
+var PROPER_FUNCTION_NAME = _cjs_import.PROPER;
 var non = '\u200B\u0085\u180E';
 
 // check that a method works with the correct list

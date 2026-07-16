@@ -1,6 +1,10 @@
 import * as os from "node:os";
-import { LEVEL as _LEVEL, MESSAGE as _MESSAGE } from "triple-beam";
+import _cjs_import from "triple-beam";
 import TransportStream from "winston-transport";
+const {
+  LEVEL,
+  MESSAGE
+} = _cjs_import;
 /**
  * Transport for outputting to the console.
  * @type {Console}
@@ -41,26 +45,26 @@ const _cjs_default = class Console extends TransportStream {
     setImmediate(() => this.emit('logged', info));
 
     // Remark: what if there is no raw...?
-    if (this.stderrLevels[info[_LEVEL]]) {
+    if (this.stderrLevels[info[LEVEL]]) {
       if (console._stderr && !this.forceConsole) {
         // Node.js maps `process.stderr` to `console._stderr`.
-        console._stderr.write(`${info[_MESSAGE]}${this.eol}`);
+        console._stderr.write(`${info[MESSAGE]}${this.eol}`);
       } else {
         // console.error adds a newline
-        this._consoleError(info[_MESSAGE]);
+        this._consoleError(info[MESSAGE]);
       }
       if (callback) {
         callback(); // eslint-disable-line callback-return
       }
       return;
-    } else if (this.consoleWarnLevels[info[_LEVEL]]) {
+    } else if (this.consoleWarnLevels[info[LEVEL]]) {
       if (console._stderr && !this.forceConsole) {
         // Node.js maps `process.stderr` to `console._stderr`.
         // in Node.js console.warn is an alias for console.error
-        console._stderr.write(`${info[_MESSAGE]}${this.eol}`);
+        console._stderr.write(`${info[MESSAGE]}${this.eol}`);
       } else {
         // console.warn adds a newline
-        this._consoleWarn(info[_MESSAGE]);
+        this._consoleWarn(info[MESSAGE]);
       }
       if (callback) {
         callback(); // eslint-disable-line callback-return
@@ -69,10 +73,10 @@ const _cjs_default = class Console extends TransportStream {
     }
     if (console._stdout && !this.forceConsole) {
       // Node.js maps `process.stdout` to `console._stdout`.
-      console._stdout.write(`${info[_MESSAGE]}${this.eol}`);
+      console._stdout.write(`${info[MESSAGE]}${this.eol}`);
     } else {
       // console.log adds a newline.
-      this._consoleLog(info[_MESSAGE]);
+      this._consoleLog(info[MESSAGE]);
     }
     if (callback) {
       callback(); // eslint-disable-line callback-return

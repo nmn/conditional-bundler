@@ -1,7 +1,7 @@
 import $ from "../internals/export";
-import { filterReject as _filterReject } from "../internals/array-iteration";
+import _cjs_import from "../internals/array-iteration";
 import addToUnscopables from "../internals/add-to-unscopables";
-var $filterReject = _filterReject;
+var $filterReject = _cjs_import.filterReject;
 // `Array.prototype.filterReject` method
 // https://github.com/tc39/proposal-array-filtering
 $({

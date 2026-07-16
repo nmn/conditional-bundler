@@ -2,11 +2,11 @@ import $ from "../internals/export";
 import aCallable from "../internals/a-callable";
 import aWeakMap from "../internals/a-weak-map";
 import aWeakKey from "../internals/a-weak-key";
-import { get as _get, has as _has, set as _set } from "../internals/weak-map-helpers";
+import WeakMapHelpers from "../internals/weak-map-helpers";
 import IS_PURE from "../internals/is-pure";
-var get = _get;
-var has = _has;
-var set = _set;
+var get = WeakMapHelpers.get;
+var has = WeakMapHelpers.has;
+var set = WeakMapHelpers.set;
 var FORCED = IS_PURE || !function () {
   try {
     // eslint-disable-next-line es/no-weak-map, no-throw-literal -- testing

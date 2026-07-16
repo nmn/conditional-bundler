@@ -3,12 +3,12 @@ import fails from "../internals/fails";
 import isCallable from "../internals/is-callable";
 import hasOwn from "../internals/has-own-property";
 import DESCRIPTORS from "../internals/descriptors";
-import { CONFIGURABLE as _CONFIGURABLE } from "../internals/function-name";
+import _cjs_import from "../internals/function-name";
 import inspectSource from "../internals/inspect-source";
-import { enforce as _enforce, get as _get } from "../internals/internal-state";
-var CONFIGURABLE_FUNCTION_NAME = _CONFIGURABLE;
-var enforceInternalState = _enforce;
-var getInternalState = _get;
+import InternalStateModule from "../internals/internal-state";
+var CONFIGURABLE_FUNCTION_NAME = _cjs_import.CONFIGURABLE;
+var enforceInternalState = InternalStateModule.enforce;
+var getInternalState = InternalStateModule.get;
 var $String = String;
 // eslint-disable-next-line es/no-object-defineproperty -- safe
 var defineProperty = Object.defineProperty;

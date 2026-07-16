@@ -1,7 +1,7 @@
 import $ from "../internals/export";
 import call from "../internals/function-call";
 import IS_PURE from "../internals/is-pure";
-import { PROPER as _PROPER, CONFIGURABLE as _CONFIGURABLE } from "../internals/function-name";
+import FunctionName from "../internals/function-name";
 import isCallable from "../internals/is-callable";
 import createIteratorConstructor from "../internals/iterator-create-constructor";
 import getPrototypeOf from "../internals/object-get-prototype-of";
@@ -11,11 +11,11 @@ import createNonEnumerableProperty from "../internals/create-non-enumerable-prop
 import defineBuiltIn from "../internals/define-built-in";
 import wellKnownSymbol from "../internals/well-known-symbol";
 import Iterators from "../internals/iterators";
-import { IteratorPrototype as _IteratorPrototype, BUGGY_SAFARI_ITERATORS as _BUGGY_SAFARI_ITERATORS } from "../internals/iterators-core";
-var PROPER_FUNCTION_NAME = _PROPER;
-var CONFIGURABLE_FUNCTION_NAME = _CONFIGURABLE;
-var IteratorPrototype = _IteratorPrototype;
-var BUGGY_SAFARI_ITERATORS = _BUGGY_SAFARI_ITERATORS;
+import IteratorsCore from "../internals/iterators-core";
+var PROPER_FUNCTION_NAME = FunctionName.PROPER;
+var CONFIGURABLE_FUNCTION_NAME = FunctionName.CONFIGURABLE;
+var IteratorPrototype = IteratorsCore.IteratorPrototype;
+var BUGGY_SAFARI_ITERATORS = IteratorsCore.BUGGY_SAFARI_ITERATORS;
 var ITERATOR = wellKnownSymbol('iterator');
 var KEYS = 'keys';
 var VALUES = 'values';
