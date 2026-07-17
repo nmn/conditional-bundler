@@ -12,28 +12,6 @@ export default function reactRscTransformBabelPlugin(api, options) {
     visitor: {
       Program(programPath, state) {
         const filePath = options.filePath ?? state.filename;
-        if (
-          options.runtimeTemplatePath &&
-          path.resolve(filePath) === path.resolve(options.runtimeTemplatePath)
-        ) {
-          programPath.traverse({
-            StringLiteral(literalPath) {
-              if (literalPath.node.value === "__BUNDLER_RSC_ENDPOINT__") {
-                literalPath.node.value = options.rscEndpoint ?? "/rsc";
-              }
-            },
-          });
-          if (options.clientReferenceEntry) {
-            let request = path
-              .relative(path.dirname(filePath), options.clientReferenceEntry)
-              .split(path.sep)
-              .join("/");
-            if (!request.startsWith(".")) request = `./${request}`;
-            programPath.node.body.unshift(
-              t.exportAllDeclaration(t.stringLiteral(request)),
-            );
-          }
-        }
         const clientId = normalizeClientId(root, filePath);
         const hasUseClient = programPath.node.directives.some(
           (directive) => directive.value.value === "use client",

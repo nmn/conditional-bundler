@@ -1,0 +1,8 @@
+{
+  "__proto__": {
+    "safe": true
+  },
+  "name": "JSON plugin",
+  "offset": -0,
+  "items": [1, null, "three"]
+}

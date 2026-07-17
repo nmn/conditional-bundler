@@ -92,16 +92,29 @@ import type {
   ModuleNode,
   Provider,
   FileRecord,
+  ModuleVariantRecord,
 } from "@bundler/shared";
 
 export type BuildResult = {
   bundles: Array<{
+    id: string;
+    environmentIds: string[];
+    entrypoints: Array<{
+      envId: string;
+      entryId: string;
+      exportMode: "entry" | "dynamic";
+    }>;
     envId: string;
     entryId: string;
     fileName: string;
+    runtimeHash: string;
     exportMode: "entry" | "dynamic";
     mapFileName?: string;
+    modules: string[];
+    conditionNames: string[];
+    dependencies: string[];
   }>;
+  entrypoints: BundleManifest["entrypoints"];
   manifest: BundleManifest;
   /** Development-only HMR state. This is intentionally not serialized. */
   hmr?: HmrBuildState;
@@ -127,6 +140,23 @@ type BundlePlan = {
   conditions: Array<{ moduleId: string; condition: ConditionExpr }>;
   conditionNames: string[];
   hmr?: HmrBundleRecord;
+};
+
+type PhysicalBundlePlan = {
+  id: string;
+  environmentIds: string[];
+  entrypoints: Array<{
+    envId: string;
+    entryId: string;
+    exportMode: "entry" | "dynamic";
+  }>;
+  plan: BundlePlan;
+};
+
+type PhysicalBundleOutput = {
+  plan: PhysicalBundlePlan;
+  hash: string;
+  fileName: string;
 };
 
 type BundleEntry = {
@@ -155,6 +185,7 @@ type BundlePlanDraftWithHmr = BundlePlanDraft & {
 
 type WorkerTransformResponse = {
   cacheHit?: boolean;
+  variants: ModuleVariantRecord[];
   fileRecordsByEnv: Record<string, FileRecord>;
 };
 
@@ -186,7 +217,7 @@ type DynamicEntryDiscovery = ModuleResolution & {
 type ModuleCollection = {
   headersByEnv: Map<string, Map<string, FileRecord>>;
   dynamicEntries: EntrySpec[];
-  resolvedMap: Map<string, ModuleResolution>;
+  resolvedMapByEnv: Map<string, Map<string, ModuleResolution>>;
   fileRecords: FileRecord[];
 };
 
@@ -307,7 +338,7 @@ export async function buildProject(
       plugins: normalizedPlugins,
       cacheDir: cacheRoot.activeRoot,
     });
-    const { headersByEnv, dynamicEntries, resolvedMap, fileRecords } =
+    const { headersByEnv, dynamicEntries, resolvedMapByEnv, fileRecords } =
       await collectTransformedModules(
         explicitEntries,
         envs,
@@ -340,11 +371,11 @@ export async function buildProject(
       }
       normalizeGraphConditions(graph);
       resolveExportTables(Array.from(graph.nodes.values()), graph.nodes, {
-        hmr: devOptions.hmr,
+        hmr: devOptions.hmr && config.envs[graph.envId]?.target === "browser",
       });
     }
 
-    const bundlePlans: BundlePlan[] = [];
+    const bundleEntriesByEnv = new Map<string, BundleEntry[]>();
     for (const graph of graphs) {
       const entries = pickEntriesForEnv(
         explicitEntries,
@@ -365,17 +396,42 @@ export async function buildProject(
           continue;
         }
         bundleEntries.push({
-          entryId: resolvedMap.get(entry.path)?.id ?? entry.path,
+          entryId:
+            resolvedMapByEnv.get(graph.envId)?.get(entry.path)?.id ??
+            entry.path,
           exportMode: "dynamic",
         });
       }
-      const partitions = createBundlePartitions(graph, bundleEntries);
+      bundleEntriesByEnv.set(graph.envId, bundleEntries);
+    }
+    const ownerMapsByEnv = createCrossEnvironmentOwnerMaps(
+      graphs,
+      bundleEntriesByEnv,
+      normalizedPlugins,
+    );
+
+    const bundlePlans: BundlePlan[] = [];
+    for (const graph of graphs) {
+      const partitions = createBundlePartitions(
+        graph,
+        bundleEntriesByEnv.get(graph.envId) ?? [],
+        ownerMapsByEnv.get(graph.envId),
+      );
       let drafts = await Promise.all(
         partitions.map((partition) =>
-          createBundlePlan(graph, partition, devOptions),
+          createBundlePlan(
+            graph,
+            partition,
+            devOptions,
+            config.envs[graph.envId]?.target === "browser",
+          ),
         ),
       );
-      if (devOptions.hmr && drafts.length > 0) {
+      if (
+        devOptions.hmr &&
+        config.envs[graph.envId]?.target === "browser" &&
+        drafts.length > 0
+      ) {
         const runtimeEntryId = `bundler:hmr-runtime:${graph.envId}`;
         drafts = drafts.map((draft) => ({
           ...draft,
@@ -421,16 +477,7 @@ export async function buildProject(
         contentType: asset.contentType,
       });
     }
-    const bundleKeysWithCss = collectBundleKeysWithCss(
-      bundlePlans,
-      fileRecords,
-    );
-
     const bundleMap = new Map<string, BundleTarget>();
-    const bundleOutputs = new Map<
-      string,
-      { envId: string; entryId: string; fileName: string; modules: string[] }
-    >();
     for (const plan of bundlePlans) {
       const assembled = assembleBundle(plan.parts);
       const references = dedupeBundleReferences(plan.parts);
@@ -451,62 +498,37 @@ export async function buildProject(
           references,
         },
       ];
-      const linkedAssetFileNames = references
-        .filter(
-          (
-            reference,
-          ): reference is Extract<LinkReference, { kind: "asset-url" }> =>
-            reference.kind === "asset-url",
-        )
-        .map((reference) => staticAssetFileNames.get(reference.assetId))
-        .filter((fileName): fileName is string => Boolean(fileName))
-        .sort();
-      const linksDynamicCss =
-        config.envs[plan.envId]?.target === "browser" &&
-        plan.dynamicImports.some(
-          (dependency) =>
-            dependency.resolvedId != null &&
-            bundleKeysWithCss.has(`${plan.envId}:${dependency.resolvedId}`),
-        );
-      const linksRootURL = linkedAssetFileNames.length > 0 || linksDynamicCss;
-      const hash = contentHashShort(
-        linksRootURL
-          ? JSON.stringify({
-              code: finalBundle.code,
-              assets: linkedAssetFileNames,
-              rootURL: config.outputs.rootURL,
-            })
-          : finalBundle.code,
-      );
-      const fileName = config.outputs.fileName
-        ? config.outputs.fileName
-            .replace("[entry]", sanitizeOutputName(plan.entryId))
-            .replace("[env]", plan.envId)
-            .replace("[hash]", hash)
-        : `bundle.${plan.envId}.${hash}.js`;
-      const target = {
-        fileName,
-        exportMode: plan.exportMode,
-      };
-      bundleMap.set(`${plan.envId}:${plan.entryId}`, target);
-      if (!bundleMap.has(plan.entryId)) {
-        bundleMap.set(plan.entryId, target);
-      }
-      bundleOutputs.set(`${plan.envId}:${plan.entryId}`, {
-        envId: plan.envId,
-        entryId: plan.entryId,
-        fileName,
-        modules: plan.modules,
-      });
     }
-
+    const physicalPlans = coalescePhysicalBundlePlans(
+      bundlePlans,
+      devOptions.hmr,
+      fileRecords,
+    );
+    const physicalBundleIdByEntrypoint = new Map(
+      physicalPlans.flatMap((physicalPlan) =>
+        physicalPlan.entrypoints.map(
+          (entrypoint) =>
+            [
+              `${entrypoint.envId}:${entrypoint.entryId}`,
+              physicalPlan.id,
+            ] as const,
+        ),
+      ),
+    );
     const resolveReference = createReferenceResolver(
       fileRecords,
       staticAssetFileNames,
       config,
     );
     await runGenerateBundleResources(normalizedPlugins, {
-      bundles: Array.from(bundleOutputs.values()),
+      bundles: physicalPlans.map((physicalPlan) => ({
+        id: physicalPlan.id,
+        environmentIds: physicalPlan.environmentIds,
+        entrypoints: physicalPlan.entrypoints,
+        envId: physicalPlan.plan.envId,
+        entryId: physicalPlan.plan.entryId,
+        modules: physicalPlan.plan.modules,
+      })),
       modules: fileRecords,
       outputs: config.outputs,
       resolveReference,
@@ -514,7 +536,28 @@ export async function buildProject(
         pendingFiles.push(file);
       },
     });
-    const stylesByBundle = collectStylesByBundle(bundlePlans, pendingFiles);
+    const stylesByBundle = collectStylesByBundle(physicalPlans, pendingFiles);
+    const bundleOutputs = finalizePhysicalBundleOutputs(
+      physicalPlans,
+      config,
+      staticAssetFileNames,
+      collectResourceFingerprints(physicalPlans, pendingFiles, {
+        includeGlobalStyles: !devOptions.hmr,
+      }),
+    );
+    bundleMap.clear();
+    for (const output of bundleOutputs.values()) {
+      const target = {
+        fileName: output.fileName,
+        exportMode: output.plan.plan.exportMode,
+      };
+      for (const entrypoint of output.plan.entrypoints) {
+        bundleMap.set(`${entrypoint.envId}:${entrypoint.entryId}`, target);
+      }
+      if (!bundleMap.has(output.plan.plan.entryId)) {
+        bundleMap.set(output.plan.plan.entryId, target);
+      }
+    }
     const documentStyleOutputs = createDocumentStyleOutputs(
       prepared.documents,
       stylesByBundle,
@@ -524,14 +567,26 @@ export async function buildProject(
 
     await fs.mkdir(config.outputs.outDir, { recursive: true });
     const bundles: Array<{
+      id: string;
+      environmentIds: string[];
+      entrypoints: Array<{
+        envId: string;
+        entryId: string;
+        exportMode: "entry" | "dynamic";
+      }>;
       envId: string;
       entryId: string;
       fileName: string;
+      runtimeHash: string;
       exportMode: "entry" | "dynamic";
       mapFileName?: string;
+      modules: string[];
+      conditionNames: string[];
+      dependencies: string[];
     }> = [];
-    for (const plan of bundlePlans) {
-      const bundleOutput = bundleOutputs.get(`${plan.envId}:${plan.entryId}`);
+    for (const physicalPlan of physicalPlans) {
+      const plan = physicalPlan.plan;
+      const bundleOutput = bundleOutputs.get(physicalPlan.id);
       if (!bundleOutput) {
         throw new Error(
           `Missing finalized bundle output for '${plan.entryId}' in '${plan.envId}'.`,
@@ -539,14 +594,7 @@ export async function buildProject(
       }
       const header = [
         emitStaticBundleImports(plan.staticImports, bundleMap, plan.envId),
-        emitDynamicImportConstants(
-          plan.dynamicImports,
-          bundleMap,
-          plan.envId,
-          stylesByBundle,
-          config.outputs.rootURL,
-          config.envs[plan.envId]?.target === "browser",
-        ),
+        emitDynamicImportConstants(plan.dynamicImports, bundleMap, plan.envId),
         emitAssetReferencePrelude(
           dedupeBundleReferences(plan.parts),
           staticAssetFileNames,
@@ -578,36 +626,86 @@ export async function buildProject(
         );
       }
       bundles.push({
+        id: physicalPlan.id,
+        environmentIds: physicalPlan.environmentIds,
+        entrypoints: physicalPlan.entrypoints,
         envId: plan.envId,
         entryId: plan.entryId,
         fileName: bundleOutput.fileName,
+        runtimeHash: contentHash(assembled.code),
         exportMode: plan.exportMode,
         mapFileName,
+        modules: plan.modules,
+        conditionNames: plan.conditionNames,
+        dependencies: Array.from(
+          new Set(
+            (plan.staticImports ?? [])
+              .map((item) =>
+                physicalBundleIdByEntrypoint.get(
+                  `${plan.envId}:${item.entryId}`,
+                ),
+              )
+              .filter((id): id is string => Boolean(id)),
+          ),
+        ),
       });
     }
 
     const diagnostics = dedupeDiagnostics(
       bundlePlans.flatMap((plan) => plan.diagnostics),
     );
+    const bundlesById = new Map(bundles.map((bundle) => [bundle.id, bundle]));
+    const bundleFilesById = new Map<string, string[]>();
+    const collectBundleFiles = (bundleId: string): string[] => {
+      const cached = bundleFilesById.get(bundleId);
+      if (cached) return cached;
+      const files: string[] = [];
+      const visited = new Set<string>();
+      const visit = (currentId: string) => {
+        if (visited.has(currentId)) return;
+        visited.add(currentId);
+        const current = bundlesById.get(currentId);
+        if (!current) return;
+        files.push(current.fileName);
+        for (const dependencyId of current.dependencies) {
+          visit(dependencyId);
+        }
+      };
+      visit(bundleId);
+      bundleFilesById.set(bundleId, files);
+      return files;
+    };
     const manifest: BundleManifest = {
       bundles: bundles.map((bundle) => ({
         ...bundle,
         type: "script",
         contentType: "text/javascript; charset=utf-8",
         mapFileName: bundle.mapFileName,
-        modules:
-          bundleOutputs.get(`${bundle.envId}:${bundle.entryId}`)?.modules ?? [],
-        conditionNames:
-          bundlePlans.find(
-            (plan) =>
-              plan.envId === bundle.envId && plan.entryId === bundle.entryId,
-          )?.conditionNames ?? [],
       })),
+      entrypoints: Object.fromEntries(
+        bundles.flatMap((bundle) =>
+          bundle.entrypoints.map((entrypoint) => [
+            `${entrypoint.envId}:${entrypoint.entryId}`,
+            {
+              bundleId: bundle.id,
+              fileName: bundle.fileName,
+              exportMode: entrypoint.exportMode,
+              bundles: collectBundleFiles(bundle.id),
+              styles:
+                stylesByBundle.get(
+                  `${entrypoint.envId}:${entrypoint.entryId}`,
+                ) ?? [],
+            },
+          ]),
+        ),
+      ),
       dynamicImports: Object.fromEntries(
-        bundles.map((bundle) => [
-          `${bundle.envId}:${bundle.entryId}`,
-          bundle.fileName,
-        ]),
+        bundles.flatMap((bundle) =>
+          bundle.entrypoints.map((entrypoint) => [
+            `${entrypoint.envId}:${entrypoint.entryId}`,
+            bundle.fileName,
+          ]),
+        ),
       ),
       emittedFiles: [],
       assets: [
@@ -622,11 +720,10 @@ export async function buildProject(
             type: "script" as const,
             contentType: "text/javascript; charset=utf-8",
             envId: bundle.envId,
+            environmentIds: bundle.environmentIds,
             entryId: bundle.entryId,
-            bundleKey: `${bundle.envId}:${bundle.entryId}`,
-            modules:
-              bundleOutputs.get(`${bundle.envId}:${bundle.entryId}`)?.modules ??
-              [],
+            bundleKey: bundle.id,
+            modules: bundleOutputs.get(bundle.id)?.plan.plan.modules ?? [],
             conditionNames: plan?.conditionNames ?? [],
           };
         }),
@@ -638,8 +735,9 @@ export async function buildProject(
                   type: "source-map" as const,
                   contentType: "application/json; charset=utf-8",
                   envId: bundle.envId,
+                  environmentIds: bundle.environmentIds,
                   entryId: bundle.entryId,
-                  bundleKey: `${bundle.envId}:${bundle.entryId}`,
+                  bundleKey: bundle.id,
                 },
               ]
             : [],
@@ -648,19 +746,31 @@ export async function buildProject(
       metadata: {
         conditions: {
           byBundle: Object.fromEntries(
-            bundlePlans.map((plan) => [
-              `${plan.envId}:${plan.entryId}`,
-              {
-                conditionNames: plan.conditionNames,
-                modules: plan.conditions,
-              },
-            ]),
+            physicalPlans.flatMap((physicalPlan) => {
+              const value = {
+                conditionNames: physicalPlan.plan.conditionNames,
+                modules: physicalPlan.plan.conditions,
+              };
+              return [
+                [physicalPlan.id, value],
+                ...physicalPlan.entrypoints.map((entrypoint) => [
+                  `${entrypoint.envId}:${entrypoint.entryId}`,
+                  value,
+                ]),
+              ];
+            }),
           ),
         },
         bundleDependencies: Object.fromEntries(
-          bundlePlans.map((plan) => [
-            `${plan.envId}:${plan.entryId}`,
-            plan.staticImports.map((item) => `${plan.envId}:${item.entryId}`),
+          physicalPlans.map((physicalPlan) => [
+            physicalPlan.id,
+            physicalPlan.plan.staticImports
+              .map((item) =>
+                physicalBundleIdByEntrypoint.get(
+                  `${physicalPlan.plan.envId}:${item.entryId}`,
+                ),
+              )
+              .filter((id): id is string => Boolean(id)),
           ]),
         ),
       },
@@ -712,6 +822,7 @@ export async function buildProject(
 
     return {
       bundles,
+      entrypoints: manifest.entrypoints,
       manifest,
       hmr,
       diagnostics,
@@ -1024,17 +1135,14 @@ async function emitDocuments(
           reference.kind === "output-integrity"
         ) {
           if (reference.outputType === "script") {
-            const bundle = manifest.bundles.find(
-              (item) =>
-                item.envId === document.envId &&
-                item.entryId === reference.outputId,
-            );
-            if (!bundle) {
+            const entrypoint =
+              manifest.entrypoints[`${document.envId}:${reference.outputId}`];
+            if (!entrypoint) {
               throw new Error(
                 `Missing script output '${reference.outputId}' for HTML entry.`,
               );
             }
-            target = bundle.fileName;
+            target = entrypoint.fileName;
             scriptFiles.add(target);
           } else {
             const styleKey = `${document.envId}:${reference.outputId}`;
@@ -1220,81 +1328,102 @@ function createReferenceResolver(
 }
 
 function collectStylesByBundle(
-  bundlePlans: BundlePlan[],
+  physicalPlans: PhysicalBundlePlan[],
   files: PendingEmitFile[],
 ): Map<string, string[]> {
+  const globalStyles = files
+    .filter((file) => file.type === "style" && file.global)
+    .map(finalPendingFileName);
   const direct = new Map<string, string[]>();
   for (const file of files) {
     if (file.type !== "style" || file.global || !file.bundleKey) {
       continue;
     }
     const names = direct.get(file.bundleKey) ?? [];
-    names.push(file.fileName);
+    names.push(finalPendingFileName(file));
     direct.set(file.bundleKey, names);
   }
   const plans = new Map(
-    bundlePlans.map((plan) => [`${plan.envId}:${plan.entryId}`, plan]),
+    physicalPlans.map((physicalPlan) => [physicalPlan.id, physicalPlan]),
+  );
+  const byEntrypoint = new Map(
+    physicalPlans.flatMap((physicalPlan) =>
+      physicalPlan.entrypoints.map(
+        (entrypoint) =>
+          [
+            `${entrypoint.envId}:${entrypoint.entryId}`,
+            physicalPlan.id,
+          ] as const,
+      ),
+    ),
   );
   const output = new Map<string, string[]>();
-  const collect = (key: string, visiting = new Set<string>()): string[] => {
+  const collect = (key: string): string[] => {
     const cached = output.get(key);
     if (cached) return cached;
-    if (visiting.has(key)) return [];
-    visiting.add(key);
-    const plan = plans.get(key);
-    const names = [
-      ...(plan?.staticImports.flatMap((dependency) =>
-        collect(`${plan.envId}:${dependency.entryId}`, visiting),
-      ) ?? []),
-      ...(direct.get(key) ?? []),
-    ];
-    visiting.delete(key);
+    const names = [...globalStyles];
+    const visited = new Set<string>();
+    const visit = (currentKey: string) => {
+      if (!currentKey || visited.has(currentKey)) return;
+      visited.add(currentKey);
+      const plan = plans.get(currentKey)?.plan;
+      if (!plan) return;
+      for (const dependency of plan.staticImports) {
+        visit(byEntrypoint.get(`${plan.envId}:${dependency.entryId}`) ?? "");
+      }
+      names.push(...(direct.get(currentKey) ?? []));
+    };
+    visit(key);
     const deduped = Array.from(new Set(names));
     output.set(key, deduped);
     return deduped;
   };
   for (const key of plans.keys()) collect(key);
+  for (const physicalPlan of physicalPlans) {
+    const names = output.get(physicalPlan.id) ?? [];
+    for (const entrypoint of physicalPlan.entrypoints) {
+      output.set(`${entrypoint.envId}:${entrypoint.entryId}`, names);
+    }
+  }
   return output;
 }
 
-function collectBundleKeysWithCss(
-  bundlePlans: BundlePlan[],
-  fileRecords: FileRecord[],
-): Set<string> {
-  const cssModules = new Set(
-    fileRecords.flatMap((record) => {
-      if (!record.extraOutputs?.["bundler-css"]) return [];
-      return record.envs.flatMap((envId) => [
-        `${envId}:${record.id}`,
-        ...(record.moduleIdentity ? [`${envId}:${record.moduleIdentity}`] : []),
-      ]);
+function collectResourceFingerprints(
+  physicalPlans: PhysicalBundlePlan[],
+  files: PendingEmitFile[],
+  options: { includeGlobalStyles?: boolean } = {},
+): Map<string, string[]> {
+  const output = new Map<string, string[]>();
+  const globalFingerprints = files
+    .filter(
+      (file) =>
+        file.global &&
+        (options.includeGlobalStyles !== false || file.type !== "style"),
+    )
+    .map(resourceFingerprint)
+    .sort();
+  for (const physicalPlan of physicalPlans) {
+    const fingerprints = files
+      .filter((file) => file.bundleKey === physicalPlan.id)
+      .map(resourceFingerprint);
+    output.set(
+      physicalPlan.id,
+      Array.from(new Set([...globalFingerprints, ...fingerprints])).sort(),
+    );
+  }
+  return output;
+}
+
+function resourceFingerprint(file: PendingEmitFile): string {
+  return contentHash(
+    JSON.stringify({
+      fileName: finalPendingFileName(file),
+      contentHash: contentHash(file.contents),
+      type: file.type,
+      contentType: file.contentType,
+      global: file.global === true,
     }),
   );
-  const plans = new Map(
-    bundlePlans.map((plan) => [`${plan.envId}:${plan.entryId}`, plan]),
-  );
-  const result = new Set<string>();
-  const inspected = new Set<string>();
-  const includesCss = (key: string, visiting = new Set<string>()): boolean => {
-    if (result.has(key)) return true;
-    if (inspected.has(key) || visiting.has(key)) return false;
-    visiting.add(key);
-    const plan = plans.get(key);
-    const found =
-      plan?.modules.some((moduleId) =>
-        cssModules.has(`${plan.envId}:${moduleId}`),
-      ) ||
-      plan?.staticImports.some((dependency) =>
-        includesCss(`${plan.envId}:${dependency.entryId}`, visiting),
-      ) ||
-      false;
-    visiting.delete(key);
-    inspected.add(key);
-    if (found) result.add(key);
-    return found;
-  };
-  for (const key of plans.keys()) includesCss(key);
-  return result;
 }
 
 async function prepareCacheRoot(
@@ -1521,7 +1650,7 @@ function inferEntryModuleType(
 function inferModuleTypeFromPath(filePath: string): ModuleResolution["type"] {
   const lower = filePath.toLowerCase();
   if (lower.endsWith(".css")) return "css";
-  if (/\.(?:[cm]?js|jsx|tsx?|mts|cts)$/.test(lower)) return "javascript";
+  if (/\.(?:[cm]?js|jsx|tsx?|mts|cts|json)$/.test(lower)) return "javascript";
   return "asset";
 }
 
@@ -1539,6 +1668,7 @@ function resolveJsLikeSyntax(
     ".jsx": { jsx: true },
     ".ts": { typescript: true },
     ".tsx": { jsx: true, typescript: true },
+    ".json": {},
   };
   const syntax = config.transforms?.jsLike?.[extension] ?? defaults[extension];
   if (!syntax) {
@@ -1559,6 +1689,7 @@ function resolvedTransformConfig(
     ".jsx": { jsx: true },
     ".ts": { typescript: true },
     ".tsx": { jsx: true, typescript: true },
+    ".json": {},
   };
   const jsLike = {
     ...defaults,
@@ -1666,6 +1797,18 @@ function createBuiltinPlugins(config: BundlerConfig): BundlerPlugin[] {
     {
       __bundlerPluginRef: true,
       module: fileURLToPath(
+        new URL("../../json-plugin/bundler.mjs", import.meta.url),
+      ),
+    },
+    {
+      __bundlerPluginRef: true,
+      module: fileURLToPath(
+        new URL("../../typescript-plugin/bundler.mjs", import.meta.url),
+      ),
+    },
+    {
+      __bundlerPluginRef: true,
+      module: fileURLToPath(
         new URL("../../static-assets/bundler.mjs", import.meta.url),
       ),
     },
@@ -1692,40 +1835,229 @@ function createBuiltinPlugins(config: BundlerConfig): BundlerPlugin[] {
     });
   }
 
-  const refreshEnvs = resolveReactRefreshTransformEnvs(config);
-  if (refreshEnvs.length > 0) {
-    plugins.push({
-      __bundlerPluginRef: true,
-      module: fileURLToPath(
-        new URL("./plugins/react-refresh.js", import.meta.url),
-      ),
-      options: { envs: refreshEnvs },
-    });
-  }
   return plugins;
 }
 
-function resolveReactRefreshTransformEnvs(config: BundlerConfig): string[] {
-  if (config.dev?.hmr !== true || config.dev.reactRefresh === false) {
-    return [];
-  }
-  const explicit =
-    typeof config.dev.reactRefresh === "object"
-      ? new Set(config.dev.reactRefresh.envs)
-      : null;
-  return Object.entries(config.envs)
-    .filter(([envId, envConfig]) => {
-      if (envConfig.target !== "browser") {
-        return false;
+function createCrossEnvironmentOwnerMaps(
+  graphs: ModuleGraph[],
+  entriesByEnv: Map<string, BundleEntry[]>,
+  plugins: NormalizedPlugin[],
+): Map<string, Map<string, string>> {
+  type Occurrence = {
+    graph: ModuleGraph;
+    moduleId: string;
+    node: ModuleNode;
+    consumers: Set<string>;
+    selection: Map<string, Set<string>>;
+  };
+  const occurrencesByModule = new Map<string, Occurrence[]>();
+  for (const graph of graphs) {
+    const consumersByModule = new Map<string, Set<string>>();
+    const combinedSelection = new Map<string, Set<string>>();
+    for (const entry of entriesByEnv.get(graph.envId) ?? []) {
+      const selection = collectBundleSelection(graph, entry.entryId);
+      for (const [moduleId, cells] of selection) {
+        const consumers = consumersByModule.get(moduleId) ?? new Set<string>();
+        consumers.add(entry.entryId);
+        consumersByModule.set(moduleId, consumers);
+        const combinedCells =
+          combinedSelection.get(moduleId) ?? new Set<string>();
+        for (const cellId of cells) {
+          combinedCells.add(cellId);
+        }
+        combinedSelection.set(moduleId, combinedCells);
       }
-      return explicit ? explicit.has(envId) : true;
-    })
-    .map(([envId]) => envId);
+    }
+    for (const [moduleId, consumers] of consumersByModule) {
+      const node = graph.nodes.get(moduleId);
+      if (!node) continue;
+      const occurrences = occurrencesByModule.get(moduleId) ?? [];
+      occurrences.push({
+        graph,
+        moduleId,
+        node,
+        consumers,
+        selection: combinedSelection,
+      });
+      occurrencesByModule.set(moduleId, occurrences);
+    }
+  }
+
+  // A transform variant is only universal when its complete selected
+  // dependency chain is universal too. For example, react-dom can have the
+  // same transformed text in two environments while linking to different
+  // React condition variants. Keep removing such parents until compatibility
+  // reaches a fixed point.
+  const crossEnvironmentCompatibleModules = new Set<string>();
+  for (const [moduleId, occurrences] of occurrencesByModule) {
+    const variantIds = new Set(
+      occurrences.map((item) => item.node.irHeader.variantId),
+    );
+    const selectedCellSets = occurrences.map((item) =>
+      Array.from(item.selection.get(moduleId) ?? []).sort(),
+    );
+    const selectedCellsMatch = selectedCellSets.every((cells) =>
+      sameStringSet(selectedCellSets[0] ?? [], cells),
+    );
+    if (
+      occurrences.length > 1 &&
+      variantIds.size === 1 &&
+      !variantIds.has(undefined) &&
+      selectedCellsMatch
+    ) {
+      crossEnvironmentCompatibleModules.add(moduleId);
+    }
+  }
+  let compatibilityChanged = true;
+  while (compatibilityChanged) {
+    compatibilityChanged = false;
+    for (const moduleId of Array.from(crossEnvironmentCompatibleModules)) {
+      const occurrences = occurrencesByModule.get(moduleId) ?? [];
+      const dependencySets = occurrences.map((occurrence) =>
+        collectSelectedFileDeps(occurrence.node, occurrence.selection).sort(),
+      );
+      const referenceDependencies = dependencySets[0] ?? [];
+      const dependenciesMatch = dependencySets.every((dependencies) =>
+        sameStringSet(referenceDependencies, dependencies),
+      );
+      if (
+        !dependenciesMatch ||
+        referenceDependencies.some(
+          (dependencyId) =>
+            !crossEnvironmentCompatibleModules.has(dependencyId),
+        )
+      ) {
+        crossEnvironmentCompatibleModules.delete(moduleId);
+        compatibilityChanged = true;
+      }
+    }
+  }
+
+  const infoById = new Map<
+    string,
+    {
+      id: string;
+      moduleIdentity?: string;
+      filePath: string;
+      environmentIds: string[];
+      entryConsumers: string[];
+    }
+  >();
+  for (const occurrences of occurrencesByModule.values()) {
+    const first = occurrences[0];
+    const environmentIds = Array.from(
+      new Set(occurrences.map((item) => item.graph.envId)),
+    ).sort();
+    const entryConsumers = Array.from(
+      new Set(occurrences.flatMap((item) => Array.from(item.consumers))),
+    ).sort();
+    infoById.set(first.moduleId, {
+      id: first.moduleId,
+      moduleIdentity: first.node.irHeader.moduleIdentity,
+      filePath: first.node.filePath,
+      environmentIds,
+      entryConsumers,
+    });
+  }
+
+  const ownersByEnv = new Map<string, Map<string, string>>();
+  const manualOwnerScopes = new Map<
+    string,
+    { environmentIds: string[]; moduleId: string }
+  >();
+  for (const graph of graphs) {
+    ownersByEnv.set(graph.envId, new Map());
+  }
+  for (const occurrences of occurrencesByModule.values()) {
+    const first = occurrences[0];
+    const canShareAcrossEnvironments = crossEnvironmentCompatibleModules.has(
+      first.moduleId,
+    );
+    const consumers = Array.from(
+      new Set(occurrences.flatMap((item) => Array.from(item.consumers))),
+    ).sort();
+    const portableConsumers = new Set(
+      consumers.map((consumer) => {
+        const occurrence = occurrences.find((item) =>
+          item.graph.nodes.has(consumer),
+        );
+        return occurrence
+          ? portableGraphModuleIdentity(occurrence.graph, consumer)
+          : portableHashIdentity(consumer);
+      }),
+    );
+    const moduleInfo = {
+      id: first.moduleId,
+      moduleIdentity: first.node.irHeader.moduleIdentity,
+      filePath: first.node.filePath,
+      environmentIds: Array.from(
+        new Set(occurrences.map((item) => item.graph.envId)),
+      ).sort(),
+      entryConsumers: consumers,
+    };
+    let manualOwner: string | undefined;
+    for (const plugin of plugins) {
+      const label = plugin.manualChunk?.(moduleInfo, {
+        getModuleInfo: (id) => infoById.get(id),
+      });
+      if (label !== undefined) {
+        if (!label || /[\0\r\n]/.test(label)) {
+          throw new Error(
+            `Plugin '${plugin.name}' returned an invalid manual chunk label for '${first.moduleId}'.`,
+          );
+        }
+        manualOwner = `bundler:manual:${sanitizeOutputName(plugin.name)}:${sanitizeOutputName(label)}`;
+        const existingScope = manualOwnerScopes.get(manualOwner);
+        if (
+          existingScope &&
+          !sameStringSet(
+            existingScope.environmentIds,
+            moduleInfo.environmentIds,
+          )
+        ) {
+          throw new Error(
+            `Plugin '${plugin.name}' grouped incompatible module variants in manual chunk '${label}': ` +
+              `'${existingScope.moduleId}' is available in [${existingScope.environmentIds.join(", ")}], ` +
+              `but '${first.moduleId}' is available in [${moduleInfo.environmentIds.join(", ")}].`,
+          );
+        }
+        manualOwnerScopes.set(manualOwner, {
+          environmentIds: moduleInfo.environmentIds,
+          moduleId: first.moduleId,
+        });
+        break;
+      }
+    }
+    for (const occurrence of occurrences) {
+      const localConsumers = Array.from(occurrence.consumers).sort();
+      const owner = localConsumers.includes(occurrence.moduleId)
+        ? occurrence.moduleId
+        : (manualOwner ??
+          (canShareAcrossEnvironments && consumers.length > 1
+            ? createSharedBundleEntryId(portableConsumers)
+            : localConsumers.length > 1
+              ? createSharedBundleEntryId(
+                  new Set(
+                    localConsumers.map((consumer) =>
+                      portableGraphModuleIdentity(occurrence.graph, consumer),
+                    ),
+                  ),
+                )
+              : localConsumers[0]));
+      if (owner) {
+        ownersByEnv
+          .get(occurrence.graph.envId)
+          ?.set(occurrence.moduleId, owner);
+      }
+    }
+  }
+  return ownersByEnv;
 }
 
 function createBundlePartitions(
   graph: ModuleGraph,
   rawEntries: BundleEntry[],
+  globalOwners?: Map<string, string>,
 ): BundlePartition[] {
   const entries = Array.from(
     new Map(rawEntries.map((entry) => [entry.entryId, entry])).values(),
@@ -1747,20 +2079,47 @@ function createBundlePartitions(
   });
 
   const consumersByModule = new Map<string, Set<string>>();
+  const combinedSelection = new Map<string, Set<string>>();
   for (const entry of entryData) {
-    for (const moduleId of entry.selection.keys()) {
+    for (const [moduleId, cells] of entry.selection) {
       const consumers = consumersByModule.get(moduleId) ?? new Set<string>();
       consumers.add(entry.entryId);
       consumersByModule.set(moduleId, consumers);
+      const combinedCells =
+        combinedSelection.get(moduleId) ?? new Set<string>();
+      for (const cellId of cells) {
+        combinedCells.add(cellId);
+      }
+      combinedSelection.set(moduleId, combinedCells);
     }
   }
 
   const ownerByModule = new Map<string, string>();
   for (const [moduleId, consumers] of consumersByModule) {
-    if (entryIds.has(moduleId)) {
+    const globalOwner = globalOwners?.get(moduleId);
+    if (globalOwner) {
+      ownerByModule.set(moduleId, globalOwner);
+      if (
+        globalOwner.startsWith("bundler:shared:") ||
+        globalOwner.startsWith("bundler:manual:")
+      ) {
+        if (entryIds.has(globalOwner)) {
+          throw new Error(
+            `Reserved bundle entry id '${globalOwner}' is in use.`,
+          );
+        }
+        sharedEntryIds.add(globalOwner);
+      }
+    } else if (entryIds.has(moduleId)) {
       ownerByModule.set(moduleId, moduleId);
     } else if (consumers.size > 1) {
-      const sharedEntryId = createSharedBundleEntryId(graph.envId);
+      const sharedEntryId = createSharedBundleEntryId(
+        new Set(
+          Array.from(consumers, (consumer) =>
+            portableGraphModuleIdentity(graph, consumer),
+          ),
+        ),
+      );
       if (entryIds.has(sharedEntryId)) {
         throw new Error(
           `Reserved bundle entry id '${sharedEntryId}' is in use.`,
@@ -1773,13 +2132,50 @@ function createBundlePartitions(
     }
   }
 
+  // A shared chunk cannot depend on a non-root module that remains owned by an
+  // entry chunk: the entry already imports the shared chunk, so that ownership
+  // would create a shared -> entry -> shared initialization cycle. Pull those
+  // dependencies into the shared family until its module graph is closed.
+  // Explicit and dynamic entries remain hard roots even when imported.
+  let ownershipChanged = true;
+  while (ownershipChanged) {
+    ownershipChanged = false;
+    for (const [moduleId] of combinedSelection) {
+      const owner = ownerByModule.get(moduleId);
+      if (
+        !owner ||
+        (!owner.startsWith("bundler:shared:") &&
+          !owner.startsWith("bundler:manual:"))
+      ) {
+        continue;
+      }
+      const node = graph.nodes.get(moduleId);
+      if (!node) {
+        continue;
+      }
+      for (const dependencyId of collectSelectedFileDeps(
+        node,
+        combinedSelection,
+      )) {
+        const dependencyOwner = ownerByModule.get(dependencyId);
+        if (
+          dependencyOwner &&
+          dependencyOwner !== owner &&
+          entryIds.has(dependencyOwner) &&
+          !entryIds.has(dependencyId)
+        ) {
+          ownerByModule.set(dependencyId, owner);
+          ownershipChanged = true;
+        }
+      }
+    }
+  }
+
   const selectionsByOwner = new Map<string, Map<string, Set<string>>>();
   const conditionStatesByOwner = new Map<
     string,
     Map<string, { unconditional: boolean; conditional: ConditionExpr[] }>
   >();
-  const combinedSelection = new Map<string, Set<string>>();
-
   for (const entry of entryData) {
     for (const [moduleId, cells] of entry.selection) {
       const owner = ownerByModule.get(moduleId);
@@ -1787,12 +2183,6 @@ function createBundlePartitions(
         continue;
       }
       mergeSelectedCells(selectionsByOwner, owner, moduleId, cells);
-      const combinedCells =
-        combinedSelection.get(moduleId) ?? new Set<string>();
-      for (const cellId of cells) {
-        combinedCells.add(cellId);
-      }
-      combinedSelection.set(moduleId, combinedCells);
 
       const states =
         conditionStatesByOwner.get(owner) ??
@@ -1956,8 +2346,28 @@ function createBundlePartitions(
   });
 }
 
-function createSharedBundleEntryId(envId: string): string {
-  return `bundler:common:${envId}`;
+function createSharedBundleEntryId(consumers: Set<string>): string {
+  return `bundler:shared:${contentHashShort(
+    Array.from(consumers).sort().join("\0"),
+    10,
+  )}`;
+}
+
+function portableGraphModuleIdentity(
+  graph: ModuleGraph,
+  moduleId: string,
+): string {
+  return (
+    graph.nodes.get(moduleId)?.irHeader.moduleIdentity ??
+    portableHashIdentity(moduleId)
+  );
+}
+
+function sameStringSet(left: string[], right: string[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
 }
 
 function mergeSelectedCells(
@@ -1980,6 +2390,7 @@ async function createBundlePlan(
   graph: ModuleGraph,
   partition: BundlePartition,
   devOptions: ResolvedDevOptions,
+  hmrTarget: boolean,
 ): Promise<BundlePlanDraftWithHmr> {
   const { entryId, exportMode, conditions, diagnostics, selection } = partition;
   const entryNode = partition.entryNodeId
@@ -1992,7 +2403,14 @@ async function createBundlePlan(
   const conditionRecordsForGraph = Array.from(conditions.entries())
     .filter((entry): entry is [string, ConditionExpr] => entry[1] !== undefined)
     .map(([moduleId, condition]) => ({ moduleId, condition }));
-  const orderedFiles = orderSelectedFiles(graph, selection);
+  const selectionForOrdering = entryId.startsWith("bundler:")
+    ? new Map(
+        Array.from(selection.entries()).sort(([left], [right]) =>
+          left.localeCompare(right),
+        ),
+      )
+    : selection;
+  const orderedFiles = orderSelectedFiles(graph, selectionForOrdering);
   const orderedFileIds = new Set(orderedFiles.map((node) => node.id));
   const conditionRecords = conditionRecordsForGraph.filter((record) =>
     orderedFileIds.has(record.moduleId),
@@ -2009,7 +2427,7 @@ async function createBundlePlan(
   const namespaceDemanded = partition.namespaceDemanded;
   const hmrCells: HmrCellRecord[] = [];
   const hmrSymbols = new Set<string>();
-  const useHmr = devOptions.hmr;
+  const useHmr = devOptions.hmr && hmrTarget;
   const useReactRefresh = devOptions.reactRefreshEnvs.has(graph.envId);
   const conditionalExportAliases = new Map<string, string>();
   const conditionalAliasNames = new Set<string>();
@@ -2212,6 +2630,365 @@ function createHmrRuntimePlan(
   };
 }
 
+function portableHashIdentity(id: string): string {
+  return path.isAbsolute(id) ? normalizePosixPath(path.basename(id)) : id;
+}
+
+function portableBundleParts(
+  parts: BundlePart[],
+  portableIdentity: (id: string) => string,
+): Array<Omit<BundlePart, "references"> & { references?: unknown[] }> {
+  return parts.map((part) => ({
+    ...part,
+    references: part.references?.map((reference) => {
+      if (reference.kind === "asset-url") {
+        return {
+          kind: reference.kind,
+          symbol: reference.symbol,
+          assetId: reference.assetId,
+          usage: reference.usage,
+        };
+      }
+      if ("symbol" in reference) {
+        return { kind: reference.kind, symbol: reference.symbol };
+      }
+      if (reference.kind === "output-styles") {
+        return {
+          kind: reference.kind,
+          outputIds: reference.outputIds.map(portableIdentity),
+        };
+      }
+      return {
+        kind: reference.kind,
+        outputId: portableIdentity(reference.outputId),
+        outputType: reference.outputType,
+      };
+    }),
+  }));
+}
+
+function coalescePhysicalBundlePlans(
+  plans: BundlePlan[],
+  hmr: boolean,
+  fileRecords: FileRecord[],
+): PhysicalBundlePlan[] {
+  const portableIdentities = new Map(
+    fileRecords.flatMap((record) => {
+      const identity = record.moduleIdentity ?? portableHashIdentity(record.id);
+      return [
+        [record.id, identity] as const,
+        [record.filePath, identity] as const,
+      ];
+    }),
+  );
+  const portableIdentity = (id: string): string =>
+    portableIdentities.get(id) ?? portableHashIdentity(id);
+  const plansByEntrypoint = new Map(
+    plans.map((plan) => [`${plan.envId}:${plan.entryId}`, plan]),
+  );
+  const localFingerprints = new Map(
+    plans.map((plan) => [
+      plan,
+      contentHash(
+        JSON.stringify({
+          ...(hmr ? { envId: plan.envId } : {}),
+          entryId: portableIdentity(plan.entryId),
+          exportMode: plan.exportMode,
+          parts: portableBundleParts(plan.parts, portableIdentity),
+          staticImports: plan.staticImports.map((item) => ({
+            entryId: portableIdentity(item.entryId),
+            symbols: item.symbols,
+          })),
+          dynamicImports: plan.dynamicImports.map((item) => ({
+            ...item,
+            resolvedId:
+              item.resolvedId == null
+                ? null
+                : portableIdentity(item.resolvedId),
+          })),
+          modules: plan.modules.map(portableIdentity),
+          conditions: plan.conditions.map((item) => ({
+            moduleId: portableIdentity(item.moduleId),
+            condition: item.condition,
+          })),
+          conditionNames: plan.conditionNames,
+        }),
+      ),
+    ]),
+  );
+  let dependencyClasses = assignCanonicalPlanClasses(
+    plans,
+    (plan) => localFingerprints.get(plan) as string,
+  );
+  let descriptors = new Map<BundlePlan, string>();
+  for (let iteration = 0; iteration <= plans.length; iteration += 1) {
+    descriptors = new Map(
+      plans.map((plan) => [
+        plan,
+        createPlanLinkDescriptor(
+          plan,
+          localFingerprints.get(plan) as string,
+          dependencyClasses,
+          plansByEntrypoint,
+          portableIdentity,
+        ),
+      ]),
+    );
+    const nextClasses = assignCanonicalPlanClasses(
+      plans,
+      (plan) => descriptors.get(plan) as string,
+    );
+    if (
+      plans.every(
+        (plan) => nextClasses.get(plan) === dependencyClasses.get(plan),
+      )
+    ) {
+      dependencyClasses = nextClasses;
+      break;
+    }
+    dependencyClasses = nextClasses;
+  }
+  descriptors = new Map(
+    plans.map((plan) => [
+      plan,
+      createPlanLinkDescriptor(
+        plan,
+        localFingerprints.get(plan) as string,
+        dependencyClasses,
+        plansByEntrypoint,
+        portableIdentity,
+      ),
+    ]),
+  );
+  if (!hmr) {
+    const manualSignatures = new Map<string, string>();
+    for (const plan of plans) {
+      if (!plan.entryId.startsWith("bundler:manual:")) {
+        continue;
+      }
+      const signature = contentHash(descriptors.get(plan) as string);
+      const existing = manualSignatures.get(plan.entryId);
+      if (existing && existing !== signature) {
+        throw new Error(
+          `Manual chunk '${plan.entryId}' groups modules with incompatible link behavior across environments.`,
+        );
+      }
+      manualSignatures.set(plan.entryId, signature);
+    }
+  }
+
+  const groups = new Map<string, BundlePlan[]>();
+  for (const plan of plans) {
+    const fingerprint = contentHash(descriptors.get(plan) as string);
+    const key = `${plan.entryId}\0${fingerprint}`;
+    const existing = groups.get(key) ?? [];
+    existing.push(plan);
+    groups.set(key, existing);
+  }
+
+  return Array.from(groups.values()).map((group) => {
+    const plan = group[0];
+    const environmentIds = Array.from(
+      new Set(group.map((item) => item.envId)),
+    ).sort();
+    const fingerprint = contentHashShort(
+      JSON.stringify({
+        entryId: portableIdentity(plan.entryId),
+        environments: environmentIds,
+        linkFingerprint: contentHash(descriptors.get(plan) as string),
+        parts: portableBundleParts(plan.parts, portableIdentity),
+        staticImports: plan.staticImports.map((item) => ({
+          entryId: portableIdentity(item.entryId),
+          symbols: item.symbols,
+        })),
+        dynamicImports: plan.dynamicImports.map((item) => ({
+          ...item,
+          resolvedId:
+            item.resolvedId == null ? null : portableIdentity(item.resolvedId),
+        })),
+      }),
+      12,
+    );
+    return {
+      id: plan.entryId.startsWith("bundler:")
+        ? `${plan.entryId}:${fingerprint}`
+        : `bundle:${fingerprint}`,
+      environmentIds,
+      entrypoints: group.map((item) => ({
+        envId: item.envId,
+        entryId: item.entryId,
+        exportMode: item.exportMode,
+      })),
+      plan,
+    };
+  });
+}
+
+function assignCanonicalPlanClasses(
+  plans: BundlePlan[],
+  describe: (plan: BundlePlan) => string,
+): Map<BundlePlan, number> {
+  const descriptions = new Map(plans.map((plan) => [plan, describe(plan)]));
+  const classByDescription = new Map(
+    Array.from(new Set(descriptions.values()))
+      .sort()
+      .map((description, index) => [description, index]),
+  );
+  return new Map(
+    plans.map((plan) => [
+      plan,
+      classByDescription.get(descriptions.get(plan) as string) as number,
+    ]),
+  );
+}
+
+function createPlanLinkDescriptor(
+  plan: BundlePlan,
+  localFingerprint: string,
+  dependencyClasses: Map<BundlePlan, number>,
+  plansByEntrypoint: Map<string, BundlePlan>,
+  portableIdentity: (id: string) => string,
+): string {
+  const dependencyClass = (entryId: string): number | string => {
+    const dependency = plansByEntrypoint.get(`${plan.envId}:${entryId}`);
+    return dependency
+      ? (dependencyClasses.get(dependency) as number)
+      : `missing:${portableIdentity(entryId)}`;
+  };
+  return JSON.stringify({
+    localFingerprint,
+    staticImports: plan.staticImports.map((item) => ({
+      entryId: portableIdentity(item.entryId),
+      symbols: item.symbols,
+      dependencyClass: dependencyClass(item.entryId),
+    })),
+    dynamicImports: plan.dynamicImports.map((item) => ({
+      hashKey: item.hashKey,
+      resolvedId:
+        item.resolvedId == null ? null : portableIdentity(item.resolvedId),
+      externalRequest: item.externalRequest,
+      exports: item.exports,
+      dependencyClass:
+        item.resolvedId == null ? null : dependencyClass(item.resolvedId),
+    })),
+  });
+}
+
+function finalizePhysicalBundleOutputs(
+  physicalPlans: PhysicalBundlePlan[],
+  config: BundlerConfig,
+  staticAssetFileNames: Map<string, string>,
+  resourceFingerprints = new Map<string, string[]>(),
+): Map<string, PhysicalBundleOutput> {
+  const byEntrypoint = new Map(
+    physicalPlans.flatMap((physicalPlan) =>
+      physicalPlan.entrypoints.map(
+        (entrypoint) =>
+          [`${entrypoint.envId}:${entrypoint.entryId}`, physicalPlan] as const,
+      ),
+    ),
+  );
+  const outputs = new Map<string, PhysicalBundleOutput>();
+  const visiting = new Set<string>();
+  const configuredEnvironmentIds = Object.keys(config.envs).sort();
+
+  const scopeFor = (physicalPlan: PhysicalBundlePlan): string => {
+    if (physicalPlan.environmentIds.length === 1) {
+      return physicalPlan.environmentIds[0];
+    }
+    if (
+      physicalPlan.environmentIds.length === configuredEnvironmentIds.length &&
+      physicalPlan.environmentIds.every(
+        (envId, index) => envId === configuredEnvironmentIds[index],
+      )
+    ) {
+      return "universal";
+    }
+    return `shared-${physicalPlan.environmentIds.join("-")}`;
+  };
+
+  const compute = (physicalPlan: PhysicalBundlePlan): PhysicalBundleOutput => {
+    const existing = outputs.get(physicalPlan.id);
+    if (existing) return existing;
+    visiting.add(physicalPlan.id);
+    const plan = physicalPlan.plan;
+    const dependencyFileName = (entryId: string): string | null => {
+      const dependency = byEntrypoint.get(`${plan.envId}:${entryId}`);
+      if (!dependency) return null;
+      if (visiting.has(dependency.id)) {
+        return `cycle:${dependency.id}`;
+      }
+      return compute(dependency).fileName;
+    };
+    const staticImports = plan.staticImports.map((item) => ({
+      entryId: item.entryId,
+      symbols: item.symbols,
+      fileName: dependencyFileName(item.entryId),
+    }));
+    const dynamicImports = plan.dynamicImports.map((item) => ({
+      ...item,
+      fileName: item.resolvedId ? dependencyFileName(item.resolvedId) : null,
+    }));
+    const linkedAssets = dedupeBundleReferences(plan.parts)
+      .filter(
+        (
+          reference,
+        ): reference is Extract<LinkReference, { kind: "asset-url" }> =>
+          reference.kind === "asset-url",
+      )
+      .map((reference) => ({
+        symbol: reference.symbol,
+        fileName: staticAssetFileNames.get(reference.assetId),
+      }))
+      .filter(
+        (
+          item,
+        ): item is {
+          symbol: string;
+          fileName: string;
+        } => Boolean(item.fileName),
+      )
+      .sort((left, right) => left.symbol.localeCompare(right.symbol));
+    const hash = contentHashShort(
+      JSON.stringify({
+        code: plan.parts.map((part) => part.code),
+        maps: plan.parts.map((part) => part.map),
+        staticImports: staticImports.map((item) => ({
+          symbols: item.symbols,
+          fileName: item.fileName,
+        })),
+        dynamicImports: dynamicImports.map((item) => ({
+          hashKey: item.hashKey,
+          externalRequest: item.externalRequest,
+          exports: item.exports,
+          fileName: item.fileName,
+        })),
+        linkedAssets,
+        resourceFingerprints: resourceFingerprints.get(physicalPlan.id) ?? [],
+        rootURL: config.outputs.rootURL,
+        sourceMap: config.outputs.sourceMap,
+      }),
+    );
+    const scope = scopeFor(physicalPlan);
+    const fileName = config.outputs.fileName
+      ? config.outputs.fileName
+          .replaceAll("[entry]", sanitizeOutputName(plan.entryId))
+          .replaceAll("[scope]", scope)
+          .replaceAll("[env]", scope)
+          .replaceAll("[hash]", hash)
+      : `bundle.${scope}.${hash}.js`;
+    const output = { plan: physicalPlan, hash, fileName };
+    outputs.set(physicalPlan.id, output);
+    visiting.delete(physicalPlan.id);
+    return output;
+  };
+
+  for (const physicalPlan of physicalPlans) {
+    compute(physicalPlan);
+  }
+  return outputs;
+}
+
 async function collectTransformedModules(
   entries: EntrySpec[],
   envs: string[],
@@ -2230,7 +3007,10 @@ async function collectTransformedModules(
   for (const envId of envs) {
     headersByEnv.set(envId, new Map<string, FileRecord>());
   }
-  const resolvedMap = new Map<string, ModuleResolution>();
+  const resolvedMapByEnv = new Map<string, Map<string, ModuleResolution>>();
+  for (const envId of envs) {
+    resolvedMapByEnv.set(envId, new Map());
+  }
   const scheduled = new Set<string>();
   const dynamicEntries = new Map<string, EntrySpec>();
   const fileRecords: FileRecord[] = [];
@@ -2245,7 +3025,8 @@ async function collectTransformedModules(
       return;
     }
     scheduled.add(key);
-    resolvedMap.set(module.id, {
+    const resolvedMap = resolvedMapByEnv.get(module.envId);
+    resolvedMap?.set(module.id, {
       id: module.id,
       moduleIdentity: module.moduleIdentity,
       filePath: module.filePath,
@@ -2259,7 +3040,7 @@ async function collectTransformedModules(
       intent: module.intent,
       meta: module.meta,
     });
-    resolvedMap.set(module.moduleIdentity, {
+    resolvedMap?.set(module.moduleIdentity, {
       id: module.id,
       moduleIdentity: module.moduleIdentity,
       filePath: module.filePath,
@@ -2340,7 +3121,7 @@ async function collectTransformedModules(
           resolver,
           debugOutputDir,
           headersByEnv,
-          resolvedMap,
+          resolvedMapByEnv,
           dynamicEntries,
           fileRecords,
           schedule,
@@ -2352,7 +3133,7 @@ async function collectTransformedModules(
   return {
     headersByEnv,
     dynamicEntries: Array.from(dynamicEntries.values()),
-    resolvedMap,
+    resolvedMapByEnv,
     fileRecords,
   };
 }
@@ -2372,7 +3153,7 @@ async function transformModule(
   resolver: Resolver,
   debugOutputDir: string | null,
   headersByEnv: Map<string, Map<string, FileRecord>>,
-  resolvedMap: Map<string, ModuleResolution>,
+  resolvedMapByEnv: Map<string, Map<string, ModuleResolution>>,
   dynamicEntries: Map<string, EntrySpec>,
   fileRecords: FileRecord[],
   schedule: (module: ScheduledModule) => void,
@@ -2396,8 +3177,9 @@ async function transformModule(
     transformConfig: resolvedTransformConfig(config),
     pkg: module.pkg,
     envs,
+    allEnvIds,
     targets: Object.fromEntries(
-      envs.map((envId) => [envId, config.envs[envId].target]),
+      allEnvIds.map((envId) => [envId, config.envs[envId].target]),
     ),
     cacheDir,
     cacheNamespace,
@@ -2432,6 +3214,25 @@ async function transformModule(
       coordinatorRequest.requestsByEnv,
     );
   })) as WorkerTransformResponse;
+  for (const variant of response.variants ?? []) {
+    const existing = fileRecords.find(
+      (record) =>
+        record.variantId === variant.variantId &&
+        record.id === variant.record.id,
+    );
+    if (existing) {
+      const environmentIds = Array.from(
+        new Set([
+          ...(existing.environmentIds ?? existing.envs ?? []),
+          ...variant.environmentIds,
+        ]),
+      ).sort();
+      existing.environmentIds = environmentIds;
+      existing.envs = environmentIds;
+    } else {
+      fileRecords.push(variant.record);
+    }
+  }
   for (const [envId, fileRecord] of Object.entries(response.fileRecordsByEnv)) {
     if (debugOutputDir) {
       await writeDebugTransform({
@@ -2444,7 +3245,16 @@ async function transformModule(
       });
     }
     headersByEnv.get(envId)?.set(fileRecord.id, fileRecord);
-    fileRecords.push(fileRecord);
+    if (
+      !fileRecord.variantId ||
+      !fileRecords.some(
+        (record) =>
+          record.variantId === fileRecord.variantId &&
+          record.id === fileRecord.id,
+      )
+    ) {
+      fileRecords.push(fileRecord);
+    }
 
     if (fileRecord.flags.hasTopLevelAwait) {
       throw new Error(
@@ -2458,8 +3268,9 @@ async function transformModule(
       if (resolved.target.kind === "runtime") {
         continue;
       }
-      resolvedMap.set(resolved.id, resolved);
-      resolvedMap.set(resolved.moduleIdentity, resolved);
+      const resolvedMap = resolvedMapByEnv.get(envId);
+      resolvedMap?.set(resolved.id, resolved);
+      resolvedMap?.set(resolved.moduleIdentity, resolved);
       schedule({
         id: resolved.id,
         moduleIdentity: resolved.moduleIdentity,
@@ -2474,8 +3285,9 @@ async function transformModule(
     }
 
     for (const dynamicEntry of discoveredDynamics) {
-      resolvedMap.set(dynamicEntry.id, dynamicEntry);
-      resolvedMap.set(dynamicEntry.moduleIdentity, dynamicEntry);
+      const dynamicResolvedMap = resolvedMapByEnv.get(dynamicEntry.envId);
+      dynamicResolvedMap?.set(dynamicEntry.id, dynamicEntry);
+      dynamicResolvedMap?.set(dynamicEntry.moduleIdentity, dynamicEntry);
       const existing = dynamicEntries.get(dynamicEntry.id);
       if (existing) {
         existing.envs = Array.from(
@@ -3672,20 +4484,22 @@ async function flushPendingFiles(
   manifest: BundleManifest,
 ): Promise<void> {
   for (const file of files) {
-    const finalName = file.hash
-      ? applyHashToFileName(file.fileName, file.contents)
-      : file.fileName;
+    const finalName = finalPendingFileName(file);
     await fs.mkdir(path.dirname(path.join(outDir, finalName)), {
       recursive: true,
     });
     await fs.writeFile(path.join(outDir, finalName), file.contents);
+    const bundleKey =
+      file.type === "style"
+        ? stableManifestBundleKey(manifest, file.bundleKey)
+        : file.bundleKey;
     manifest.emittedFiles.push({
       fileName: finalName,
       originalFileName: file.fileName,
       type: file.type ?? "asset",
       envId: file.envId,
       contentType: file.contentType,
-      bundleKey: file.bundleKey,
+      bundleKey,
       contentHash: contentHash(file.contents),
       global: file.global,
     });
@@ -3703,10 +4517,34 @@ async function flushPendingFiles(
                 : "asset",
       contentType: file.contentType ?? guessContentType(finalName),
       envId: file.envId,
-      bundleKey: file.bundleKey,
+      bundleKey,
       global: file.global,
     });
   }
+}
+
+function finalPendingFileName(file: PendingEmitFile): string {
+  return file.hash
+    ? applyHashToFileName(file.fileName, file.contents)
+    : file.fileName;
+}
+
+function stableManifestBundleKey(
+  manifest: BundleManifest,
+  bundleKey: string | undefined,
+): string | undefined {
+  if (!bundleKey) return bundleKey;
+  const bundle = manifest.bundles.find(
+    (candidate) => candidate.id === bundleKey,
+  );
+  if (!bundle) return bundleKey;
+  const logicalEntrypoints = bundle.entrypoints
+    .map((entrypoint) => `${entrypoint.envId}:${entrypoint.entryId}`)
+    .sort();
+  if (logicalEntrypoints.length > 0) {
+    return logicalEntrypoints.join("|");
+  }
+  return `${bundle.envId}:${bundle.entryId}`;
 }
 
 function applyHashToFileName(

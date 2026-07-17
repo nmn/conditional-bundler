@@ -27,25 +27,43 @@ export default function cssBundlerPlugin(options = {}) {
             output,
             record: moduleRecord,
           };
-          moduleOutputs.set(`${moduleRecord.envs[0]}:${moduleRecord.id}`, item);
-          moduleOutputs.set(`${moduleRecord.envs[0]}:${item.moduleId}`, item);
+          for (const envId of moduleRecord.environmentIds ??
+            moduleRecord.envs ??
+            []) {
+            moduleOutputs.set(`${envId}:${moduleRecord.id}`, item);
+            moduleOutputs.set(`${envId}:${item.moduleId}`, item);
+          }
         }
       }
 
       for (const bundle of context.bundles) {
-        const selected = bundle.modules
-          .map((moduleId) => moduleOutputs.get(`${bundle.envId}:${moduleId}`))
-          .filter(Boolean);
+        const selected = Array.from(
+          new Map(
+            bundle.environmentIds
+              .flatMap((envId) =>
+                bundle.modules.map((moduleId) =>
+                  moduleOutputs.get(`${envId}:${moduleId}`),
+                ),
+              )
+              .filter(Boolean)
+              .map((item) => [item.moduleId, item]),
+          ).values(),
+        );
         if (selected.length === 0) {
           continue;
         }
         const entry = sanitizeBundleName(bundle.entryId);
         const pattern =
           context.outputs.cssFileName ?? "[entry].[env].[hash].css";
+        const scope =
+          bundle.environmentIds.length === 1
+            ? bundle.environmentIds[0]
+            : "universal";
         const provisional = normalizePosixPath(
           pattern
             .replaceAll("[entry]", entry)
-            .replaceAll("[env]", bundle.envId)
+            .replaceAll("[scope]", scope)
+            .replaceAll("[env]", scope)
             .replaceAll("[hash]", "RESOURCE_HASH"),
         );
         const selectedById = new Map(
@@ -115,10 +133,10 @@ export default function cssBundlerPlugin(options = {}) {
         context.emitFile({
           fileName,
           contents: css,
-          envId: bundle.envId,
+          envId: bundle.environmentIds.length === 1 ? bundle.envId : undefined,
           type: "style",
           contentType: "text/css; charset=utf-8",
-          bundleKey: `${bundle.envId}:${bundle.entryId}`,
+          bundleKey: bundle.id,
         });
         if (mapFileName) {
           context.emitFile({
@@ -126,10 +144,11 @@ export default function cssBundlerPlugin(options = {}) {
             contents: JSON.stringify(
               createIndexedMap(maps, cssParts, fileName, mapLineOffsets),
             ),
-            envId: bundle.envId,
+            envId:
+              bundle.environmentIds.length === 1 ? bundle.envId : undefined,
             type: "source-map",
             contentType: "application/json; charset=utf-8",
-            bundleKey: `${bundle.envId}:${bundle.entryId}`,
+            bundleKey: bundle.id,
           });
         }
       }

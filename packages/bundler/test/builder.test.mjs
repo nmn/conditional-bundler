@@ -224,7 +224,7 @@ test("rewrites dynamic import to constant", async () => {
   expect(snapshot).toMatchInlineSnapshot(`
 {
   "name": "dynamic-import",
-  "output": "const __IMPORT_ra8btrgq = () => import("./dynamic-import.browser.sp6pcy52.js").then((mod) => Object.freeze({ "foo": mod["ra8btrgq_foo"] }));
+  "output": "const __IMPORT_ra8btrgq = () => import("./dynamic-import.browser.ab0li65m.js").then((mod) => Object.freeze({ "foo": mod["ra8btrgq_foo"] }));
 async function ogy9gk4r_loadFoo() {
   const mod = await __IMPORT_ra8btrgq();
   return mod.foo;
@@ -239,7 +239,7 @@ test("dedupes dynamic import constants", async () => {
   expect(snapshot).toMatchInlineSnapshot(`
 {
   "name": "dynamic-import-shared",
-  "output": "const __IMPORT_s5ot8viw = () => import("./dynamic-import-shared.browser.v345apxf.js").then((mod) => Object.freeze({ "shared": mod["s5ot8viw_shared"] }));
+  "output": "const __IMPORT_s5ot8viw = () => import("./dynamic-import-shared.browser.rq7p77oz.js").then((mod) => Object.freeze({ "shared": mod["s5ot8viw_shared"] }));
 async function pjxrtv5k_loadA() {
   return __IMPORT_s5ot8viw();
 }
@@ -307,7 +307,7 @@ export const c = shared + 2;`,
   );
 
   const commonBundle = result.bundles.find((bundle) =>
-    bundle.entryId.startsWith("bundler:common:"),
+    bundle.entryId.startsWith("bundler:shared:"),
   );
   const bundlesByEntry = Object.fromEntries(
     Object.entries(entryPaths).map(([name, entryPath]) => [
@@ -330,7 +330,7 @@ export const c = shared + 2;`,
       (moduleId) => moduleCounts.get(moduleId),
     ),
   ).toEqual([1, 1, 1, 1]);
-  expect(commonBundle.entryId).toBe("bundler:common:browser");
+  expect(commonBundle.entryId).toMatch(/^bundler:shared:/);
   expect(
     result.manifest.bundles.find(
       (bundle) => bundle.entryId === commonBundle.entryId,
@@ -388,7 +388,7 @@ test("tree-shakes independent static CommonJS exports", async () => {
   expect(output).not.toContain("__BUNDLER_CJS_CACHE__");
 });
 
-test("coalesces shared modules into one stable common bundle in development and production", async () => {
+test("keeps reachability-based shared chunks stable in development and production", async () => {
   const projectDir = path.join(outRoot, "consumer-set-boundaries");
   const srcDir = path.join(projectDir, "src");
   await fs.rm(projectDir, { recursive: true, force: true });
@@ -461,18 +461,21 @@ export const c = sharedAll;`,
     );
 
   expect(moduleOwners(development)).toEqual(moduleOwners(production));
-  expect(production.bundles).toHaveLength(4);
-  expect(development.bundles).toHaveLength(5);
+  expect(production.bundles).toHaveLength(5);
+  expect(development.bundles).toHaveLength(6);
   expect(
     production.bundles.filter((bundle) =>
-      bundle.entryId.startsWith("bundler:common:"),
+      bundle.entryId.startsWith("bundler:shared:"),
     ),
-  ).toHaveLength(1);
-  expect(moduleOwners(production)[path.join(srcDir, "shared-all.js")]).toBe(
-    "bundler:common:browser",
+  ).toHaveLength(2);
+  expect(moduleOwners(production)[path.join(srcDir, "shared-all.js")]).toMatch(
+    /^bundler:shared:/,
   );
-  expect(moduleOwners(production)[path.join(srcDir, "shared-ab.js")]).toBe(
-    "bundler:common:browser",
+  expect(moduleOwners(production)[path.join(srcDir, "shared-ab.js")]).toMatch(
+    /^bundler:shared:/,
+  );
+  expect(moduleOwners(production)[path.join(srcDir, "shared-all.js")]).not.toBe(
+    moduleOwners(production)[path.join(srcDir, "shared-ab.js")],
   );
   expect(moduleOwners(production)[path.join(srcDir, "only-a.js")]).toBe(
     path.join(srcDir, "a.js"),
@@ -678,6 +681,28 @@ test("links runtime module paths without embedding source paths", async () => {
   expect(loaded.moduleUrl).toBe(pathToFileURL(bundlePath).href);
 });
 
+test("rejects Node filesystem path references while linking browser bundles", async () => {
+  await expect(
+    buildFixture("module-paths-browser", {
+      entries: [
+        {
+          id: "module-paths-browser",
+          path: path.join(fixturesDir, "module-paths", "src/index.js"),
+        },
+      ],
+      envs: {
+        browser: { conditions: ["browser"], target: "browser" },
+      },
+      outputs: {
+        outDir: path.join(outRoot, "module-paths-browser"),
+        fileName: "module-paths-browser.[scope].[hash].js",
+      },
+    }),
+  ).rejects.toThrow(
+    "Node path references cannot be linked into a browser-target bundle",
+  );
+});
+
 test("emits imported binary assets with linked URLs", async () => {
   const name = "asset-import";
   const result = await buildFixture(name);
@@ -701,6 +726,66 @@ test("emits imported binary assets with linked URLs", async () => {
     logo: { src: assetUrl, width: 4, height: 4 },
     freshLogo: new URL(assetUrl, pathToFileURL(bundlePath)).href,
   });
+});
+
+test("transforms JSON modules to one default export and preserves raw intent", async () => {
+  const name = "json-import";
+  const result = await buildFixture(name);
+  const bundlePath = path.join(outRoot, name, result.bundles[0].fileName);
+  await fs.writeFile(
+    path.join(outRoot, name, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+
+  const module = await import(pathToFileURL(bundlePath).href);
+  const source = await fs.readFile(
+    path.join(fixturesDir, name, "src/data.json"),
+    "utf8",
+  );
+  expect(module.result).toEqual({
+    data: JSON.parse(source),
+    hasOwnProto: true,
+    negativeZero: true,
+    raw: source,
+  });
+  expect(
+    result.manifest.assets.filter((item) => item.type === "asset"),
+  ).toEqual([]);
+  expect(await fs.readFile(bundlePath, "utf8")).toContain("JSON.parse(");
+});
+
+test("automatically removes types from TypeScript and TSX modules", async () => {
+  const name = "typescript";
+  const result = await buildFixture(name, {
+    entries: [
+      {
+        id: name,
+        path: path.join(fixturesDir, name, "src/index.ts"),
+      },
+    ],
+    configPlugins: [
+      {
+        __bundlerPluginRef: true,
+        module: path.join(rootDir, "packages/react-jsx-plugin/bundler.mjs"),
+      },
+    ],
+  });
+  const bundlePath = path.join(outRoot, name, result.bundles[0].fileName);
+  await fs.writeFile(
+    path.join(outRoot, name, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+
+  const module = await import(pathToFileURL(bundlePath).href);
+  expect(module.result).toEqual({
+    type: "strong",
+    properties: { "data-kind": "badge" },
+    child: "ready",
+  });
+  const output = await fs.readFile(bundlePath, "utf8");
+  expect(output).not.toMatch(/\b(?:interface|type)\s+Badge/);
+  expect(output).not.toContain(": BadgeModel");
+  expect(output).toContain("React.createElement");
 });
 
 test("resolves new URL assets against a configured root URL", async () => {
@@ -811,11 +896,21 @@ test("preserves binary assets and changes bundle hashes with asset contents", as
   expect(second.bundles[0].fileName).not.toBe(first.bundles[0].fileName);
 });
 
-test("loads a dynamic chunk's CSS before importing its JavaScript", async () => {
+test("records dynamic chunk CSS without injecting a runtime loader", async () => {
   const name = "dynamic-css";
-  const result = await buildFixture(name);
+  const outDir = path.join(outRoot, name);
+  const result = await buildFixture(name, {
+    outputs: {
+      outDir,
+      fileName: `${name}.[env].[hash].js`,
+      manifestFile: "manifest.json",
+    },
+  });
   const entry = result.bundles.find((bundle) =>
     bundle.entryId.endsWith("/src/index.js"),
+  );
+  const feature = result.bundles.find((bundle) =>
+    bundle.entryId.endsWith("/src/feature.js"),
   );
   const code = await fs.readFile(
     path.join(outRoot, name, entry.fileName),
@@ -823,8 +918,18 @@ test("loads a dynamic chunk's CSS before importing its JavaScript", async () => 
   );
   const style = result.manifest.assets.find((item) => item.type === "style");
   expect(style).toBeDefined();
-  expect(code).toContain("__bundler_load_css__");
-  expect(code).toContain(`"/${style.fileName}"`);
+  expect(code).not.toContain("__bundler_load_css__");
+  expect(code).not.toContain('document.createElement("link")');
+  expect(code).toContain("import(");
+  const featureEntrypoint = result.entrypoints[`browser:${feature.entryId}`];
+  expect(featureEntrypoint.bundles).toContain(feature.fileName);
+  expect(featureEntrypoint.styles).toEqual([style.fileName]);
+  const writtenManifest = JSON.parse(
+    await fs.readFile(path.join(outDir, "manifest.json"), "utf8"),
+  );
+  expect(writtenManifest.entrypoints[`browser:${feature.entryId}`]).toEqual(
+    featureEntrypoint,
+  );
   const css = await fs.readFile(
     path.join(outRoot, name, style.fileName),
     "utf8",
@@ -860,6 +965,13 @@ test("does not inject the browser CSS loader into node dynamic imports", async (
   expect(code).not.toContain("__bundler_load_css__");
   expect(code).not.toContain('document.createElement("link")');
   expect(code).toContain("import(");
+  const feature = result.bundles.find((bundle) =>
+    bundle.entryId.endsWith("/src/feature.js"),
+  );
+  const style = result.manifest.assets.find((item) => item.type === "style");
+  expect(result.entrypoints[`server:${feature.entryId}`].styles).toEqual([
+    style.fileName,
+  ]);
 });
 
 test("joins CSS asset and stylesheet paths after a configured root URL", async () => {
@@ -881,14 +993,58 @@ test("joins CSS asset and stylesheet paths after a configured root URL", async (
   const entry = result.bundles.find((bundle) =>
     bundle.entryId.endsWith("/src/index.js"),
   );
+  const feature = result.bundles.find((bundle) =>
+    bundle.entryId.endsWith("/src/feature.js"),
+  );
   const style = result.manifest.assets.find((item) => item.type === "style");
   const code = await fs.readFile(path.join(outDir, entry.fileName), "utf8");
   const css = await fs.readFile(path.join(outDir, style.fileName), "utf8");
 
-  expect(code).toContain(`"https://cdn.example.test/app/${style.fileName}"`);
+  expect(code).not.toContain(style.fileName);
+  expect(result.entrypoints[`browser:${feature.entryId}`].styles).toEqual([
+    style.fileName,
+  ]);
   expect(css).toMatch(
     /url\("https:\/\/cdn\.example\.test\/app\/assets\/pixel\.[a-z0-9]+\.svg"\)/,
   );
+});
+
+test("coalesces browser and node dynamic-CSS bundles without target glue", async () => {
+  const name = "dynamic-css-universal";
+  const outDir = path.join(outRoot, name);
+  const entryPath = path.join(fixturesDir, "dynamic-css", "src/index.js");
+  const result = await buildFixture(name, {
+    envs: {
+      browser: { conditions: ["default"], target: "browser" },
+      server: { conditions: ["default"], target: "node" },
+    },
+    entries: [{ id: name, path: entryPath }],
+    outputs: {
+      outDir,
+      fileName: "[entry].[scope].[hash].js",
+    },
+  });
+  const browserEntry = result.entrypoints[`browser:${entryPath}`];
+  const serverEntry = result.entrypoints[`server:${entryPath}`];
+  expect(browserEntry.fileName).toBe(serverEntry.fileName);
+  expect(result.bundles).toHaveLength(2);
+
+  const code = await fs.readFile(
+    path.join(outDir, browserEntry.fileName),
+    "utf8",
+  );
+  expect(code).not.toContain("__bundler_load_css__");
+  expect(code).not.toContain("document.");
+  await fs.writeFile(
+    path.join(outDir, "package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+  const imported = await import(
+    `${pathToFileURL(path.join(outDir, browserEntry.fileName)).href}?universal-css=${Date.now()}`
+  );
+  await expect(imported.loadFeature()).resolves.toMatchObject({
+    feature: true,
+  });
 });
 
 test("fails on top-level await", async () => {
@@ -947,6 +1103,44 @@ test("reuses cached worker artifacts for unchanged modules", async () => {
   const secondArtifactStat = await fs.stat(artifactPaths[0]);
   expect(secondModuleStat.mtimeMs).toBe(firstModuleStat.mtimeMs);
   expect(secondArtifactStat.mtimeMs).toBe(firstArtifactStat.mtimeMs);
+});
+
+test("reuses cached asset artifacts when external source maps are enabled", async () => {
+  const name = "asset-import";
+  const cacheDir = path.join(cacheRoot, "asset-source-map-cache-hit");
+  const outDir = path.join(outRoot, name);
+  await fs.rm(cacheDir, { recursive: true, force: true });
+
+  const options = {
+    cacheDir,
+    outputs: {
+      outDir,
+      fileName: `${name}.[env].[hash].js`,
+      sourceMap: "external",
+    },
+  };
+  await buildFixture(name, options);
+
+  const v2Dir = path.join(cacheDir, "v2");
+  const [configRoot] = (await fs.readdir(v2Dir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  const logoPath = path.join(fixturesDir, name, "src/logo.svg");
+  const logoPkgRoot = findPkgRoot(logoPath) ?? path.dirname(logoPath);
+  const logoFileHash = contentHash(
+    packagePathIdentity(readPkgSafe(logoPkgRoot), logoPath),
+  );
+  const logoModuleRoot = path.join(v2Dir, configRoot, "files", logoFileHash);
+  const logoModulePath = path.join(
+    logoModuleRoot,
+    await findModuleCacheSuffix(logoModuleRoot),
+  );
+  const firstModuleStat = await fs.stat(logoModulePath);
+
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  await buildFixture(name, options);
+
+  expect((await fs.stat(logoModulePath)).mtimeMs).toBe(firstModuleStat.mtimeMs);
 });
 
 test("writes and replaces readable debug transformations, including cache hits", async () => {
@@ -1266,6 +1460,81 @@ test("reuses transformed CJS artifacts after relocating a package", async () => 
   }
 });
 
+test("keeps hashed bundle filenames stable after relocating an identical graph", async () => {
+  const firstRoot = path.join(outRoot, "portable-output-first");
+  const secondRoot = path.join(outRoot, "portable-output-second");
+  const prepareProject = async (projectRoot) => {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+    await fs.mkdir(path.join(projectRoot, "src"), { recursive: true });
+    await fs.writeFile(
+      path.join(projectRoot, "package.json"),
+      JSON.stringify({
+        name: "portable-output-fixture",
+        version: "1.0.0",
+        type: "module",
+      }),
+    );
+    await fs.writeFile(
+      path.join(projectRoot, "src/index.js"),
+      `import { shared } from "./shared.js";
+export const value = shared;
+export const load = () => import("./lazy.js");`,
+    );
+    await fs.writeFile(
+      path.join(projectRoot, "src/lazy.js"),
+      `import { shared } from "./shared.js"; export const lazy = shared;`,
+    );
+    await fs.writeFile(
+      path.join(projectRoot, "src/shared.js"),
+      `export const shared = "portable";`,
+    );
+  };
+  const buildRelocated = async (projectRoot) => {
+    const { buildProject } = await import("../dist/builder.js");
+    return buildProject(
+      {
+        envs: { browser: { conditions: ["default"], target: "browser" } },
+        entries: [
+          { id: "index", path: path.join(projectRoot, "src/index.js") },
+        ],
+        outputs: {
+          outDir: path.join(projectRoot, "dist"),
+          fileName: "[entry].[scope].[hash].js",
+        },
+        cacheDir: path.join(projectRoot, ".cache"),
+        css: false,
+        maxWorkers: 2,
+        diagnostics: "human",
+      },
+      [],
+    );
+  };
+  const summarize = async (projectRoot, result) =>
+    Promise.all(
+      result.bundles
+        .map((bundle) => ({
+          entry: path.basename(bundle.entryId),
+          fileName: bundle.fileName,
+        }))
+        .sort((left, right) => left.entry.localeCompare(right.entry))
+        .map(async (bundle) => ({
+          ...bundle,
+          code: await fs.readFile(
+            path.join(projectRoot, "dist", bundle.fileName),
+            "utf8",
+          ),
+        })),
+    );
+
+  await Promise.all([prepareProject(firstRoot), prepareProject(secondRoot)]);
+  const first = await buildRelocated(firstRoot);
+  const second = await buildRelocated(secondRoot);
+
+  expect(await summarize(secondRoot, second)).toEqual(
+    await summarize(firstRoot, first),
+  );
+});
+
 test("writes bundle manifest and supports entry output placeholder", async () => {
   const outDir = path.join(outRoot, "entry-placeholder");
   const result = await buildFixture("simple", {
@@ -1442,6 +1711,87 @@ test("dev hmr emits mutable cell installers keyed by identifiers", async () => {
   expect(Object.prototype.hasOwnProperty.call(symbolCell, "cellId")).toBe(
     false,
   );
+});
+
+test("dev hmr keeps node aliases and asset facades immutable", async () => {
+  const projectDir = path.join(outRoot, "hmr-browser-server-variants");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  const serverPath = path.join(srcDir, "entry.server.js");
+  const clientPath = path.join(srcDir, "entry.client.js");
+  await fs.writeFile(
+    path.join(srcDir, "logo.svg"),
+    '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4" />',
+  );
+  await fs.writeFile(path.join(srcDir, "value.js"), `export default "shared";`);
+  await fs.writeFile(
+    path.join(srcDir, "bridge.js"),
+    `export { default as logo } from "./logo.svg";
+export { default as value } from "./value.js";`,
+  );
+  const entrySource = `import { logo, value } from "./bridge.js";
+export const result = { logo, value };`;
+  await fs.writeFile(serverPath, entrySource);
+  await fs.writeFile(clientPath, entrySource);
+
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: {
+        server: { conditions: ["node"], target: "node" },
+        client: { conditions: ["browser"], target: "browser" },
+      },
+      entries: [
+        { id: "server", path: serverPath, envs: ["server"] },
+        { id: "client", path: clientPath, envs: ["client"] },
+      ],
+      outputs: { outDir, fileName: "[entry].[scope].[hash].js" },
+      cacheDir: path.join(projectDir, ".cache"),
+      maxWorkers: 2,
+      diagnostics: "human",
+      dev: { hmr: true, reactRefresh: false },
+    },
+    [],
+  );
+
+  const serverBundle = result.entrypoints[`server:${serverPath}`];
+  const clientBundle = result.entrypoints[`client:${clientPath}`];
+  const serverCode = await fs.readFile(
+    path.join(outDir, serverBundle.fileName),
+    "utf8",
+  );
+  const clientCode = await fs.readFile(
+    path.join(outDir, clientBundle.fileName),
+    "utf8",
+  );
+  const serverUrl = pathToFileURL(
+    path.join(outDir, serverBundle.fileName),
+  ).href;
+  const { stdout } = await execFileAsync(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    `const loaded = await import(${JSON.stringify(serverUrl)}); console.log(JSON.stringify(loaded.result));`,
+  ]);
+  const loadedResult = JSON.parse(stdout);
+
+  expect(loadedResult).toEqual({
+    logo: expect.objectContaining({
+      src: expect.stringMatching(/^\/assets\//),
+    }),
+    value: "shared",
+  });
+  expect(serverCode).not.toContain("__BUNDLER_HMR__.register");
+  expect(serverCode).toMatch(/const [a-z0-9]+_default = \{/);
+  expect(clientCode).toContain("__BUNDLER_HMR__.register");
+  expect(
+    result.bundles.some(
+      (bundle) =>
+        bundle.entryId.startsWith("bundler:hmr-runtime:") &&
+        bundle.environmentIds.includes("server"),
+    ),
+  ).toBe(false);
 });
 
 test("dev hmr applies fetched patches inside the owning bundle scope", async () => {
@@ -2238,6 +2588,65 @@ test("runs module-backed worker transforms per environment", async () => {
   expect(ssrCode).toContain('"server"');
 });
 
+test("keeps parent chunks split when dependency chunk variants differ", async () => {
+  const projectDir = path.join(outRoot, "dependency-variant-linking");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  const parentPath = path.join(srcDir, "parent.js");
+  const childPath = path.join(srcDir, "child.js");
+  await fs.writeFile(
+    parentPath,
+    `import { child } from "./child.js"; export const parent = child;`,
+  );
+  await fs.writeFile(childPath, `export const child = "__TOKEN__";`);
+  const pluginModule = path.join(
+    rootDir,
+    "packages/bundler/test/plugins/env-transform-plugin.mjs",
+  );
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: {
+        client: { conditions: ["browser"], target: "browser" },
+        server: { conditions: ["node"], target: "node" },
+      },
+      entries: [
+        { id: "parent", path: parentPath },
+        { id: "child", path: childPath },
+      ],
+      outputs: { outDir, fileName: "[entry].[scope].[hash].js" },
+      cacheDir: path.join(projectDir, ".cache"),
+      css: false,
+      maxWorkers: 2,
+      diagnostics: "human",
+      plugins: [
+        {
+          __bundlerPluginRef: true,
+          module: pluginModule,
+          options: { defaultValue: "server", clientValue: "client" },
+        },
+      ],
+    },
+    [],
+  );
+
+  expect(result.bundles).toHaveLength(4);
+  expect(
+    result.bundles.every((bundle) => bundle.environmentIds.length === 1),
+  ).toBe(true);
+  for (const envId of ["client", "server"]) {
+    const parentEntry = result.entrypoints[`${envId}:${parentPath}`];
+    const childEntry = result.entrypoints[`${envId}:${childPath}`];
+    const parentCode = await fs.readFile(
+      path.join(outDir, parentEntry.fileName),
+      "utf8",
+    );
+    expect(parentCode).toContain(`from "./${childEntry.fileName}"`);
+  }
+});
+
 test("runs declared environment-independent Babel stages once", async () => {
   const projectDir = path.join(outRoot, "environment-independent-transform");
   const srcDir = path.join(projectDir, "src");
@@ -2245,16 +2654,19 @@ test("runs declared environment-independent Babel stages once", async () => {
   await fs.rm(projectDir, { recursive: true, force: true });
   await fs.mkdir(srcDir, { recursive: true });
   const sharedPath = path.join(srcDir, "shared.js");
+  const bridgePath = path.join(srcDir, "bridge.js");
   const clientPath = path.join(srcDir, "app.client.js");
   const serverPath = path.join(srcDir, "app.server.js");
+  const countFile = path.join(projectDir, "transform-count.txt");
   await fs.writeFile(sharedPath, `export const shared = "once";`);
+  await fs.writeFile(bridgePath, `export { shared } from "./shared.js";`);
   await fs.writeFile(
     clientPath,
     `import { shared } from "./shared.js"; export const client = shared;`,
   );
   await fs.writeFile(
     serverPath,
-    `import { shared } from "./shared.js"; export const server = shared;`,
+    `import { shared } from "./bridge.js"; export const server = shared;`,
   );
   const pluginModule = path.join(
     rootDir,
@@ -2268,8 +2680,8 @@ test("runs declared environment-independent Babel stages once", async () => {
         client: { conditions: ["browser"], target: "browser" },
       },
       entries: [
-        { id: "client", path: clientPath },
-        { id: "server", path: serverPath },
+        { id: "client", path: clientPath, envs: ["client"] },
+        { id: "server", path: serverPath, envs: ["server"] },
       ],
       outputs: {
         outDir,
@@ -2282,16 +2694,422 @@ test("runs declared environment-independent Babel stages once", async () => {
         {
           __bundlerPluginRef: true,
           module: pluginModule,
+          options: { countFile },
         },
       ],
     },
     [],
   );
 
-  expect(result.bundles.map((bundle) => bundle.envId).sort()).toEqual([
-    "client",
-    "server",
+  expect(result.bundles).toHaveLength(3);
+  expect(
+    result.bundles
+      .filter((bundle) => bundle.environmentIds.length === 1)
+      .map((bundle) => bundle.environmentIds[0])
+      .sort(),
+  ).toEqual(["client", "server"]);
+  expect(
+    result.bundles.some((bundle) => bundle.environmentIds.length > 1),
+  ).toBe(true);
+  expect((await fs.readFile(countFile, "utf8")).trim().split("\n")).toEqual([
+    "shared",
   ]);
+});
+
+test("groups compatible modules with manualChunk", async () => {
+  const projectDir = path.join(outRoot, "manual-chunk");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(
+    path.join(srcDir, "first.js"),
+    `import { a } from "./a.js"; export const first = a;`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "second.js"),
+    `import { b } from "./b.js"; export const second = b;`,
+  );
+  await fs.writeFile(path.join(srcDir, "a.js"), `export const a = "a";`);
+  await fs.writeFile(path.join(srcDir, "b.js"), `export const b = "b";`);
+
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: { browser: { conditions: ["default"], target: "browser" } },
+      entries: [
+        { id: "first", path: path.join(srcDir, "first.js") },
+        { id: "second", path: path.join(srcDir, "second.js") },
+      ],
+      outputs: { outDir, fileName: "[entry].[scope].[hash].js" },
+      cacheDir: path.join(projectDir, ".cache"),
+      css: false,
+      maxWorkers: 2,
+      diagnostics: "human",
+      plugins: [
+        {
+          name: "manual-vendor",
+          manualChunk(moduleInfo) {
+            "manual-vendor-v1";
+            return /[/\\][ab]\.js$/.test(moduleInfo.filePath)
+              ? "vendor"
+              : undefined;
+          },
+        },
+      ],
+    },
+    [],
+  );
+
+  const manualBundle = result.bundles.find((bundle) =>
+    bundle.entryId.startsWith("bundler:manual:manual-vendor:vendor"),
+  );
+  expect(manualBundle).toBeDefined();
+  expect(manualBundle.modules.map((id) => path.basename(id)).sort()).toEqual([
+    "a.js",
+    "b.js",
+  ]);
+  for (const entryName of ["first.js", "second.js"]) {
+    const entryBundle = result.bundles.find((bundle) =>
+      bundle.entryId.endsWith(entryName),
+    );
+    const code = await fs.readFile(
+      path.join(outDir, entryBundle.fileName),
+      "utf8",
+    );
+    expect(code).toContain(`from "./${manualBundle.fileName}"`);
+  }
+});
+
+test("rejects manualChunk groups with incompatible environment variants", async () => {
+  const projectDir = path.join(outRoot, "manual-chunk-incompatible");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(
+    path.join(srcDir, "client.js"),
+    `import { shared } from "./universal.js"; import { scoped } from "./scoped.js"; export const value = shared + scoped;`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "server.js"),
+    `import { shared } from "./universal.js"; import { scoped } from "./scoped.js"; export const value = shared + scoped;`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "universal.js"),
+    `export const shared = "shared";`,
+  );
+  await fs.writeFile(
+    path.join(srcDir, "scoped.js"),
+    `export const scoped = "__TOKEN__";`,
+  );
+  const envTransformPlugin = path.join(
+    rootDir,
+    "packages/bundler/test/plugins/env-transform-plugin.mjs",
+  );
+  const { buildProject } = await import("../dist/builder.js");
+
+  await expect(
+    buildProject(
+      {
+        envs: {
+          client: { conditions: ["browser"], target: "browser" },
+          server: { conditions: ["node"], target: "node" },
+        },
+        entries: [
+          {
+            id: "client",
+            path: path.join(srcDir, "client.js"),
+            envs: ["client"],
+          },
+          {
+            id: "server",
+            path: path.join(srcDir, "server.js"),
+            envs: ["server"],
+          },
+        ],
+        outputs: { outDir, fileName: "[entry].[scope].[hash].js" },
+        cacheDir: path.join(projectDir, ".cache"),
+        css: false,
+        maxWorkers: 2,
+        diagnostics: "human",
+        plugins: [
+          {
+            __bundlerPluginRef: true,
+            module: envTransformPlugin,
+            options: { defaultValue: "server", clientValue: "client" },
+          },
+          {
+            name: "manual-incompatible",
+            manualChunk(moduleInfo) {
+              "manual-incompatible-v1";
+              return /[/\\](?:universal|scoped)\.js$/.test(moduleInfo.filePath)
+                ? "vendor"
+                : undefined;
+            },
+          },
+        ],
+      },
+      [],
+    ),
+  ).rejects.toThrow("incompatible link behavior");
+});
+
+test("rejects manualChunk groups with incompatible dependency links", async () => {
+  const projectDir = path.join(outRoot, "manual-chunk-link-incompatible");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  const rootPath = path.join(srcDir, "root.js");
+  const wrapperPath = path.join(srcDir, "wrapper.js");
+  const childPath = path.join(srcDir, "child.js");
+  await fs.writeFile(
+    rootPath,
+    `import { wrapper } from "./wrapper.js"; export const root = wrapper;`,
+  );
+  await fs.writeFile(
+    wrapperPath,
+    `import { child } from "./child.js"; export const wrapper = child;`,
+  );
+  await fs.writeFile(childPath, `export const child = "__TOKEN__";`);
+  const envTransformPlugin = path.join(
+    rootDir,
+    "packages/bundler/test/plugins/env-transform-plugin.mjs",
+  );
+  const { buildProject } = await import("../dist/builder.js");
+
+  await expect(
+    buildProject(
+      {
+        envs: {
+          client: { conditions: ["browser"], target: "browser" },
+          server: { conditions: ["node"], target: "node" },
+        },
+        entries: [
+          { id: "root", path: rootPath },
+          { id: "child", path: childPath },
+        ],
+        outputs: { outDir, fileName: "[entry].[scope].[hash].js" },
+        cacheDir: path.join(projectDir, ".cache"),
+        css: false,
+        maxWorkers: 2,
+        diagnostics: "human",
+        plugins: [
+          {
+            __bundlerPluginRef: true,
+            module: envTransformPlugin,
+            options: { defaultValue: "server", clientValue: "client" },
+          },
+          {
+            name: "manual-link-incompatible",
+            manualChunk(moduleInfo) {
+              "manual-link-incompatible-v1";
+              return moduleInfo.filePath === wrapperPath
+                ? "wrapper"
+                : undefined;
+            },
+          },
+        ],
+      },
+      [],
+    ),
+  ).rejects.toThrow("incompatible link behavior");
+});
+
+test("changes importer hashes when generated dependency imports change", async () => {
+  const projectDir = path.join(outRoot, "dependency-hash");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  const cacheDir = path.join(projectDir, ".cache");
+  const entryPath = path.join(srcDir, "entry.js");
+  const dependencyPath = path.join(srcDir, "dependency.js");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(
+    entryPath,
+    `import { dependency } from "./dependency.js"; export const value = dependency;`,
+  );
+  await fs.writeFile(dependencyPath, `export const dependency = 1;`);
+  const { buildProject } = await import("../dist/builder.js");
+  const config = {
+    envs: { browser: { conditions: ["default"], target: "browser" } },
+    entries: [
+      { id: "entry", path: entryPath },
+      { id: "dependency", path: dependencyPath },
+    ],
+    outputs: { outDir, fileName: "[entry].[scope].[hash].js" },
+    cacheDir,
+    css: false,
+    maxWorkers: 2,
+    diagnostics: "human",
+  };
+  const first = await buildProject(config, []);
+  const firstEntry = first.bundles.find(
+    (bundle) => bundle.entryId === entryPath,
+  );
+  const firstDependency = first.bundles.find(
+    (bundle) => bundle.entryId === dependencyPath,
+  );
+
+  await fs.writeFile(dependencyPath, `export const dependency = 2;`);
+  const second = await buildProject(config, []);
+  const secondEntry = second.bundles.find(
+    (bundle) => bundle.entryId === entryPath,
+  );
+  const secondDependency = second.bundles.find(
+    (bundle) => bundle.entryId === dependencyPath,
+  );
+  const secondEntryCode = await fs.readFile(
+    path.join(outDir, secondEntry.fileName),
+    "utf8",
+  );
+
+  expect(secondDependency.fileName).not.toBe(firstDependency.fileName);
+  expect(secondEntry.fileName).not.toBe(firstEntry.fileName);
+  expect(secondEntryCode).toContain(`from "./${secondDependency.fileName}"`);
+});
+
+test("changes bundle hashes when linked resource contents change", async () => {
+  const projectDir = path.join(outRoot, "resource-hash");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  const entryPath = path.join(srcDir, "index.js");
+  const stylePath = path.join(srcDir, "theme.css");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(
+    entryPath,
+    `import "./theme.css"; export const value = 1;`,
+  );
+  await fs.writeFile(stylePath, `body { color: red; }`);
+  const { buildProject } = await import("../dist/builder.js");
+  const config = {
+    envs: { browser: { conditions: ["default"], target: "browser" } },
+    entries: [{ id: "index", path: entryPath }],
+    outputs: { outDir, fileName: "[entry].[scope].[hash].js" },
+    cacheDir: path.join(projectDir, ".cache"),
+    maxWorkers: 2,
+    diagnostics: "human",
+  };
+  const first = await buildProject(config, []);
+  const firstStyle = first.manifest.assets.find(
+    (asset) => asset.type === "style",
+  );
+
+  await fs.writeFile(stylePath, `body { color: blue; }`);
+  const second = await buildProject(config, []);
+  const secondStyle = second.manifest.assets.find(
+    (asset) => asset.type === "style",
+  );
+
+  expect(secondStyle.fileName).not.toBe(firstStyle.fileName);
+  expect(second.bundles[0].fileName).not.toBe(first.bundles[0].fileName);
+});
+
+test("exposes final bundle filenames only after resource hashing", async () => {
+  const projectDir = path.join(outRoot, "resource-final-filename");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  const entryPath = path.join(srcDir, "index.js");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(entryPath, `export const value = 1;`);
+  let resourceBundles;
+  const { buildProject } = await import("../dist/builder.js");
+  const result = await buildProject(
+    {
+      envs: { browser: { conditions: ["default"], target: "browser" } },
+      entries: [{ id: "index", path: entryPath }],
+      outputs: { outDir, fileName: "[entry].[scope].[hash].js" },
+      cacheDir: path.join(projectDir, ".cache"),
+      css: false,
+      maxWorkers: 2,
+      diagnostics: "human",
+      plugins: [
+        {
+          name: "resource-final-filename",
+          generateBundleResources({ bundles, emitFile }) {
+            "resource-final-filename-v1";
+            resourceBundles = structuredClone(bundles);
+            emitFile({
+              fileName: "resource.txt",
+              contents: "resource bytes",
+              bundleKey: bundles[0].id,
+            });
+          },
+          buildEnd({ bundles, emitFile }) {
+            "resource-final-filename-build-end-v1";
+            emitFile({
+              fileName: "bundle-names.json",
+              type: "manifest",
+              contents: JSON.stringify(
+                bundles.map((bundle) => bundle.fileName),
+              ),
+            });
+          },
+        },
+      ],
+    },
+    [],
+  );
+
+  expect(resourceBundles[0]).not.toHaveProperty("fileName");
+  const referencedNames = JSON.parse(
+    await fs.readFile(path.join(outDir, "bundle-names.json"), "utf8"),
+  );
+  expect(referencedNames).toEqual(
+    result.bundles.map((bundle) => bundle.fileName),
+  );
+  await expect(fs.access(path.join(outDir, referencedNames[0]))).resolves.toBe(
+    undefined,
+  );
+});
+
+test("changes bundle hashes when linked source maps change", async () => {
+  const projectDir = path.join(outRoot, "source-map-hash");
+  const srcDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  const entryPath = path.join(srcDir, "index.js");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(srcDir, { recursive: true });
+  await fs.writeFile(entryPath, `export const value = 1;`);
+  const { buildProject } = await import("../dist/builder.js");
+  const createMapPlugin = (label) => ({
+    name: `source-map-${label}`,
+    afterCombine: [
+      ({ code, map }) => {
+        "source-map-hash-v1";
+        return {
+          code,
+          map: JSON.stringify({ ...JSON.parse(map), x_test_label: label }),
+        };
+      },
+    ],
+  });
+  const config = {
+    envs: { browser: { conditions: ["default"], target: "browser" } },
+    entries: [{ id: "index", path: entryPath }],
+    outputs: {
+      outDir,
+      fileName: "[entry].[scope].[hash].js",
+      sourceMap: "external",
+    },
+    cacheDir: path.join(projectDir, ".cache"),
+    css: false,
+    maxWorkers: 2,
+    diagnostics: "human",
+  };
+  const first = await buildProject(
+    { ...config, plugins: [createMapPlugin("first")] },
+    [],
+  );
+  const second = await buildProject(
+    { ...config, plugins: [createMapPlugin("second")] },
+    [],
+  );
+
+  expect(second.bundles[0].fileName).not.toBe(first.bundles[0].fileName);
 });
 
 test("resolves imports introduced by transform plugins", async () => {

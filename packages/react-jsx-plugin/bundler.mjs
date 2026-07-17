@@ -15,7 +15,6 @@ export default function reactJsxPlugin(options = {}) {
             ? { importSource: options.importSource ?? "react" }
             : {}),
           __bundlerExcludeNodeModules: true,
-          __bundlerEnvironmentIndependent: true,
         },
       ],
     ],

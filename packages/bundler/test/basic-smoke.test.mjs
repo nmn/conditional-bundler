@@ -34,14 +34,16 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
   );
   const clientBundle = findBundle(manifest, "client");
   const serverBundle = findBundle(manifest, "rsc");
-  const clientBundles = manifest.bundles.filter(
-    (bundle) => bundle.envId === "client",
+  const clientBundles = manifest.bundles.filter((bundle) =>
+    bundleAppliesTo(bundle, "client"),
   );
   const clientBundleFiles = clientBundles
     .map((bundle) => bundle.fileName)
     .sort();
-  const commonBundle = clientBundles.find((bundle) =>
-    bundle.entryId.startsWith("bundler:common:"),
+  const commonBundle = clientBundles.find(
+    (bundle) =>
+      bundle.environmentIds.length === 1 &&
+      bundle.entryId.startsWith("bundler:shared:"),
   );
   const counterBundle = manifest.bundles.find(
     (bundle) =>
@@ -64,10 +66,17 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
       expect.stringMatching(/^Counter\.client\.[a-z0-9]+\.js$/),
       expect.stringMatching(/^DraftPad\.client\.[a-z0-9]+\.js$/),
       expect.stringMatching(/^PreferenceSwitch\.client\.[a-z0-9]+\.js$/),
-      expect.stringMatching(/^bundler-common-client\.client\.[a-z0-9]+\.js$/),
+      expect.stringMatching(
+        /^bundler-shared-[a-z0-9]+\.client\.[a-z0-9]+\.js$/,
+      ),
       expect.stringMatching(/^runtime-client\.client\.[a-z0-9]+\.js$/),
     ]),
   );
+  expect(
+    clientBundleFiles.filter((fileName) =>
+      fileName.startsWith("bundler-shared-"),
+    ),
+  ).toHaveLength(1);
   expect(commonBundle).toBeDefined();
   const clientModuleIds = clientBundles.flatMap((bundle) => bundle.modules);
   expect(new Set(clientModuleIds).size).toBe(clientModuleIds.length);
@@ -131,6 +140,9 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
     expect(html).toContain(
       `<script type="module" src="/${clientBundle.fileName}"></script>`,
     );
+    expect(html).toContain(
+      `<link rel="stylesheet" href="/${showcaseAssets.style.fileName}"`,
+    );
 
     const clientAsset = await fetchAsset(`${baseUrl}/${clientBundle.fileName}`);
     expect(clientAsset.contentType).toContain("text/javascript");
@@ -148,6 +160,11 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
     );
     expect(markAsset.contentType).toContain("image/svg+xml");
     expect(markAsset.text).toContain("<svg");
+    const styleAsset = await fetchAsset(
+      `${baseUrl}/${showcaseAssets.style.fileName}`,
+    );
+    expect(styleAsset.contentType).toContain("text/css");
+    expect(styleAsset.text).toContain("outline-offset: 6px");
 
     const flight = await fetchText(`${baseUrl}/rsc?path=%2F`);
     expect(flight).toContain("src/Counter.jsx");
@@ -190,6 +207,10 @@ test("react-rsc-basic development serves HMR output and linked source maps", asy
       expect(html).toContain("Counter.client.");
       expect(html).toContain("DraftPad.client.");
       expect(html).toContain("PreferenceSwitch.client.");
+      const styleMatch = html.match(
+        /<link rel="stylesheet" href="\/(server\.rsc\.[a-z0-9]+\.css)"/,
+      );
+      expect(styleMatch).not.toBeNull();
       const scriptMatch = html.match(
         /<script type="module" src="\/(runtime-client\.client\.[a-z0-9]+\.js)"><\/script>/,
       );
@@ -220,18 +241,22 @@ test("react-rsc-basic development serves HMR output and linked source maps", asy
       const manifest = await readManifest();
       expectCjsNodeEnv(manifest, "development");
       const showcaseAssets = await expectShowcaseAssets(manifest);
+      expect(styleMatch[1]).toBe(showcaseAssets.style.fileName);
       const markAsset = await fetchAsset(
         `${baseUrl}/${showcaseAssets.mark.fileName}`,
       );
       expect(markAsset.contentType).toContain("image/svg+xml");
-      const clientBundles = manifest.bundles.filter(
-        (bundle) => bundle.envId === "client",
+      const styleAsset = await fetchAsset(`${baseUrl}/${styleMatch[1]}`);
+      expect(styleAsset.contentType).toContain("text/css");
+      expect(styleAsset.text).toContain("outline-offset: 6px");
+      const clientBundles = manifest.bundles.filter((bundle) =>
+        bundleAppliesTo(bundle, "client"),
       );
       const runtimeBundle = clientBundles.find(
         (bundle) => bundle.entryId === "bundler:hmr-runtime:client",
       );
-      const commonBundle = clientBundles.find(
-        (bundle) => bundle.entryId === "bundler:common:client",
+      const commonBundle = clientBundles.find((bundle) =>
+        bundle.entryId.startsWith("bundler:shared:"),
       );
       const clientModuleIds = clientBundles.flatMap((bundle) => bundle.modules);
       expect(new Set(clientModuleIds).size).toBe(clientModuleIds.length);
@@ -435,9 +460,13 @@ function expectCjsNodeEnv(manifest, expected) {
 function findBundle(manifest, envId) {
   return manifest.bundles.find(
     (bundle) =>
-      bundle.envId === envId &&
+      bundleAppliesTo(bundle, envId) &&
       bundle.entryId.endsWith("runtime-client.js") === (envId === "client"),
   );
+}
+
+function bundleAppliesTo(bundle, envId) {
+  return (bundle.environmentIds ?? [bundle.envId]).includes(envId);
 }
 
 async function fetchText(url) {

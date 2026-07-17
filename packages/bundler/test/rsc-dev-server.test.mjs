@@ -1,9 +1,17 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
   addClientPatchImports,
   classifyRscDevChange,
+  syncChangedRscNodeModules,
 } from "../dist/dev/rsc-server.js";
 import { resolveConditionalPatch } from "../dist/dev/conditional-assets.js";
-import { createPatch, HmrUpdateStore } from "../dist/dev/server.js";
+import {
+  createPatch,
+  createRebuildScheduler,
+  HmrUpdateStore,
+} from "../dist/dev/server.js";
 
 test("resolves conditional HMR records from environment values", async () => {
   const previous = process.env.DEV;
@@ -211,6 +219,46 @@ test("keeps client reference edits patchable when the module has an RSC stub", (
   ).toEqual({ type: "patch", patch });
 });
 
+test("ignores server filename churn caused only by changed style resources", () => {
+  const clientEntryId = "/app/src/island.jsx";
+  const previous = fakeBuild([
+    bundle("client", clientEntryId, "island.old.js", [clientEntryId]),
+    bundle(
+      "rsc",
+      "/app/src/server.jsx",
+      "server.resource-old.js",
+      ["/app/src/server.jsx"],
+      "same-server-runtime",
+    ),
+  ]);
+  const next = fakeBuild([
+    bundle("client", clientEntryId, "island.new.js", [clientEntryId]),
+    bundle(
+      "rsc",
+      "/app/src/server.jsx",
+      "server.resource-new.js",
+      ["/app/src/server.jsx"],
+      "same-server-runtime",
+    ),
+  ]);
+  const patch = {
+    type: "patch",
+    updates: [update(`client:${clientEntryId}`)],
+    changedBundles: [`client:${clientEntryId}`],
+    styles: ["/assets/tailwind.new.css"],
+  };
+
+  expect(
+    classifyRscDevChange({
+      previous,
+      next,
+      patch,
+      clientEntryId: "/app/src/island.jsx",
+      serverEntryId: "server",
+    }),
+  ).toEqual({ type: "patch", patch });
+});
+
 test("ignores generated RSC manifest churn and keeps client updates granular", () => {
   const entryId = "/app/src/island.jsx";
   const key = `client:${entryId}`;
@@ -296,7 +344,7 @@ test("adds dynamic imports for changed client chunks but not the client entry", 
     ...patch,
     updates: [patch.updates[0]],
     imports: [
-      "/assets/island.new.js?hmr=island.new.js&rsc-id=%2Fapp%2Fsrc%2Fisland.jsx&v=7",
+      "/island.new.js?hmr=island.new.js&rsc-id=%2Fapp%2Fsrc%2Fisland.jsx&v=7",
     ],
     rscChunks: { "/app/src/island.jsx": "island.new.js" },
   });
@@ -340,6 +388,93 @@ test("creates style-only HMR patches for changed CSS assets", () => {
       serverEntryId: "server",
     }),
   ).toEqual({ type: "patch", patch });
+});
+
+test("serializes rebuilds and coalesces changes received during a build", async () => {
+  let active = 0;
+  let maximumActive = 0;
+  let runs = 0;
+  let releaseFirst;
+  const firstRun = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const scheduler = createRebuildScheduler(async () => {
+    runs += 1;
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    if (runs === 1) {
+      await firstRun;
+    }
+    active -= 1;
+  }, 0);
+
+  scheduler.notify();
+  await waitFor(() => runs === 1);
+  scheduler.notify();
+  scheduler.notify();
+  releaseFirst();
+  await waitFor(() => runs === 2 && active === 0);
+  scheduler.close();
+
+  expect(runs).toBe(2);
+  expect(maximumActive).toBe(1);
+});
+
+test("replaces changed modules in the server-side RSC chunk cache", async () => {
+  const previousNodeModules = globalThis.__BUNDLER_RSC_NODE_MODULE_CACHE__;
+  const previousChunks = globalThis.__BUNDLER_RSC_CHUNKS__;
+  const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "bundler-rsc-hmr-"));
+  try {
+    globalThis.__BUNDLER_RSC_NODE_MODULE_CACHE__ = new Map([
+      ["/app/src/island.jsx", { stale: true }],
+      ["/app/src/unchanged.jsx", { marker: "unchanged" }],
+    ]);
+    globalThis.__BUNDLER_RSC_CHUNKS__ = {
+      "/app/src/island.jsx": "island.old.mjs",
+      "/app/src/unchanged.jsx": "unchanged.mjs",
+    };
+    await fs.writeFile(
+      path.join(outDir, "island.new.mjs"),
+      'export const marker = "new";',
+    );
+    const previous = fakeBuild([
+      bundle("client", "/app/src/island.jsx", "island.old.mjs", [
+        "/app/src/island.jsx",
+      ]),
+    ]);
+    const next = fakeBuild([
+      bundle("client", "/app/src/island.jsx", "island.new.mjs", [
+        "/app/src/island.jsx",
+      ]),
+    ]);
+
+    await syncChangedRscNodeModules(
+      {
+        envs: { client: { target: "browser" } },
+        outputs: { outDir },
+      },
+      previous,
+      next,
+      1,
+    );
+
+    expect(
+      globalThis.__BUNDLER_RSC_NODE_MODULE_CACHE__.get("/app/src/island.jsx")
+        .marker,
+    ).toBe("new");
+    expect(
+      globalThis.__BUNDLER_RSC_NODE_MODULE_CACHE__.get("/app/src/unchanged.jsx")
+        .marker,
+    ).toBe("unchanged");
+    expect(globalThis.__BUNDLER_RSC_CHUNKS__).toEqual({
+      "/app/src/island.jsx": "island.new.mjs",
+      "/app/src/unchanged.jsx": "unchanged.mjs",
+    });
+  } finally {
+    globalThis.__BUNDLER_RSC_NODE_MODULE_CACHE__ = previousNodeModules;
+    globalThis.__BUNDLER_RSC_CHUNKS__ = previousChunks;
+    await fs.rm(outDir, { recursive: true, force: true });
+  }
 });
 
 function fakeBuild(bundles) {
@@ -424,6 +559,26 @@ function manifestAsset(fileName, contentHash) {
   };
 }
 
-function bundle(envId, entryId, fileName, modules) {
-  return { envId, entryId, fileName, modules };
+function bundle(envId, entryId, fileName, modules, runtimeHash = fileName) {
+  return {
+    id: `${envId}:${entryId}`,
+    environmentIds: [envId],
+    entrypoints: [{ envId, entryId, exportMode: "dynamic" }],
+    envId,
+    entryId,
+    fileName,
+    runtimeHash,
+    exportMode: "dynamic",
+    modules,
+  };
+}
+
+async function waitFor(predicate) {
+  const deadline = Date.now() + 1_000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error("Timed out waiting for test condition.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }

@@ -19,9 +19,11 @@
     "@bundler/assets": "workspace:*",
     "@bundler/css-plugin": "workspace:*",
     "@bundler/html-plugin": "workspace:*",
+    "@bundler/json-plugin": "workspace:*",
     "@bundler/module-paths": "workspace:*",
     "@bundler/static-assets": "workspace:*",
     "@bundler/shared": "workspace:*",
+    "@bundler/typescript-plugin": "workspace:*",
     "@bundler/worker": "workspace:*",
     "react-refresh": "0.14.2"
   }

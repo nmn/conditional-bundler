@@ -19,6 +19,7 @@ async function transformCjs(source, options = {}) {
           moduleIdentity: createCjsModuleIdentity(filePath),
           format: "commonjs",
           envId,
+          reactCjsEnv: options.reactCjsEnv,
           mode: options.mode ?? "development",
           strategy: options.strategy,
         },
@@ -289,7 +290,15 @@ module.exports = load;
 
       expect(outputs[0].code).toBe(outputs[1].code);
       expect(outputs[0].code).toContain(
-        "portable-package@1.2.3::lib/entry.cjs::env=client::NODE_ENV=development",
+        "portable-package@1.2.3::lib/entry.cjs::NODE_ENV=development",
+      );
+      const runtimeScoped = await transformCjs(source, {
+        filePath: roots[0].filePath,
+        strategy: "compatibility",
+        reactCjsEnv: "rsc",
+      });
+      expect(runtimeScoped.code).toContain(
+        "portable-package@1.2.3::lib/entry.cjs::runtime=rsc::NODE_ENV=development",
       );
       for (const { root } of roots) {
         expect(outputs[0].code).not.toContain(root);

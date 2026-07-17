@@ -1,0 +1,14 @@
+{
+  "name": "@bundler/json-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./bundler.mjs",
+  "exports": {
+    ".": "./bundler.mjs",
+    "./transform": "./transform.mjs"
+  },
+  "peerDependencies": {
+    "@babel/core": "^7.24.0"
+  }
+}

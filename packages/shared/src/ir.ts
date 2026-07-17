@@ -230,10 +230,21 @@ export type FileRecord = Pick<
   | "exportRanges"
   | "pkg"
 > & {
+  /** Stable transform/link variant identity shared by compatible environments. */
+  variantId?: string;
+  /** Environments that reuse this exact record and its cached artifacts. */
+  environmentIds?: string[];
+  /** @deprecated Use environmentIds. */
   envs: string[];
   codeByEnv: Record<string, string>;
   mapByEnv: Record<string, string>;
   sourceContents?: Record<string, string>;
+};
+
+export type ModuleVariantRecord = {
+  variantId: string;
+  environmentIds: string[];
+  record: FileRecord;
 };
 
 export type IRHeader = FileRecord;

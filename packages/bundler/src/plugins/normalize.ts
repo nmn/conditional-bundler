@@ -16,6 +16,8 @@ import type {
   ModuleBundlerPlugin,
   NormalizedBabelPluginSpec,
   NormalizedPlugin,
+  NormalizedScopedBabelPluginSpec,
+  ScopedBabelPluginSpec,
   WorkerTransformProfile,
 } from "./types.js";
 
@@ -85,6 +87,7 @@ export async function normalizePlugins(plugins: BundlerPlugin[]): Promise<{
       afterCombine: plugin.afterCombine,
       buildEnd: plugin.buildEnd,
       generateBundleResources: plugin.generateBundleResources,
+      manualChunk: plugin.manualChunk,
     });
   }
 
@@ -150,16 +153,16 @@ async function loadModulePlugin(
   };
 
   if (plugin.transformPre) {
-    resolved.transformPre = resolveEnvBabelSpecs(
+    resolved.transformPre = resolveScopedBabelSpecs(
       plugin.transformPre,
       modulePath,
     );
   }
   if (plugin.transform) {
-    resolved.transform = resolveEnvBabelSpecs(plugin.transform, modulePath);
+    resolved.transform = resolveScopedBabelSpecs(plugin.transform, modulePath);
   }
   if (plugin.transformPost) {
-    resolved.transformPost = resolveEnvBabelSpecs(
+    resolved.transformPost = resolveScopedBabelSpecs(
       plugin.transformPost,
       modulePath,
     );
@@ -174,9 +177,9 @@ async function loadModulePlugin(
       moduleHash: hashFileIfExists(modulePath),
       version: pkg.version,
       options: portableFingerprintValue(pluginRef.options ?? null),
-      transform: portableEnvSpecs(resolved.transform),
-      transformPre: portableEnvSpecs(resolved.transformPre),
-      transformPost: portableEnvSpecs(resolved.transformPost),
+      transform: portableScopedSpecs(resolved.transform),
+      transformPre: portableScopedSpecs(resolved.transformPre),
+      transformPost: portableScopedSpecs(resolved.transformPost),
       transformFiles: hashTransformFiles([
         resolved.transform,
         resolved.transformPre,
@@ -188,15 +191,12 @@ async function loadModulePlugin(
 }
 
 function hashTransformFiles(
-  values: Array<EnvValue<NormalizedBabelPluginSpec[]> | undefined>,
+  values: Array<NormalizedScopedBabelPluginSpec[] | undefined>,
 ): Record<string, string | null> {
   const modulePaths = new Set<string>();
   for (const value of values) {
-    const specs = serializeEnvSpecs(value);
-    for (const entries of Object.values(specs ?? {})) {
-      for (const entry of entries) {
-        modulePaths.add(entry.modulePath);
-      }
+    for (const entry of value ?? []) {
+      modulePaths.add(entry.plugin.modulePath);
     }
   }
   return Object.fromEntries(
@@ -217,32 +217,56 @@ function hashFileIfExists(filePath: string): string | null {
   }
 }
 
-function resolveEnvBabelSpecs(
-  value: EnvValue<BabelPluginSpec[]>,
+function resolveScopedBabelSpecs(
+  value:
+    | ScopedBabelPluginSpec[]
+    | ({ default?: BabelPluginSpec[] } & Record<
+        string,
+        BabelPluginSpec[] | undefined
+      >),
   fromModulePath: string,
-): EnvValue<NormalizedBabelPluginSpec[]> {
-  if (!isEnvMap(value)) {
-    return value.map((entry) => resolveBabelSpec(entry, fromModulePath));
+): NormalizedScopedBabelPluginSpec[] {
+  if (Array.isArray(value)) {
+    return value.map((entry) => {
+      if (isScopedBabelSpec(entry)) {
+        return {
+          plugin: resolveBabelSpec(entry.plugin, fromModulePath),
+          environments: entry.environments,
+        };
+      }
+      return { plugin: resolveBabelSpec(entry, fromModulePath) };
+    });
   }
 
-  const resolved: { default?: NormalizedBabelPluginSpec[] } & Record<
-    string,
-    NormalizedBabelPluginSpec[] | undefined
-  > = {};
-  if (value.default) {
-    resolved.default = value.default.map((entry) =>
-      resolveBabelSpec(entry, fromModulePath),
-    );
+  // Compatibility for the previous EnvValue transform shape: `default`
+  // becomes the shared stage and named keys become explicit env stages.
+  const resolved: NormalizedScopedBabelPluginSpec[] = [];
+  for (const entry of value.default ?? []) {
+    resolved.push({ plugin: resolveBabelSpec(entry, fromModulePath) });
   }
   for (const [envId, entries] of Object.entries(value)) {
     if (envId === "default" || !entries) {
       continue;
     }
-    resolved[envId] = entries.map((entry) =>
-      resolveBabelSpec(entry, fromModulePath),
-    );
+    for (const entry of entries) {
+      resolved.push({
+        plugin: resolveBabelSpec(entry, fromModulePath),
+        environments: [envId],
+      });
+    }
   }
   return resolved;
+}
+
+function isScopedBabelSpec(
+  value: ScopedBabelPluginSpec,
+): value is Extract<ScopedBabelPluginSpec, { plugin: BabelPluginSpec }> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "plugin" in value
+  );
 }
 
 function resolveBabelSpec(
@@ -273,97 +297,43 @@ function resolveModuleSpecifier(specifier: string, fromDir: string): string {
 function buildWorkerTransformProfile(
   plugins: NormalizedPlugin[],
 ): WorkerTransformProfile {
-  const transformPre = new Map<string, NormalizedBabelPluginSpec[]>();
-  const transform = new Map<string, NormalizedBabelPluginSpec[]>();
-  const transformPost = new Map<string, NormalizedBabelPluginSpec[]>();
+  const transformPre: NormalizedScopedBabelPluginSpec[] = [];
+  const transform: NormalizedScopedBabelPluginSpec[] = [];
+  const transformPost: NormalizedScopedBabelPluginSpec[] = [];
 
   for (const plugin of plugins) {
-    for (const envId of envKeys(plugin.transform)) {
-      const current = transform.get(envId) ?? [];
-      current.push(...getEnvListValue(plugin.transform, envId));
-      transform.set(envId, current);
-    }
-    for (const envId of envKeys(plugin.transformPre)) {
-      const current = transformPre.get(envId) ?? [];
-      current.push(...getEnvListValue(plugin.transformPre, envId));
-      transformPre.set(envId, current);
-    }
-    for (const envId of envKeys(plugin.transformPost)) {
-      const current = transformPost.get(envId) ?? [];
-      current.push(...getEnvListValue(plugin.transformPost, envId));
-      transformPost.set(envId, current);
-    }
+    transform.push(...(plugin.transform ?? []));
+    transformPre.push(...(plugin.transformPre ?? []));
+    transformPost.push(...(plugin.transformPost ?? []));
   }
 
   const profile = {
     fingerprint: contentHash(
       JSON.stringify({
-        transform: portableEnvSpecs(Object.fromEntries(transform.entries())),
-        transformPre: portableEnvSpecs(
-          Object.fromEntries(transformPre.entries()),
-        ),
-        transformPost: portableEnvSpecs(
-          Object.fromEntries(transformPost.entries()),
-        ),
+        transform: portableScopedSpecs(transform),
+        transformPre: portableScopedSpecs(transformPre),
+        transformPost: portableScopedSpecs(transformPost),
         plugins: plugins
           .map((plugin) => plugin.workerFingerprint)
           .filter((value): value is string => Boolean(value)),
       }),
     ),
-    transform: Object.fromEntries(transform.entries()),
-    transformPre: Object.fromEntries(transformPre.entries()),
-    transformPost: Object.fromEntries(transformPost.entries()),
+    transform,
+    transformPre,
+    transformPost,
   };
   return profile;
 }
 
-function envKeys<T>(value: EnvValue<T[]> | undefined): string[] {
-  if (!value) {
-    return [];
-  }
-  if (!isEnvMap(value)) {
-    return ["default"];
-  }
-  const keys = new Set<string>();
-  if (value.default) {
-    keys.add("default");
-  }
-  for (const envId of Object.keys(value)) {
-    if (envId !== "default") {
-      keys.add(envId);
-    }
-  }
-  return Array.from(keys);
-}
-
-function serializeEnvSpecs(
-  value: EnvValue<NormalizedBabelPluginSpec[]> | undefined,
-): Record<string, NormalizedBabelPluginSpec[]> | null {
-  if (!value) {
-    return null;
-  }
-  if (!isEnvMap(value)) {
-    return { default: value };
-  }
-  return Object.fromEntries(
-    Object.entries(value).filter(([, entries]) => Array.isArray(entries)),
-  ) as Record<string, NormalizedBabelPluginSpec[]>;
-}
-
-function portableEnvSpecs(
-  value: EnvValue<NormalizedBabelPluginSpec[]> | undefined,
-): Record<string, unknown> | null {
-  const specs = serializeEnvSpecs(value);
-  return specs
-    ? Object.fromEntries(
-        Object.entries(specs).map(([envId, entries]) => [
-          envId,
-          entries.map((entry) => ({
-            modulePath: portablePathIdentity(entry.modulePath),
-            options: portableFingerprintValue(entry.options),
-          })),
-        ]),
-      )
+function portableScopedSpecs(
+  value: NormalizedScopedBabelPluginSpec[] | undefined,
+): unknown[] | null {
+  return value
+    ? value.map((entry) => ({
+        modulePath: portablePathIdentity(entry.plugin.modulePath),
+        options: portableFingerprintValue(entry.plugin.options),
+        environments: entry.environments,
+      }))
     : null;
 }
 

@@ -33,8 +33,6 @@ export default function cjsToEsmBabelPlugin(api, options = {}) {
         }
 
         const filePath = pluginOptions.filePath;
-        const envId =
-          pluginOptions.reactCjsEnv ?? pluginOptions.envId ?? "default";
         const nodeEnv =
           pluginOptions.nodeEnv ??
           pluginOptions.mode ??
@@ -51,9 +49,12 @@ export default function cjsToEsmBabelPlugin(api, options = {}) {
           moduleIdentity:
             pluginOptions.moduleIdentity ??
             createCjsModuleIdentity(filePath, pluginOptions.pkg),
-          envId,
           mode,
           nodeEnv,
+          runtimeEnvironment:
+            typeof pluginOptions.reactCjsEnv === "string"
+              ? pluginOptions.reactCjsEnv
+              : undefined,
           linkReferences: [],
           linkModulePaths: pluginOptions.linkModulePaths === true,
         };
@@ -1131,7 +1132,7 @@ function removeUnusedCjsHelpers(programPath) {
 }
 
 function createCompatibilityWrapper(programPath, context) {
-  const { t, filePath, moduleIdentity, envId, nodeEnv } = context;
+  const { t, filePath, moduleIdentity, nodeEnv, runtimeEnvironment } = context;
   const originalBody = programPath.node.body;
   const originalDirectives = programPath.node.directives;
   const requires = collectCjsRequires(programPath, t);
@@ -1195,7 +1196,7 @@ function createCompatibilityWrapper(programPath, context) {
   const moduleId = t.identifier("__cjs_module__");
   const exportsId = t.identifier("__cjs_exports__");
   const cacheKeyLiteral = t.stringLiteral(
-    `${moduleIdentity}::env=${envId}::NODE_ENV=${nodeEnv}`,
+    `${moduleIdentity}${runtimeEnvironment ? `::runtime=${runtimeEnvironment}` : ""}::NODE_ENV=${nodeEnv}`,
   );
   const usesFilename =
     context.linkModulePaths && usesUnboundGlobal(programPath, "__filename");

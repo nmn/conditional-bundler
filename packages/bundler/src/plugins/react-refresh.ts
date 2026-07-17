@@ -6,19 +6,17 @@ export default function reactRefreshPlugin(options: {
   const envs = options.envs ?? [];
   return {
     name: "builtin-react-refresh",
-    transformPost: Object.fromEntries(
-      envs.map((envId) => [
-        envId,
-        [
-          [
-            "react-refresh/babel",
-            {
-              skipEnvCheck: true,
-              __bundlerExcludeNodeModules: true,
-            },
-          ],
+    transformPost: [
+      {
+        plugin: [
+          "react-refresh/babel",
+          {
+            skipEnvCheck: true,
+            __bundlerExcludeNodeModules: true,
+          },
         ],
-      ]),
-    ),
+        environments: envs,
+      },
+    ],
   };
 }

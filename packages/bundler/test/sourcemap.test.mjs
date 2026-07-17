@@ -413,11 +413,11 @@ test("offsets entry and common maps past static bundle imports", async () => {
   for (const [entryName, expectedLine] of [
     ["a.js", 2],
     ["b.js", 2],
-    ["bundler:common:browser", 1],
+    ["bundler:shared:", 1],
   ]) {
     const bundle = result.bundles.find((candidate) =>
       entryName.startsWith("bundler:")
-        ? candidate.entryId === entryName
+        ? candidate.entryId.startsWith(entryName)
         : candidate.entryId.endsWith(entryName),
     );
     const code = await fs.readFile(path.join(outDir, bundle.fileName), "utf8");

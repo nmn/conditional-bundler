@@ -6,7 +6,8 @@ Restructure the disk cache so it mirrors the actual opaque inputs used by linkin
 
 - The configured `cacheDir` becomes a base directory that contains config-scoped roots.
 - Each config root contains a flat list of per-file folders named by a hash of the normalized file path.
-- Each file folder contains one `.js` file per worker-emitted cell plus a small JSON metadata file.
+- Each request cache contains a small JSON index, while cell artifacts are
+  grouped by semantic module variant.
 - The linker reads cached cell `.js` artifacts as opaque text for concatenation; it never depends on inline cell code stored in memory.
 
 This reduces duplicated large JSON payloads, makes cache contents line up with bundle assembly, and lowers peak memory pressure by keeping worker cell code on disk instead of embedding it in every `FileRecord`.
@@ -22,25 +23,35 @@ This reduces duplicated large JSON payloads, makes cache contents line up with b
   - `configHash`
   - `createdAt`
   - `lastUsedAt`
-- Store file caches under `cacheDir/v2/<configHash>/files/<filePathHash>/`.
+- Store file caches under
+  `cacheDir/v2/<configHash>/files/<filePathHash>/<requestHash>/`.
 - `filePathHash` is a hash of the normalized absolute file path only; folder names are hash-only.
-- Keep one `module.json` per file folder with:
+- Keep one `module.json` per request folder with:
   - `moduleKey`
   - `realPath`
   - file-level metadata
-  - cell metadata in source order
-  - artifact filenames for each cell
+  - unique `ModuleVariantRecord`s with their environment membership
+  - a compatibility environment-to-variant lookup
+  - cell metadata and artifact filenames in source order
 - `moduleKey` must include all worker-relevant inputs for a file:
   - normalized real path
   - pkg name, version, and root
   - syntax flags
-  - requested env list
+  - scoped-transform inputs
   - source code hash
   - any per-env override code hashes
+  - resolved-import tables
+- Cache complete Babel pipelines separately under `transform-pipelines/`.
+  Their keys exclude unrelated environments and resolution tables; an
+  environment ID is included only when the pipeline contains scoped stages.
+- Cache core transform results under `core-variants/`, keyed by transformed
+  input, resolved imports, and effective HMR mode.
 
 ### Cached artifacts and linker consumption
 
-- Persist one `.js` artifact per worker-emitted cell in the file folder, named by stable cell order, e.g. `000.js`, `001.js`, etc.
+- Persist one `.js` artifact per worker-emitted cell under
+  `variants/<filePathHash>/<variantId>/`, named by stable cell order, e.g.
+  `variants/<filePathHash>/<variantId>/000.js`.
 - Persist only worker-produced cells this way:
   - normal worker cells
   - conditional binding cells
@@ -56,7 +67,9 @@ This reduces duplicated large JSON payloads, makes cache contents line up with b
 - Builder computes the active config root once and passes that root to all workers.
 - Worker no longer writes `records/` and `ir/` top-level blobs; all per-file cache state lives in the per-file folder.
 - On cache miss, worker:
-  - transforms once
+  - reuses or computes the complete shared/scoped transform pipeline
+  - computes only the required scoped/resolution variants
+  - groups identical environment results
   - writes per-cell `.js` files
   - writes `module.json`
   - returns the metadata form used by the builder

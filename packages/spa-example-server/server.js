@@ -36,21 +36,29 @@ export function createSpaExampleServer({
       response.end(fs.readFileSync(path.join(dist, asset.fileName)));
       return;
     }
-    const clientBundle = manifest.bundles.find(
-      (bundle) =>
-        bundle.envId === "client" && bundle.entryId.endsWith(clientEntrySuffix),
-    );
+    const logicalEntry = Object.entries(manifest.entrypoints ?? {}).find(
+      ([key]) => key.startsWith("client:") && key.endsWith(clientEntrySuffix),
+    )?.[1];
+    const clientBundle = logicalEntry
+      ? manifest.bundles.find((bundle) => bundle.id === logicalEntry.bundleId)
+      : manifest.bundles.find(
+          (bundle) =>
+            (bundle.environmentIds ?? [bundle.envId]).includes("client") &&
+            bundle.entryId.endsWith(clientEntrySuffix),
+        );
     if (!clientBundle) {
       throw new Error("Missing SPA client bundle.");
     }
     const markup = await render(url);
-    const styles = Array.from(
-      new Set(
-        (manifest.assets ?? [])
-          .filter((candidate) => candidate.type === "style")
-          .map((candidate) => candidate.fileName),
-      ),
-    );
+    const styles =
+      logicalEntry?.styles ??
+      Array.from(
+        new Set(
+          (manifest.assets ?? [])
+            .filter((candidate) => candidate.type === "style")
+            .map((candidate) => candidate.fileName),
+        ),
+      );
     response.setHeader("content-type", "text/html; charset=utf-8");
     response.end(`<!doctype html>
 <html>
@@ -58,7 +66,15 @@ export function createSpaExampleServer({
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeAttribute(title)}</title>
-    ${styles.map((style) => `<link rel="stylesheet" href="/${escapeAttribute(style)}">`).join("\n    ")}
+    ${styles
+      .map((style) => {
+        const asset = (manifest.assets ?? []).find(
+          (candidate) =>
+            candidate.type === "style" && candidate.fileName === style,
+        );
+        return `<link rel="stylesheet" href="/${escapeAttribute(style)}" data-bundler-style="${escapeAttribute(asset?.bundleKey ?? style)}">`;
+      })
+      .join("\n    ")}
   </head>
   <body>
     <div id="root">${markup}</div>

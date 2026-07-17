@@ -80,6 +80,11 @@ test("StyleX commerce hot reloads global CSS with RSC refreshes", async () => {
   expect(updatedApp).not.toBe(originalApp);
   try {
     await withServer("dev", async (baseUrl) => {
+      const initialHtml = await (await fetch(baseUrl)).text();
+      const style = (await readManifest()).assets.find(
+        (asset) => asset.type === "style",
+      );
+      expect(initialHtml).toContain(`data-bundler-style="${style.bundleKey}"`);
       const socketUrl = new URL("/__bundler_hmr", baseUrl);
       socketUrl.protocol = "ws:";
       const socket = new WebSocket(socketUrl);
@@ -91,12 +96,69 @@ test("StyleX commerce hot reloads global CSS with RSC refreshes", async () => {
         expect(message.type).toBe("rsc-refresh");
         expect(message.styles).toHaveLength(1);
         expect(message.styles[0]).toContain("/assets/stylex.all.");
+        expect(
+          new URL(message.styles[0], baseUrl).searchParams.get("key"),
+        ).toBe(style.bundleKey);
       } finally {
         socket.close();
       }
     });
   } finally {
     await fs.writeFile(appPath, originalApp, "utf8");
+  }
+});
+
+test("StyleX commerce hot reloads client component styles", async () => {
+  const counterPath = path.join(exampleDir, "src/client/HomeCounter.jsx");
+  const originalCounter = await fs.readFile(counterPath, "utf8");
+  const buttonStyle = originalCounter.match(
+    /(button:\s*{\s*backgroundColor:\s*)"([^"]+)"/,
+  );
+  expect(buttonStyle).not.toBeNull();
+  const nextColor = buttonStyle?.[2] === "#00ff00" ? "#00ff01" : "#00ff00";
+  const updatedCounter = originalCounter.replace(
+    buttonStyle?.[0] ?? "",
+    `${buttonStyle?.[1]}"${nextColor}"`,
+  );
+  expect(updatedCounter).not.toBe(originalCounter);
+
+  try {
+    await withServer("dev", async (baseUrl) => {
+      const socketUrl = new URL("/__bundler_hmr", baseUrl);
+      socketUrl.protocol = "ws:";
+      const socket = new WebSocket(socketUrl);
+      try {
+        await waitForWebSocketOpen(socket);
+        const nextMessage = waitForWebSocketMessage(socket);
+        await fs.writeFile(counterPath, updatedCounter, "utf8");
+        const message = await nextMessage;
+
+        expect(message.type).toBe("patch");
+        expect(message.styles).toHaveLength(1);
+        expect(message.imports).toHaveLength(1);
+        expect(message.imports[0]).toContain("/HomeCounter.client.");
+        expect(message.changedBundles).toEqual([
+          expect.stringMatching(/client:.*\/src\/client\/HomeCounter\.jsx$/),
+        ]);
+        expect(Object.keys(message.rscChunks ?? {})).toEqual([
+          expect.stringMatching(/\/src\/client\/HomeCounter\.jsx$/),
+        ]);
+
+        const clientChunk = await fetch(new URL(message.imports[0], baseUrl));
+        expect(clientChunk.status).toBe(200);
+        expect(await clientChunk.text()).toContain(
+          "HomeCounter__styles.button",
+        );
+
+        const stylesheet = await fetch(new URL(message.styles[0], baseUrl));
+        expect(stylesheet.status).toBe(200);
+        expect(await stylesheet.text()).toContain(nextColor);
+      } finally {
+        socket.close();
+      }
+    });
+  } finally {
+    await fs.writeFile(counterPath, originalCounter, "utf8");
   }
 });
 

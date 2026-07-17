@@ -1,6 +1,39 @@
 import React, { useState } from "react";
 import * as stylex from "@stylexjs/stylex";
 
+export default function Dashboard() {
+  const [refreshes, setRefreshes] = useState(0);
+  return (
+    <>
+      <header {...stylex.props(styles.header)}>
+        <div>
+          <p {...stylex.props(styles.eyebrow)}>Live overview</p>
+          <h1 {...stylex.props(styles.title)}>Operations at a glance.</h1>
+        </div>
+        <button
+          {...stylex.props(styles.button)}
+          onClick={() => setRefreshes((value) => value + 1)}
+        >
+          Refreshes: {refreshes}
+        </button>
+      </header>
+      <section {...stylex.props(styles.grid)}>
+        {[
+          ["Active orders", "128"],
+          ["Fill rate", "96.4%"],
+          ["At-risk SKUs", "7"],
+          ["Dock windows", "14"],
+        ].map(([label, value]) => (
+          <article key={label} {...stylex.props(styles.card)}>
+            <span {...stylex.props(styles.eyebrow)}>{label}</span>
+            <strong {...stylex.props(styles.metric)}>{value}</strong>
+          </article>
+        ))}
+      </section>
+    </>
+  );
+}
+
 const styles = stylex.create({
   header: {
     alignItems: "end",
@@ -48,36 +81,3 @@ const styles = stylex.create({
     fontSize: 42,
   },
 });
-
-export default function Dashboard() {
-  const [refreshes, setRefreshes] = useState(0);
-  return (
-    <>
-      <header {...stylex.props(styles.header)}>
-        <div>
-          <p {...stylex.props(styles.eyebrow)}>Live overview</p>
-          <h1 {...stylex.props(styles.title)}>Operations at a glance.</h1>
-        </div>
-        <button
-          {...stylex.props(styles.button)}
-          onClick={() => setRefreshes((value) => value + 1)}
-        >
-          Refreshes: {refreshes}
-        </button>
-      </header>
-      <section {...stylex.props(styles.grid)}>
-        {[
-          ["Active orders", "128"],
-          ["Fill rate", "96.4%"],
-          ["At-risk SKUs", "7"],
-          ["Dock windows", "14"],
-        ].map(([label, value]) => (
-          <article key={label} {...stylex.props(styles.card)}>
-            <span {...stylex.props(styles.eyebrow)}>{label}</span>
-            <strong {...stylex.props(styles.metric)}>{value}</strong>
-          </article>
-        ))}
-      </section>
-    </>
-  );
-}

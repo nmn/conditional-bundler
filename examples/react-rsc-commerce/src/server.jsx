@@ -97,14 +97,21 @@ function loadCommerceContext({ dist = distDir, clientBundle } = {}) {
   const manifest = JSON.parse(
     fs.readFileSync(path.join(dist, "manifest.json"), "utf8"),
   );
+  const logicalEntry = Object.entries(manifest.entrypoints ?? {}).find(
+    ([key]) =>
+      key.startsWith("client:") &&
+      (key.endsWith("runtime-client.js") || key.endsWith("client.jsx")),
+  )?.[1];
   const resolvedClientBundle =
     clientBundle ??
-    manifest.bundles.find(
-      (bundle) =>
-        bundle.envId === "client" &&
-        (bundle.entryId.endsWith("runtime-client.js") ||
-          bundle.entryId.endsWith("client.jsx")),
-    );
+    (logicalEntry
+      ? manifest.bundles.find((bundle) => bundle.id === logicalEntry.bundleId)
+      : manifest.bundles.find(
+          (bundle) =>
+            (bundle.environmentIds ?? [bundle.envId]).includes("client") &&
+            (bundle.entryId.endsWith("runtime-client.js") ||
+              bundle.entryId.endsWith("client.jsx")),
+        ));
   const clientManifest = JSON.parse(
     fs.readFileSync(path.join(dist, "rsc-client-manifest.json"), "utf8"),
   );
@@ -113,9 +120,30 @@ function loadCommerceContext({ dist = distDir, clientBundle } = {}) {
     throw new Error("Missing client bundle. Run the bundler build first.");
   }
 
+  const serverRoot = manifest.bundles
+    .flatMap((bundle) => bundle.entrypoints ?? [])
+    .find(
+      (entrypoint) =>
+        entrypoint.envId === "rsc" && entrypoint.exportMode === "entry",
+    );
+  const serverEntrypoint = serverRoot
+    ? manifest.entrypoints?.[`rsc:${serverRoot.entryId}`]
+    : undefined;
+  const clientEntrypoint =
+    logicalEntry ??
+    Object.values(manifest.entrypoints ?? {}).find(
+      (entrypoint) => entrypoint.bundleId === resolvedClientBundle.id,
+    );
   return {
     manifest,
     clientBundle: resolvedClientBundle,
+    clientEntrypoint,
+    documentStyles: Array.from(
+      new Set([
+        ...(serverEntrypoint?.styles ?? []),
+        ...(clientEntrypoint?.styles ?? []),
+      ]),
+    ),
     clientManifest,
     serverConsumerManifest: createServerConsumerManifest(clientManifest),
   };
@@ -153,7 +181,7 @@ async function renderHtml(url, context, dist) {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Monarch Goods</title>
     <style>${style}</style>
-    ${renderStyleLinks(context.manifest)}
+    ${renderStyleLinks(context.documentStyles, context.manifest)}
   </head>
   <body>
     <div id="root">${initialRoute.markup}</div>
@@ -164,13 +192,15 @@ async function renderHtml(url, context, dist) {
 </html>`;
 }
 
-function renderStyleLinks(manifest) {
-  return (manifest.assets ?? [])
-    .filter((asset) => asset.type === "style")
-    .map(
-      (asset) =>
-        `<link rel="stylesheet" href="/${escapeAttribute(asset.fileName)}" data-bundler-style="${escapeAttribute(asset.bundleKey ?? asset.fileName)}">`,
-    )
+function renderStyleLinks(styles, manifest) {
+  return Array.from(new Set(styles))
+    .map((fileName) => {
+      const asset = (manifest.assets ?? []).find(
+        (candidate) =>
+          candidate.type === "style" && candidate.fileName === fileName,
+      );
+      return `<link rel="stylesheet" href="/${escapeAttribute(fileName)}" data-bundler-style="${escapeAttribute(asset?.bundleKey ?? fileName)}">`;
+    })
     .join("\n    ");
 }
 

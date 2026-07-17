@@ -20,7 +20,6 @@ export default function stylexBundlerPlugin(options = {}) {
     runtimeInjection: false,
     treeshakeCompensation: true,
     __bundlerExcludeNodeModules: true,
-    __bundlerEnvironmentIndependent: true,
     ...(options.rootDir
       ? {
           unstable_moduleResolution: {
@@ -40,7 +39,6 @@ export default function stylexBundlerPlugin(options = {}) {
         "./capture-metadata.mjs",
         {
           __bundlerExcludeNodeModules: true,
-          __bundlerEnvironmentIndependent: true,
         },
       ],
     ],

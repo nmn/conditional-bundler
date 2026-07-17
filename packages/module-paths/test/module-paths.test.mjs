@@ -40,8 +40,11 @@ test("preserves shadowed globals and import.meta.hot", async () => {
   expect(result.metadata.conditionalBundlerLinkReferences).toBeUndefined();
 });
 
-test("rejects filesystem path properties for browser targets", async () => {
-  await expect(
-    transform("console.log(__dirname);", { target: "browser" }),
-  ).rejects.toThrow("only available in Node-target bundles");
+test("records filesystem path references independently from the target", async () => {
+  const result = await transform("console.log(__dirname);", {
+    target: "browser",
+  });
+  expect(result.metadata.conditionalBundlerLinkReferences).toEqual([
+    expect.objectContaining({ kind: "module-dirname" }),
+  ]);
 });

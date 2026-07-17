@@ -31,13 +31,13 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
   expect(
     buildManifest.bundles.filter(
       (bundle) =>
-        bundle.envId === "rsc" &&
-        bundle.entryId.startsWith("bundler:common:rsc"),
-    ),
-  ).toHaveLength(1);
+        bundleAppliesTo(bundle, "rsc") &&
+        bundle.entryId.startsWith("bundler:shared:"),
+    ).length,
+  ).toBe(4);
   for (const envId of ["rsc", "client"]) {
     const modules = buildManifest.bundles
-      .filter((bundle) => bundle.envId === envId)
+      .filter((bundle) => bundleAppliesTo(bundle, envId))
       .flatMap((bundle) => bundle.modules);
     expect(new Set(modules).size).toBe(modules.length);
   }
@@ -53,14 +53,16 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
   expect(cachedModuleIdentities.some((item) => item.includes(rootDir))).toBe(
     false,
   );
-  const clientBundles = buildManifest.bundles.filter(
-    (bundle) => bundle.envId === "client",
+  const clientBundles = buildManifest.bundles.filter((bundle) =>
+    bundleAppliesTo(bundle, "client"),
   );
   const clientBundleFiles = clientBundles
     .map((bundle) => bundle.fileName)
     .sort();
-  const commonBundle = clientBundles.find((bundle) =>
-    bundle.entryId.startsWith("bundler:common:"),
+  const commonBundle = clientBundles.find(
+    (bundle) =>
+      bundle.environmentIds.length === 1 &&
+      bundle.entryId.startsWith("bundler:shared:"),
   );
   expect(clientBundleFiles).toHaveLength(9);
   expect(clientBundleFiles).toEqual(
@@ -72,10 +74,17 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
       expect.stringMatching(/^DeliveryEstimator\.client\.[a-z0-9]+\.js$/),
       expect.stringMatching(/^HomeCounter\.client\.[a-z0-9]+\.js$/),
       expect.stringMatching(/^ProductActions\.client\.[a-z0-9]+\.js$/),
-      expect.stringMatching(/^bundler-common-client\.client\.[a-z0-9]+\.js$/),
+      expect.stringMatching(
+        /^bundler-shared-[a-z0-9]+\.client\.[a-z0-9]+\.js$/,
+      ),
       expect.stringMatching(/^runtime-client\.client\.[a-z0-9]+\.js$/),
     ]),
   );
+  expect(
+    clientBundleFiles.filter((fileName) =>
+      fileName.startsWith("bundler-shared-"),
+    ),
+  ).toHaveLength(1);
   expect(clientBundleFiles).not.toEqual(
     expect.arrayContaining([
       expect.stringMatching(/^client-references\.client\.[a-z0-9]+\.js$/),
@@ -230,6 +239,9 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     expect(html).toMatch(
       /<script type="module" src="\/runtime-client\.client\.[a-z0-9]+\.js"><\/script>/,
     );
+    expect(html).toContain(
+      `<link rel="stylesheet" href="/${showcaseAssets.style.fileName}"`,
+    );
     const clientBundle = buildManifest.bundles.find(
       (bundle) =>
         bundle.envId === "client" &&
@@ -253,6 +265,11 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     );
     expect(markAsset.contentType).toContain("image/svg+xml");
     expect(markAsset.text).toContain("<svg");
+    const styleAsset = await fetchAsset(
+      `${baseUrl}/${showcaseAssets.style.fileName}`,
+    );
+    expect(styleAsset.contentType).toContain("text/css");
+    expect(styleAsset.text).toContain("outline-offset: 6px");
 
     const home = await fetchText(`${baseUrl}/rsc?path=%2F`);
     expect(home).toContain("src/client/HomeCounter.jsx");
@@ -341,6 +358,10 @@ test("react-rsc-commerce dev server serves linked source maps", async () => {
     expect(html).toContain("HomeCounter.client.");
     expect(html).toContain("CategoryPicker.client.");
     expect(html).toContain("DeliveryEstimator.client.");
+    const styleMatch = html.match(
+      /<link rel="stylesheet" href="\/(server\.rsc\.[a-z0-9]+\.css)"/,
+    );
+    expect(styleMatch).not.toBeNull();
     const scriptMatch = html.match(
       /<script type="module" src="\/(runtime-client\.client\.[a-z0-9]+\.js)"><\/script>/,
     );
@@ -378,18 +399,22 @@ test("react-rsc-commerce dev server serves linked source maps", async () => {
     );
     expectCjsNodeEnv(manifest, "development");
     const showcaseAssets = await expectShowcaseAssets(manifest);
+    expect(styleMatch[1]).toBe(showcaseAssets.style.fileName);
     const markAsset = await fetchAsset(
       `${baseUrl}/${showcaseAssets.mark.fileName}`,
     );
     expect(markAsset.contentType).toContain("image/svg+xml");
-    const clientBundles = manifest.bundles.filter(
-      (bundle) => bundle.envId === "client",
+    const styleAsset = await fetchAsset(`${baseUrl}/${styleMatch[1]}`);
+    expect(styleAsset.contentType).toContain("text/css");
+    expect(styleAsset.text).toContain("outline-offset: 6px");
+    const clientBundles = manifest.bundles.filter((bundle) =>
+      bundleAppliesTo(bundle, "client"),
     );
     const runtimeBundle = clientBundles.find(
       (bundle) => bundle.entryId === "bundler:hmr-runtime:client",
     );
-    const commonBundle = clientBundles.find(
-      (bundle) => bundle.entryId === "bundler:common:client",
+    const commonBundle = clientBundles.find((bundle) =>
+      bundle.entryId.startsWith("bundler:shared:"),
     );
     const clientModuleIds = clientBundles.flatMap((bundle) => bundle.modules);
     expect(new Set(clientModuleIds).size).toBe(clientModuleIds.length);
@@ -686,4 +711,8 @@ async function findFilesNamed(root, fileName) {
     }
   }
   return files;
+}
+
+function bundleAppliesTo(bundle, envId) {
+  return (bundle.environmentIds ?? [bundle.envId]).includes(envId);
 }

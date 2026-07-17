@@ -43,7 +43,6 @@ export default function cjsToEsmBundlerPlugin(options = {}) {
               ? { mode: options.mode }
               : {}),
           linkModulePaths: true,
-          __bundlerEnvironmentIndependentUnlessCommonJs: true,
         },
       ],
     ],

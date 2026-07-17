@@ -1,0 +1,17 @@
+{
+  "name": "@bundler/typescript-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./bundler.mjs",
+  "exports": {
+    ".": "./bundler.mjs",
+    "./transform": "./transform.mjs"
+  },
+  "dependencies": {
+    "@babel/plugin-transform-typescript": "7.28.6"
+  },
+  "peerDependencies": {
+    "@babel/core": "^7.24.0"
+  }
+}

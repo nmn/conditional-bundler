@@ -10,13 +10,13 @@ function __cjs_require__(request) {
   }
 }
 const __cjs_cache__ = globalThis.__BUNDLER_CJS_CACHE__ ??= new Map();
-let __cjs_default__ = __cjs_cache__.get("core-js@3.49.0::internals/global-this.js::env=snapshot::NODE_ENV=production");
+let __cjs_default__ = __cjs_cache__.get("core-js@3.49.0::internals/global-this.js::NODE_ENV=production");
 if (!__cjs_default__) {
   const __cjs_module__ = {
     exports: {}
   };
   const __cjs_exports__ = __cjs_module__.exports;
-  __cjs_cache__.set("core-js@3.49.0::internals/global-this.js::env=snapshot::NODE_ENV=production", __cjs_exports__);
+  __cjs_cache__.set("core-js@3.49.0::internals/global-this.js::NODE_ENV=production", __cjs_exports__);
   ((module, exports, require, process, __filename, __dirname) => {
     'use strict';
 
@@ -36,6 +36,6 @@ if (!__cjs_default__) {
     }() || Function('return this')();
   })(__cjs_module__, __cjs_exports__, __cjs_require__, __cjs_process__, "core-js@3.49.0::internals/global-this.js", "core-js@3.49.0::internals");
   __cjs_default__ = __cjs_module__.exports;
-  __cjs_cache__.set("core-js@3.49.0::internals/global-this.js::env=snapshot::NODE_ENV=production", __cjs_default__);
+  __cjs_cache__.set("core-js@3.49.0::internals/global-this.js::NODE_ENV=production", __cjs_default__);
 }
 export default __cjs_default__;

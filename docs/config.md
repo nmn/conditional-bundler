@@ -11,7 +11,8 @@ export default {
   entries: [{ id: "app", path: "src/index.js" }],
   outputs: {
     outDir: "dist",
-    fileName: "bundle.[env].[hash].js",
+    fileName: "[entry].[scope].[hash].js",
+    manifestFile: "manifest.json",
     sourceMap: "external",
     rootURL: "/static/",
   },
@@ -69,11 +70,75 @@ alias. Arbitrary Lightning CSS options are intentionally rejected because
 minification, syntax lowering, and other whole-stylesheet work belongs after
 linking.
 
-The built-in JS-like extensions are `.js`, `.mjs`, `.cjs`, `.jsx`, `.ts`, and
-`.tsx`. Add custom extensions through `transforms.jsLike`, declaring only
-whether JSX and TypeScript syntax are enabled.
+The built-in JS-like extensions are `.js`, `.mjs`, `.cjs`, `.jsx`, `.ts`,
+`.tsx`, and `.json`. Add custom extensions through `transforms.jsLike`,
+declaring only whether JSX and TypeScript syntax are enabled. JSON files are
+handled by the built-in JSON plugin and become JavaScript modules with one
+default export.
+Types are removed from `.ts` and `.tsx` automatically with Babel's TypeScript
+transform. TSX syntax remains available to a JSX transform such as
+`@bundler/react-jsx-plugin`; the built-in TypeScript transform does not
+type-check.
+
+When `outputs.manifestFile` is set, the generated JSON `entrypoints` records
+include the primary `bundleId` and `fileName`, the complete static script
+closure in `bundles`, and the CSS files the server should load in `styles`.
+Dynamic entrypoints have their own records, so a server can choose route CSS
+without JavaScript injecting stylesheet loaders.
 
 Entries and dynamically discovered entry points named `*.client.*` or
 `*.browser.*` are emitted only for browser environments. Files named
 `*.server.*` or `*.node.*` are emitted only for Node environments. Unsuffixed
 files remain available to both targets.
+
+`outputs.fileName` supports `[entry]`, `[scope]`, `[env]`, and `[hash]`.
+`[scope]` is the environment ID for an environment-specific physical bundle,
+`universal` when every configured environment shares it, or a stable joined
+scope for partial sharing. `[env]` is an alias for `[scope]`.
+
+Module-backed plugins share Babel transform stages by default:
+
+```ts
+export default function examplePlugin() {
+  return {
+    name: "example",
+    transform: [
+      ["./shared-transform.mjs", {}],
+      {
+        plugin: ["./environment-transform.mjs", {}],
+        environments: "each",
+      },
+      {
+        plugin: ["./browser-transform.mjs", {}],
+        environments: ["browser"],
+      },
+    ],
+  };
+}
+```
+
+Shared stages receive `envs` and no `envId`. Scoped stages receive both `envs`
+and the current `envId`. A plugin can also coarsen compatible reachability
+groups:
+
+```ts
+export default {
+  name: "vendor-chunks",
+  manualChunk(moduleInfo) {
+    "vendor-chunks-v1";
+    return moduleInfo.filePath.includes("/node_modules/")
+      ? "vendor"
+      : undefined;
+  },
+};
+```
+
+Manual labels cannot combine module variants with incompatible environment
+availability. Linking still runs for each environment before compatible logical
+chunks are merged into a physical bundle.
+
+`generateBundleResources` runs before bundle hashes are finalized. Its bundle
+descriptors expose stable physical IDs and logical entrypoints, but not
+filenames, because emitted resource bytes participate in `[hash]`. Plugins that
+emit manifests containing final script filenames should do so from `buildEnd`,
+whose bundle descriptors contain the finalized filenames.

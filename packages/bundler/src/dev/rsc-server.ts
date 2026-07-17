@@ -130,6 +130,12 @@ export async function startRscDevServer(
         clientEntryId: options.clientEntryId,
         serverEntryId: options.serverEntryId,
       });
+      await syncChangedRscNodeModules(
+        devConfig,
+        current,
+        next,
+        clientPatchVersion + 1,
+      );
       if (action.type === "reload") {
         await disposeLoadedServerModule(loadedServerModule, options);
         loadedServerModule = undefined;
@@ -143,13 +149,33 @@ export async function startRscDevServer(
           next,
           options.clientEntryId,
           ++clientPatchVersion,
+          devConfig.outputs.rootURL,
         );
         broadcast(clients, await hmrUpdates.publish(patchWithImports));
       } else if (action.type === "reload") {
-        broadcast(clients, {
-          type: "rsc-refresh",
-          styles: patch?.styles,
-        });
+        const patchWithImports = patch
+          ? addClientPatchImports(
+              patch,
+              next,
+              options.clientEntryId,
+              ++clientPatchVersion,
+              devConfig.outputs.rootURL,
+            )
+          : undefined;
+        const hasClientCode =
+          (patchWithImports?.updates.length ?? 0) > 0 ||
+          (patchWithImports?.imports?.length ?? 0) > 0;
+        const refreshesRsc =
+          Object.keys(patchWithImports?.rscChunks ?? {}).length > 0;
+        if (patchWithImports && hasClientCode) {
+          broadcast(clients, await hmrUpdates.publish(patchWithImports));
+        }
+        if (!refreshesRsc) {
+          broadcast(clients, {
+            type: "rsc-refresh",
+            styles: hasClientCode ? undefined : patch?.styles,
+          });
+        }
       }
     } catch (error) {
       console.error("[bundler] RSC dev rebuild failed", error);
@@ -299,35 +325,35 @@ export function addClientPatchImports(
   build: BuildResult,
   clientEntryId: string,
   version?: number,
+  rootURL = "/",
 ): HmrPatchPlan {
   const importedBundles = patch.changedBundles
-    .map((key) =>
-      build.manifest.bundles.find(
-        (bundle) => `${bundle.envId}:${bundle.entryId}` === key,
-      ),
-    )
-    .filter((bundle): bundle is NonNullable<typeof bundle> => {
-      if (!bundle) {
+    .map((key) => {
+      const bundle = findBundleForLogicalKey(build, key);
+      const separator = key.indexOf(":");
+      const entryId = separator === -1 ? key : key.slice(separator + 1);
+      return bundle ? { bundle, entryId, key } : undefined;
+    })
+    .filter((item): item is NonNullable<typeof item> => {
+      if (!item) {
         return false;
       }
       return (
-        bundle.entryId !== clientEntryId &&
-        !bundle.entryId.endsWith(clientEntryId) &&
-        !entryBasenameMatches(bundle.entryId, clientEntryId)
+        item.entryId !== clientEntryId &&
+        !item.entryId.endsWith(clientEntryId) &&
+        !entryBasenameMatches(item.entryId, clientEntryId)
       );
     });
   const imports = importedBundles.map(
-    (bundle) =>
-      `/assets/${bundle.fileName}?hmr=${encodeURIComponent(bundle.fileName)}&rsc-id=${encodeURIComponent(bundle.entryId)}${version == null ? "" : `&v=${encodeURIComponent(String(version))}`}`,
+    ({ bundle, entryId }) =>
+      `${joinRootURL(rootURL, bundle.fileName)}?hmr=${encodeURIComponent(bundle.fileName)}&rsc-id=${encodeURIComponent(entryId)}${version == null ? "" : `&v=${encodeURIComponent(String(version))}`}`,
   );
-  const importedBundleKeys = new Set(
-    importedBundles.map((bundle) => `${bundle.envId}:${bundle.entryId}`),
-  );
+  const importedBundleKeys = new Set(importedBundles.map(({ key }) => key));
   const updates = patch.updates.filter(
     (update) => !importedBundleKeys.has(update.bundleKey),
   );
   const chunkUpdates = Object.fromEntries(
-    importedBundles.map((bundle) => [bundle.entryId, bundle.fileName]),
+    importedBundles.map(({ bundle, entryId }) => [entryId, bundle.fileName]),
   );
   if (imports.length === 0) {
     return patch;
@@ -340,22 +366,18 @@ export function addClientPatchImports(
   };
 }
 
+function joinRootURL(rootURL: string, fileName: string): string {
+  const root = rootURL.replace(/\/+$/, "");
+  const relativePath = fileName.replaceAll("\\", "/").replace(/^\/+/, "");
+  return root ? `${root}/${relativePath}` : `/${relativePath}`;
+}
+
 function collectChangedOutputKeys(
   previous: BuildResult,
   next: BuildResult,
 ): string[] {
-  const previousOutputs = new Map(
-    previous.bundles.map((bundle) => [
-      `${bundle.envId}:${bundle.entryId}`,
-      bundle.fileName,
-    ]),
-  );
-  const nextOutputs = new Map(
-    next.bundles.map((bundle) => [
-      `${bundle.envId}:${bundle.entryId}`,
-      bundle.fileName,
-    ]),
-  );
+  const previousOutputs = collectLogicalOutputs(previous);
+  const nextOutputs = collectLogicalOutputs(next);
   if (
     !sameStrings(
       Array.from(previousOutputs.keys()).sort(),
@@ -365,8 +387,138 @@ function collectChangedOutputKeys(
     return ["<bundle-set>"];
   }
   return Array.from(nextOutputs.entries())
-    .filter(([key, fileName]) => previousOutputs.get(key) !== fileName)
+    .filter(([key, output]) => {
+      const prior = previousOutputs.get(key);
+      if (!prior) {
+        return true;
+      }
+      if (prior.runtimeHash && output.runtimeHash) {
+        return prior.runtimeHash !== output.runtimeHash;
+      }
+      return prior.fileName !== output.fileName;
+    })
     .map(([key]) => key);
+}
+
+function collectLogicalOutputs(
+  build: BuildResult,
+): Map<string, { fileName: string; runtimeHash?: string }> {
+  const bundleRuntimeHashes = new Map(
+    build.bundles.map((bundle) => [bundle.id, bundle.runtimeHash]),
+  );
+  const entrypoints = build.entrypoints ?? build.manifest.entrypoints;
+  if (entrypoints && Object.keys(entrypoints).length > 0) {
+    return new Map(
+      Object.entries(entrypoints).map(([key, value]) => [
+        key,
+        {
+          fileName: value.fileName,
+          runtimeHash: bundleRuntimeHashes.get(value.bundleId),
+        },
+      ]),
+    );
+  }
+  return new Map(
+    build.bundles.flatMap((bundle) => {
+      const aliases = bundle.entrypoints ?? [
+        { envId: bundle.envId, entryId: bundle.entryId },
+      ];
+      return aliases.map(
+        (entrypoint) =>
+          [
+            `${entrypoint.envId}:${entrypoint.entryId}`,
+            {
+              fileName: bundle.fileName,
+              runtimeHash: bundle.runtimeHash,
+            },
+          ] as const,
+      );
+    }),
+  );
+}
+
+export async function syncChangedRscNodeModules(
+  config: BundlerConfig,
+  previous: BuildResult,
+  next: BuildResult,
+  version = Date.now(),
+): Promise<void> {
+  const runtime = globalThis as {
+    __BUNDLER_RSC_NODE_MODULE_CACHE__?: Map<unknown, unknown>;
+    __BUNDLER_RSC_CHUNKS__?: Record<string, string>;
+  };
+  const previousOutputs = collectLogicalOutputs(previous);
+  const changes = next.bundles.flatMap((bundle) =>
+    (
+      bundle.entrypoints ?? [
+        {
+          envId: bundle.envId,
+          entryId: bundle.entryId,
+          exportMode: bundle.exportMode,
+        },
+      ]
+    )
+      .filter(
+        (entrypoint) =>
+          entrypoint.exportMode === "dynamic" &&
+          config.envs[entrypoint.envId]?.target === "browser",
+      )
+      .filter((entrypoint) => {
+        const previousOutput = previousOutputs.get(
+          `${entrypoint.envId}:${entrypoint.entryId}`,
+        );
+        return (
+          previousOutput?.fileName !== bundle.fileName ||
+          (previousOutput.runtimeHash != null &&
+            bundle.runtimeHash != null &&
+            previousOutput.runtimeHash !== bundle.runtimeHash)
+        );
+      })
+      .map((entrypoint) => ({
+        entryId: entrypoint.entryId,
+        fileName: bundle.fileName,
+      })),
+  );
+  if (changes.length === 0) {
+    return;
+  }
+
+  const cache = (runtime.__BUNDLER_RSC_NODE_MODULE_CACHE__ ??= new Map<
+    unknown,
+    unknown
+  >());
+  const chunks = (runtime.__BUNDLER_RSC_CHUNKS__ ??= {});
+  for (const [index, change] of changes.entries()) {
+    const href = pathToFileURL(
+      path.join(config.outputs.outDir, change.fileName),
+    ).href;
+    const module = await import(
+      `${href}?bundler-rsc-hmr=${encodeURIComponent(`${version}-${index}`)}`
+    );
+    chunks[change.entryId] = change.fileName;
+    cache.set(change.entryId, module);
+    cache.set(change.fileName, module);
+  }
+}
+
+function findBundleForLogicalKey(
+  build: BuildResult,
+  key: string,
+): BuildResult["bundles"][number] | undefined {
+  const logical = build.entrypoints?.[key] ?? build.manifest.entrypoints?.[key];
+  if (logical) {
+    return build.bundles.find(
+      (bundle) =>
+        bundle.id === logical.bundleId || bundle.fileName === logical.fileName,
+    );
+  }
+  return build.bundles.find(
+    (bundle) =>
+      `${bundle.envId}:${bundle.entryId}` === key ||
+      bundle.entrypoints?.some(
+        (entrypoint) => `${entrypoint.envId}:${entrypoint.entryId}` === key,
+      ),
+  );
 }
 
 async function loadServerModule({

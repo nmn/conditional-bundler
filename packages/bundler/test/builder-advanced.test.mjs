@@ -108,7 +108,7 @@ test("bundles complex dynamic imports", async () => {
   expect(snapshot).toMatchInlineSnapshot(`
 {
   "name": "complex-dynamic",
-  "output": "const __IMPORT_a7s65xr38 = () => import("./complex-dynamic.browser.3nusib50.js").then((mod) => Object.freeze({ "value": mod["a7s65xr38_value"] }));
+  "output": "const __IMPORT_a7s65xr38 = () => import("./complex-dynamic.browser.ro04z6a2.js").then((mod) => Object.freeze({ "value": mod["a7s65xr38_value"] }));
 async function ia6xmlu2_load() {
   const mod = await __IMPORT_a7s65xr38();
   return mod.value;
@@ -172,17 +172,7 @@ test("bundles a hybrid graph with conditionals, barrels, and dynamic namespace u
 {
   "name": "hybrid",
   "outputs": {
-    "hybrid.browser.isgubvhv.js": "
-const o5ufutef_suffix = "tail";
-const __NS__o5ufutef = Object.create(null);
-Object.defineProperty(__NS__o5ufutef, Symbol.toStringTag, { value: "Module" });
-Object.defineProperty(__NS__o5ufutef, "suffix", { enumerable: true, get: () => o5ufutef_suffix });
-Object.preventExtensions(__NS__o5ufutef);
-const kh774klk_default = function kh774klk_finish(input) {
-  return \`\${input}:\${__NS__o5ufutef.suffix}:\${__NS__o5ufutef["suffix"]}\`;
-};
-export { kh774klk_default };",
-    "hybrid.browser.o84oz7v7.js": "const __IMPORT_kh774klk = () => import("./hybrid.browser.isgubvhv.js").then((mod) => Object.freeze({ "default": mod["kh774klk_default"] }));
+    "hybrid.browser.ci4x8uvy.js": "const __IMPORT_kh774klk = () => import("./hybrid.browser.qxq4sqrp.js").then((mod) => Object.freeze({ "default": mod["kh774klk_default"] }));
 const kbgjp98n_label = "base";
 const a7c4iu3zz_label = kbgjp98n_label;
 /////##CONDITION_START##"FLAG_A"
@@ -203,6 +193,16 @@ async function a54u0cy4f_run(key) {
   return mod.default(\`\${a7c4iu3zz_label}:\${a54u0cy4f_feature}:\${key}\`);
 }
 export { a54u0cy4f_run as run };",
+    "hybrid.browser.qxq4sqrp.js": "
+const o5ufutef_suffix = "tail";
+const __NS__o5ufutef = Object.create(null);
+Object.defineProperty(__NS__o5ufutef, Symbol.toStringTag, { value: "Module" });
+Object.defineProperty(__NS__o5ufutef, "suffix", { enumerable: true, get: () => o5ufutef_suffix });
+Object.preventExtensions(__NS__o5ufutef);
+const kh774klk_default = function kh774klk_finish(input) {
+  return \`\${input}:\${__NS__o5ufutef.suffix}:\${__NS__o5ufutef["suffix"]}\`;
+};
+export { kh774klk_default };",
   },
 }
 `);

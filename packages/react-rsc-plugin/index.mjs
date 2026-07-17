@@ -110,12 +110,8 @@ export function createReactRscPlugin(options) {
         jsxOptions,
       ],
       [
-        "./transform.mjs",
+        "./runtime-transform.mjs",
         {
-          root,
-          clientEnv,
-          rscEnv,
-          discoverClientEntrypoints,
           runtimeTemplatePath: fileURLToPath(
             new URL("./runtime-client.js", import.meta.url),
           ),
@@ -123,12 +119,31 @@ export function createReactRscPlugin(options) {
           clientReferenceEntry,
         },
       ],
-      ["./webpack-shim-transform.mjs", { clientEnv }],
+      {
+        plugin: [
+          "./transform.mjs",
+          {
+            root,
+            clientEnv,
+            rscEnv,
+            discoverClientEntrypoints,
+          },
+        ],
+        environments: [rscEnv],
+      },
+      {
+        plugin: ["./webpack-shim-transform.mjs", { clientEnv }],
+        environments: [clientEnv],
+      },
     ],
     buildEnd({ manifest, modules, outputs, emitFile }) {
       const records = {};
       for (const moduleRecord of modules) {
-        if (moduleRecord.envs[0] !== rscEnv) {
+        if (
+          !(moduleRecord.environmentIds ?? moduleRecord.envs ?? []).includes(
+            rscEnv,
+          )
+        ) {
           continue;
         }
         const raw =
@@ -261,30 +276,29 @@ function findClientReferenceBundle(
   moduleId,
   { clientReferenceEntry, runtimeEntry } = {},
 ) {
+  const findEntrypointBundle = (entryId) => {
+    const record = manifest.entrypoints?.[`${clientEnv}:${entryId}`];
+    return record
+      ? manifest.bundles.find((bundle) => bundle.id === record.bundleId)
+      : undefined;
+  };
   return (
     (clientReferenceEntry && runtimeEntry
-      ? manifest.bundles.find(
-          (bundle) =>
-            bundle.envId === clientEnv && bundle.entryId === runtimeEntry,
-        )
+      ? findEntrypointBundle(runtimeEntry)
       : undefined) ??
     (clientReferenceEntry
-      ? manifest.bundles.find(
-          (bundle) =>
-            bundle.envId === clientEnv &&
-            bundle.entryId === clientReferenceEntry,
-        )
+      ? findEntrypointBundle(clientReferenceEntry)
       : undefined) ??
+    findEntrypointBundle(moduleId) ??
     manifest.bundles.find(
-      (bundle) => bundle.envId === clientEnv && bundle.entryId === moduleId,
+      (bundle) =>
+        bundle.environmentIds?.includes(clientEnv) &&
+        bundle.modules?.[0] === moduleId,
     ) ??
     manifest.bundles.find(
       (bundle) =>
-        bundle.envId === clientEnv && bundle.modules?.[0] === moduleId,
-    ) ??
-    manifest.bundles.find(
-      (bundle) =>
-        bundle.envId === clientEnv && bundle.modules?.includes(moduleId),
+        bundle.environmentIds?.includes(clientEnv) &&
+        bundle.modules?.includes(moduleId),
     )
   );
 }

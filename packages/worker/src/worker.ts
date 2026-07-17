@@ -11,6 +11,7 @@ import type {
   ExtraTransformOutput,
   FileRecord,
   LinkReference,
+  ModuleVariantRecord,
   RemoteCacheAdapter,
   RemoteCacheConfig,
   TransformResult,
@@ -34,11 +35,21 @@ type WorkerBabelPluginSpec = {
   options?: Record<string, unknown>;
 };
 
+type WorkerScopedBabelPluginSpec = {
+  plugin: WorkerBabelPluginSpec;
+  environments?: "each" | string[];
+};
+
+type WorkerPipelineBabelPluginSpec = {
+  plugin: WorkerBabelPluginSpec;
+  scoped: boolean;
+};
+
 type WorkerTransformProfile = {
   fingerprint: string;
-  transform: Record<string, WorkerBabelPluginSpec[]>;
-  transformPre: Record<string, WorkerBabelPluginSpec[]>;
-  transformPost: Record<string, WorkerBabelPluginSpec[]>;
+  transform: WorkerScopedBabelPluginSpec[];
+  transformPre: WorkerScopedBabelPluginSpec[];
+  transformPost: WorkerScopedBabelPluginSpec[];
 };
 
 type WorkerRequest = {
@@ -55,6 +66,7 @@ type WorkerRequest = {
   transformConfig?: Record<string, unknown>;
   pkg: { name: string; version: string; root: string };
   envs: string[];
+  allEnvIds?: string[];
   targets: Record<string, "node" | "browser">;
   cacheDir: string;
   cacheNamespace?: string;
@@ -81,6 +93,7 @@ type WorkerResponse = {
   cacheHit?: boolean;
   contentHash: string;
   prefix: string;
+  variants: ModuleVariantRecord[];
   fileRecordsByEnv: Record<string, FileRecord>;
 };
 
@@ -124,6 +137,7 @@ type ModuleCacheRecord = {
   baseKey: string;
   moduleKey: string;
   dependencyRequestsByEnv: Record<string, WorkerImportRequest[]>;
+  variants?: ModuleVariantRecord[];
   fileRecordsByEnv: Record<string, FileRecord>;
 };
 
@@ -136,8 +150,10 @@ type TransformFileOutput = {
 type FileCachePaths = {
   fileHash: string;
   fileDir: string;
+  artifactDir: string;
   modulePath: string;
   remoteBaseKey: string;
+  remoteArtifactBaseKey: string;
 };
 
 const babelModuleCache = new Map<string, unknown>();
@@ -146,7 +162,7 @@ const pendingCoordinatorRequests = new Map<
   { resolve: (value: unknown) => void; reject: (error: Error) => void }
 >();
 let nextCoordinatorRequestId = 1;
-const CELL_ARTIFACT_FORMAT = 19;
+const CELL_ARTIFACT_FORMAT = 25;
 const remapping = ((
   remappingModule as unknown as {
     default?: typeof import("@ampproject/remapping").default;
@@ -185,10 +201,7 @@ async function handleTransform(
     : null;
   if (
     validatedCached &&
-    (await hasCachedArtifacts(
-      validatedCached.fileRecordsByEnv,
-      Boolean(request.sourceMap),
-    ))
+    (await hasCachedArtifacts(validatedCached.fileRecordsByEnv))
   ) {
     const first = Object.values(validatedCached.fileRecordsByEnv)[0];
     return {
@@ -196,17 +209,12 @@ async function handleTransform(
       cacheHit: true,
       contentHash: first.contentHash,
       prefix: first.prefix,
+      variants: collectVariants(validatedCached.fileRecordsByEnv),
       fileRecordsByEnv: validatedCached.fileRecordsByEnv,
     };
   }
   const remoteCached = remote
-    ? await readRemoteModuleCache(
-        remote,
-        cachePaths,
-        baseKey,
-        Boolean(request.sourceMap),
-        request,
-      )
+    ? await readRemoteModuleCache(remote, cachePaths, baseKey, request)
     : null;
   if (remoteCached) {
     const first = Object.values(remoteCached.fileRecordsByEnv)[0];
@@ -215,6 +223,7 @@ async function handleTransform(
       cacheHit: true,
       contentHash: first.contentHash,
       prefix: first.prefix,
+      variants: collectVariants(remoteCached.fileRecordsByEnv),
       fileRecordsByEnv: remoteCached.fileRecordsByEnv,
     };
   }
@@ -222,35 +231,41 @@ async function handleTransform(
   const transformed = await transformFile(request);
   const resultsByEnv = transformed.resultsByEnv;
   const moduleKey = buildModuleKey(baseKey, transformed.resolvedImportsByEnv);
-  const fileRecordsByEnv = Object.fromEntries(
-    Object.entries(resultsByEnv).map(([envId, result]) => {
-      if (!result.fileRecord) {
-        throw new Error(
-          `Transform result missing file record for env '${envId}'.`,
-        );
-      }
-      return [
-        envId,
-        finalizeFileRecord(
-          {
-            ...result.fileRecord,
-            id: request.id,
-            filePath: request.realPath,
-            prefix: result.fileRecord.prefix,
-            contentHash: contentHash(
-              request.codeByEnv?.[envId] ?? sourceContent,
-            ),
-            envs: [envId],
-            codeByEnv: {},
-            mapByEnv: {},
-            pkg: request.pkg,
-            resolutionMeta: request.resolutionMeta,
-          },
-          cachePaths.fileDir,
-          envId,
+  const variants: ModuleVariantRecord[] = groupTransformResults(
+    resultsByEnv,
+  ).map(({ variantId, environmentIds, result }) => {
+    if (!result.fileRecord) {
+      throw new Error(
+        `Transform result missing file record for variant '${variantId}'.`,
+      );
+    }
+    const representativeEnv = environmentIds[0];
+    const record = finalizeFileRecord(
+      {
+        ...result.fileRecord,
+        id: request.id,
+        filePath: request.realPath,
+        prefix: result.fileRecord.prefix,
+        contentHash: contentHash(
+          request.codeByEnv?.[representativeEnv] ?? sourceContent,
         ),
-      ];
-    }),
+        variantId,
+        environmentIds,
+        envs: environmentIds,
+        codeByEnv: {},
+        mapByEnv: {},
+        pkg: request.pkg,
+        resolutionMeta: request.resolutionMeta,
+      },
+      cachePaths.artifactDir,
+      variantId,
+    );
+    return { variantId, environmentIds, record };
+  });
+  const fileRecordsByEnv = Object.fromEntries(
+    variants.flatMap((variant) =>
+      variant.environmentIds.map((envId) => [envId, variant.record]),
+    ),
   ) as Record<string, FileRecord>;
 
   await writeFileCache(
@@ -261,6 +276,7 @@ async function handleTransform(
     baseKey,
     transformed.dependencyRequestsByEnv,
     request.moduleIdentity,
+    variants,
   );
   if (remote) {
     await writeRemoteFileCache(
@@ -271,6 +287,7 @@ async function handleTransform(
       baseKey,
       transformed.dependencyRequestsByEnv,
       request.moduleIdentity,
+      variants,
     );
   }
 
@@ -279,8 +296,72 @@ async function handleTransform(
     cacheHit: false,
     contentHash: fileRecordsByEnv[request.envs[0]]?.contentHash ?? fileHash,
     prefix: fileRecordsByEnv[request.envs[0]]?.prefix ?? "",
+    variants,
     fileRecordsByEnv,
   };
+}
+
+function groupTransformResults(
+  resultsByEnv: Record<string, TransformResult>,
+): Array<{
+  variantId: string;
+  environmentIds: string[];
+  result: TransformResult;
+}> {
+  const groups = new Map<
+    string,
+    { environmentIds: string[]; result: TransformResult }
+  >();
+  for (const [envId, result] of Object.entries(resultsByEnv)) {
+    const fingerprint = contentHash(
+      JSON.stringify(result.fileRecord ?? result),
+    );
+    const existing = groups.get(fingerprint);
+    if (existing) {
+      existing.environmentIds.push(envId);
+    } else {
+      groups.set(fingerprint, { environmentIds: [envId], result });
+    }
+  }
+  return Array.from(groups, ([variantId, group]) => ({
+    variantId,
+    environmentIds: group.environmentIds.sort(),
+    result: group.result,
+  }));
+}
+
+function collectVariants(
+  fileRecordsByEnv: Record<string, FileRecord>,
+): ModuleVariantRecord[] {
+  const variants = new Map<string, ModuleVariantRecord>();
+  for (const [envId, record] of Object.entries(fileRecordsByEnv)) {
+    const variantId =
+      record.variantId ??
+      contentHash(
+        JSON.stringify(record, (key, value) =>
+          key === "envs" || key === "environmentIds" ? undefined : value,
+        ),
+      );
+    const existing = variants.get(variantId);
+    if (existing) {
+      if (!existing.environmentIds.includes(envId)) {
+        existing.environmentIds.push(envId);
+      }
+      continue;
+    }
+    const environmentIds = record.environmentIds ?? record.envs ?? [envId];
+    variants.set(variantId, {
+      variantId,
+      environmentIds: [...environmentIds],
+      record: {
+        ...record,
+        variantId,
+        environmentIds,
+        envs: environmentIds,
+      },
+    });
+  }
+  return Array.from(variants.values());
 }
 
 async function transformFile(
@@ -296,8 +377,7 @@ async function transformFile(
   if (request.moduleType === "css") {
     return transformCssFile(request);
   }
-  const { prepareCoreTransform, transformWithCore } =
-    await import("./transform/core.js");
+  const { prepareCoreTransform } = await import("./transform/core.js");
   const results: Record<string, TransformResult> = {};
   const preResults: Record<
     string,
@@ -308,61 +388,50 @@ async function transformFile(
     ReturnType<typeof prepareCoreTransform>
   > = {};
   const requestsByEnv: Record<string, WorkerImportRequest[]> = {};
-  const preResultCache = new Map<
-    string,
-    Awaited<ReturnType<typeof applyBabelStage>>
-  >();
   const preparedCache = new Map<
     string,
     ReturnType<typeof prepareCoreTransform>
   >();
   const preparedKeysByEnv: Record<string, string> = {};
-  const transformSpecsByEnv = Object.fromEntries(
-    request.envs.map((envId) => [
-      envId,
-      [
-        ...(request.workerProfile.transformPre[envId] ??
-          request.workerProfile.transformPre.default ??
-          []),
-        ...(request.workerProfile.transform[envId] ??
-          request.workerProfile.transform.default ??
-          []),
-      ],
-    ]),
-  ) as Record<string, WorkerBabelPluginSpec[]>;
-  const transformSpecKeysByEnv = Object.fromEntries(
-    Object.entries(transformSpecsByEnv).map(([envId, specs]) => [
-      envId,
-      JSON.stringify(specs),
-    ]),
-  ) as Record<string, string>;
+  const orderedTransformStages = [
+    ...request.workerProfile.transformPre,
+    ...request.workerProfile.transform,
+  ];
+  const pipelineCache = new Map<
+    string,
+    Awaited<ReturnType<typeof applyBabelStage>>
+  >();
 
   for (const envId of request.envs) {
     const initialCode = request.codeByEnv?.[envId] ?? request.code;
     const initialMap = request.mapByEnv?.[envId];
-    const transformSpecs = transformSpecsByEnv[envId];
-    const canReusePreTransform = transformSpecs.every((spec) =>
-      isEnvironmentIndependentSpec(spec, request, initialCode),
+    const pipeline = selectTransformPipeline(orderedTransformStages, envId);
+    const transformEnvId = pipeline.scoped ? envId : undefined;
+    const pipelineKey = contentHash(
+      JSON.stringify({
+        codeHash: contentHash(initialCode),
+        mapHash: initialMap ? contentHash(initialMap) : null,
+        specs: pipeline.specs,
+        envId: transformEnvId,
+        target: transformEnvId ? request.targets[transformEnvId] : undefined,
+      }),
     );
-    const preCacheKey = canReusePreTransform
-      ? JSON.stringify({
-          codeHash: contentHash(initialCode),
-          mapHash: initialMap ? contentHash(initialMap) : null,
-          specs: transformSpecKeysByEnv[envId],
-        })
-      : `env:${envId}`;
-    let preResult = preResultCache.get(preCacheKey);
+    let preResult = pipelineCache.get(pipelineKey);
     if (!preResult) {
-      preResult = await applyBabelStage(
+      preResult = await applyCachedBabelPipeline(
         initialCode,
         initialMap,
         request,
-        envId,
-        transformSpecs,
+        transformEnvId,
+        pipeline.specs,
       );
-      preResultCache.set(preCacheKey, preResult);
+      pipelineCache.set(pipelineKey, preResult);
     }
     preResults[envId] = preResult;
+  }
+
+  for (const envId of request.envs) {
+    const preResult = preResults[envId];
     const preparedKey = JSON.stringify({
       codeHash: contentHash(preResult.code),
       sourceFileName: request.sourceMap?.sourceFileName,
@@ -396,39 +465,23 @@ async function transformFile(
     : {};
 
   const coreResultCache = new Map<string, TransformResult>();
+  const coreResultsByEnv: Record<string, TransformResult> = {};
+  const coreCellsByEnv: Record<string, CellRecord[]> = {};
+  const sourceContentsByEnv: Record<string, Record<string, string>> = {};
   for (const envId of request.envs) {
     const preResult = preResults[envId];
     const coreCacheKey = JSON.stringify({
       preparedKey: preparedKeysByEnv[envId],
       resolvedImports: resolvedImportsByEnv[envId] ?? {},
+      hmr: request.dev?.hmr === true && request.targets[envId] === "browser",
     });
     let coreResult = coreResultCache.get(coreCacheKey);
     if (!coreResult) {
-      coreResult = transformWithCore(
-        {
-          id: request.id,
-          moduleIdentity: request.moduleIdentity,
-          canonicalPath: request.canonicalPath ?? request.moduleIdentity,
-          code: preResult.code,
-          realPath: request.realPath,
-          pkg: request.pkg,
-          syntax: request.syntax,
-          envs: request.envs,
-          envId,
-          resolvedImports: resolvedImportsByEnv[envId],
-          dev: request.dev,
-        },
-        {
-          importAttrAllow: ["json", "url", "raw", "base64", "assetPath"],
-          generateModuleOutput: false,
-          sourceMap: request.sourceMap
-            ? {
-                sourceFileName: request.sourceMap.sourceFileName,
-                sourcesContent: request.sourceMap.sourcesContent,
-                embedCellSourcesContent: false,
-              }
-            : undefined,
-        },
+      coreResult = await applyCachedCoreTransform(
+        request,
+        envId,
+        preResult.code,
+        resolvedImportsByEnv[envId],
         structuredClone(preparedByEnv[envId]),
       );
       coreResultCache.set(coreCacheKey, coreResult);
@@ -448,13 +501,21 @@ async function transformFile(
       ...cell,
       map: composeSourceMaps(cell.map, preResult.map, parsedPreMap),
     }));
-    const postSpecs =
-      request.workerProfile.transformPost[envId] ??
-      request.workerProfile.transformPost.default ??
-      [];
-    const postCells = coreResult.fileRecord
-      ? await applyBabelStageToCells(coreCells, request, envId, postSpecs)
-      : [];
+    coreResultsByEnv[envId] = coreResult;
+    coreCellsByEnv[envId] = coreResult.fileRecord ? coreCells : [];
+    sourceContentsByEnv[envId] = sourceContents;
+  }
+  await applyPostTransformPipelines(
+    coreCellsByEnv,
+    request,
+    request.workerProfile.transformPost,
+  );
+
+  for (const envId of request.envs) {
+    const preResult = preResults[envId];
+    const coreResult = coreResultsByEnv[envId];
+    const postCells = coreCellsByEnv[envId];
+    const sourceContents = sourceContentsByEnv[envId];
     const metadata = preResult.metadata as
       | {
           conditionalBundlerExtraOutputs?: Record<string, ExtraTransformOutput>;
@@ -515,6 +576,216 @@ async function transformFile(
   };
 }
 
+async function applyPostTransformPipelines(
+  cellsByEnv: Record<string, CellRecord[]>,
+  request: WorkerRequest,
+  entries: WorkerScopedBabelPluginSpec[],
+): Promise<void> {
+  const resultCache = new Map<string, CellRecord[]>();
+  for (const envId of request.envs) {
+    const pipeline = selectTransformPipeline(entries, envId);
+    const transformEnvId = pipeline.scoped ? envId : undefined;
+    const input = cellsByEnv[envId];
+    const cacheKey = contentHash(
+      JSON.stringify({
+        cells: input,
+        specs: pipeline.specs,
+        envId: transformEnvId,
+      }),
+    );
+    let transformed = resultCache.get(cacheKey);
+    if (!transformed) {
+      transformed = await applyCachedBabelPipelineToCells(
+        input,
+        request,
+        transformEnvId,
+        pipeline.specs,
+      );
+      resultCache.set(cacheKey, transformed);
+    }
+    cellsByEnv[envId] = transformed;
+  }
+}
+
+function transformEntryApplies(
+  entry: WorkerScopedBabelPluginSpec,
+  envId: string,
+): boolean {
+  return (
+    entry.environments === undefined ||
+    entry.environments === "each" ||
+    entry.environments.includes(envId)
+  );
+}
+
+function selectTransformPipeline(
+  entries: WorkerScopedBabelPluginSpec[],
+  envId: string,
+): { specs: WorkerPipelineBabelPluginSpec[]; scoped: boolean } {
+  const applicable = entries.filter((entry) =>
+    transformEntryApplies(entry, envId),
+  );
+  return {
+    specs: applicable.map((entry) => ({
+      plugin: entry.plugin,
+      scoped: entry.environments !== undefined,
+    })),
+    scoped: applicable.some((entry) => entry.environments !== undefined),
+  };
+}
+
+async function applyCachedBabelPipeline(
+  code: string,
+  map: string | undefined,
+  request: WorkerRequest,
+  envId: string | undefined,
+  specs: WorkerPipelineBabelPluginSpec[],
+): Promise<{ code: string; map?: string; metadata?: Record<string, unknown> }> {
+  if (specs.length === 0) {
+    return { code, map };
+  }
+  const key = contentHash(
+    JSON.stringify({
+      format: 2,
+      moduleIdentity: request.moduleIdentity,
+      codeHash: contentHash(code),
+      mapHash: map ? contentHash(map) : null,
+      specs,
+      pluginHashes: await Promise.all(
+        specs.map(async (entry) => {
+          try {
+            return contentHash(await fs.readFile(entry.plugin.modulePath));
+          } catch {
+            return null;
+          }
+        }),
+      ),
+      envId,
+      target: envId ? request.targets[envId] : undefined,
+      syntax: request.syntax,
+      buildMode: request.buildMode,
+      resolutionMeta: request.resolutionMeta,
+      sourceMap: request.sourceMap
+        ? {
+            sourceFileName: request.sourceMap.sourceFileName,
+            sourcesContent: request.sourceMap.sourcesContent,
+          }
+        : null,
+    }),
+  );
+  const cachePath = path.join(
+    request.cacheDir,
+    "transform-pipelines",
+    `${key}.json`,
+  );
+  const cached = await readJsonIfExists<{
+    code: string;
+    map?: string;
+    metadata?: Record<string, unknown>;
+  }>(cachePath);
+  if (cached) {
+    return cached;
+  }
+  const result = await applyBabelStage(code, map, request, envId, specs);
+  await writeJsonAtomic(cachePath, result);
+  return result;
+}
+
+async function applyCachedBabelPipelineToCells(
+  cells: CellRecord[],
+  request: WorkerRequest,
+  envId: string | undefined,
+  specs: WorkerPipelineBabelPluginSpec[],
+): Promise<CellRecord[]> {
+  if (specs.length === 0) {
+    return cells;
+  }
+  const transformed: CellRecord[] = [];
+  for (const cell of cells) {
+    if (cell.kind === "generated" || cell.code == null) {
+      transformed.push(cell);
+      continue;
+    }
+    const result = await applyCachedBabelPipeline(
+      cell.code,
+      cell.map,
+      request,
+      envId,
+      specs,
+    );
+    transformed.push({ ...cell, code: result.code, map: result.map });
+  }
+  return transformed;
+}
+
+async function applyCachedCoreTransform(
+  request: WorkerRequest,
+  envId: string,
+  code: string,
+  resolvedImports: ResolvedImportsByEnv[string] | undefined,
+  prepared: unknown,
+): Promise<TransformResult> {
+  const dev = {
+    hmr: request.dev?.hmr === true && request.targets[envId] === "browser",
+  };
+  const key = contentHash(
+    JSON.stringify({
+      format: 2,
+      moduleIdentity: request.moduleIdentity,
+      canonicalPath: request.canonicalPath ?? request.moduleIdentity,
+      pkg: {
+        name: request.pkg.name,
+        version: request.pkg.version,
+      },
+      syntax: request.syntax,
+      codeHash: contentHash(code),
+      resolvedImports: resolvedImports ?? {},
+      dev,
+      sourceMap: request.sourceMap
+        ? {
+            sourceFileName: request.sourceMap.sourceFileName,
+            sourcesContent: request.sourceMap.sourcesContent,
+          }
+        : null,
+    }),
+  );
+  const cachePath = path.join(request.cacheDir, "core-variants", `${key}.json`);
+  const cached = await readJsonIfExists<TransformResult>(cachePath);
+  if (cached) {
+    return cached;
+  }
+  const { transformWithCore } = await import("./transform/core.js");
+  const result = transformWithCore(
+    {
+      id: request.id,
+      moduleIdentity: request.moduleIdentity,
+      canonicalPath: request.canonicalPath ?? request.moduleIdentity,
+      code,
+      realPath: request.realPath,
+      pkg: request.pkg,
+      syntax: request.syntax,
+      envs: request.allEnvIds ?? request.envs,
+      envId,
+      resolvedImports,
+      dev,
+    },
+    {
+      importAttrAllow: ["json", "url", "raw", "base64", "assetPath"],
+      generateModuleOutput: false,
+      sourceMap: request.sourceMap
+        ? {
+            sourceFileName: request.sourceMap.sourceFileName,
+            sourcesContent: request.sourceMap.sourcesContent,
+            embedCellSourcesContent: false,
+          }
+        : undefined,
+    },
+    prepared as Parameters<typeof transformWithCore>[2],
+  );
+  await writeJsonAtomic(cachePath, result);
+  return result;
+}
+
 async function transformAssetFile(
   request: WorkerRequest,
 ): Promise<Record<string, TransformResult>> {
@@ -541,23 +812,30 @@ async function transformAssetFile(
   ) {
     throw new Error(`Unsupported asset intent '${String(intent)}'.`);
   }
+  const resultsByHmrMode = new Map<boolean, TransformResult>();
   return Object.fromEntries(
-    request.envs.map((envId) => [
-      envId,
-      transformAsset({
-        id: request.id,
-        moduleIdentity: request.moduleIdentity,
-        canonicalPath: request.canonicalPath ?? request.moduleIdentity,
-        realPath: request.realPath,
-        bytes,
-        intent,
-        assetId,
-        pkg: request.pkg,
-        envs: request.envs,
-        envId,
-        dev: request.dev,
-      }),
-    ]),
+    request.envs.map((envId) => {
+      const hmr =
+        request.dev?.hmr === true && request.targets[envId] === "browser";
+      let result = resultsByHmrMode.get(hmr);
+      if (!result) {
+        result = transformAsset({
+          id: request.id,
+          moduleIdentity: request.moduleIdentity,
+          canonicalPath: request.canonicalPath ?? request.moduleIdentity,
+          realPath: request.realPath,
+          bytes,
+          intent,
+          assetId,
+          pkg: request.pkg,
+          envs: request.allEnvIds ?? request.envs,
+          envId,
+          dev: { hmr },
+        });
+        resultsByHmrMode.set(hmr, result);
+      }
+      return [envId, result];
+    }),
   );
 }
 
@@ -568,8 +846,9 @@ async function transformCssFile(
     await import("./transform/css.js");
   const analyses: Record<string, ReturnType<typeof analyzeCss>> = {};
   const requestsByEnv: Record<string, WorkerImportRequest[]> = {};
+  const analysisCache = new Map<string, ReturnType<typeof analyzeCss>>();
   for (const envId of request.envs) {
-    const analysis = analyzeCss({
+    const input = {
       id: request.id,
       moduleIdentity: request.moduleIdentity,
       canonicalPath: request.canonicalPath ?? request.moduleIdentity,
@@ -586,8 +865,20 @@ async function transformCssFile(
             sourcesContent: request.sourceMap.sourcesContent,
           }
         : undefined,
-      dev: request.dev,
+      dev: {
+        hmr: request.dev?.hmr === true && request.targets[envId] === "browser",
+      },
+    };
+    const analysisKey = JSON.stringify({
+      codeHash: contentHash(input.code),
+      buildMode: input.buildMode,
+      sourceMap: input.sourceMap,
     });
+    let analysis = analysisCache.get(analysisKey);
+    if (!analysis) {
+      analysis = analyzeCss(input);
+      analysisCache.set(analysisKey, analysis);
+    }
     analyses[envId] = analysis;
     requestsByEnv[envId] = analysis.requests;
   }
@@ -611,7 +902,7 @@ async function transformCssFile(
           realPath: request.realPath,
           code: request.codeByEnv?.[envId] ?? request.code,
           pkg: request.pkg,
-          envs: request.envs,
+          envs: request.allEnvIds ?? request.envs,
           envId,
           target: request.targets[envId] ?? "browser",
           buildMode: request.buildMode ?? "development",
@@ -621,7 +912,10 @@ async function transformCssFile(
                 sourcesContent: request.sourceMap.sourcesContent,
               }
             : undefined,
-          dev: request.dev,
+          dev: {
+            hmr:
+              request.dev?.hmr === true && request.targets[envId] === "browser",
+          },
         },
         analyses[envId],
         resolvedByEnv[envId] ?? {},
@@ -714,41 +1008,42 @@ async function applyBabelStage(
   code: string,
   map: string | undefined,
   request: WorkerRequest,
-  envId: string,
-  specs: WorkerBabelPluginSpec[],
+  envId: string | undefined,
+  specs: WorkerPipelineBabelPluginSpec[],
 ): Promise<{ code: string; map?: string; metadata?: Record<string, unknown> }> {
   const applicableSpecs = specs.filter(
-    (spec) =>
-      spec.options?.__bundlerExcludeNodeModules !== true ||
+    (entry) =>
+      entry.plugin.options?.__bundlerExcludeNodeModules !== true ||
       !isNodeModulesPath(request.realPath),
   );
   if (applicableSpecs.length === 0) {
     return { code, map };
   }
   const plugins = await Promise.all(
-    applicableSpecs.map(async (spec, index) => {
+    applicableSpecs.map(async (entry, index) => {
+      const spec = entry.plugin;
+      const pluginEnvId = entry.scoped ? envId : undefined;
       const loaded = await loadBabelPlugin(spec.modulePath);
       const pluginOptions = { ...(spec.options ?? {}) };
       delete pluginOptions.__bundlerExcludeNodeModules;
-      delete pluginOptions.__bundlerEnvironmentIndependent;
-      delete pluginOptions.__bundlerEnvironmentIndependentUnlessCommonJs;
-      delete pluginOptions.__bundlerEnvironmentIndependentUnlessModulePaths;
       return [
         loaded,
         {
           ...pluginOptions,
-          envId,
           envs: request.envs,
+          ...(pluginEnvId
+            ? { envId: pluginEnvId, target: request.targets[pluginEnvId] }
+            : {}),
           filePath: request.realPath,
           id: request.id,
           moduleIdentity: request.moduleIdentity,
-          target: request.targets[envId] ?? "browser",
           buildMode: request.buildMode ?? "development",
           pkg: request.pkg,
+          syntax: request.syntax,
           format: request.resolutionMeta?.format,
           reactCjsEnv: request.resolutionMeta?.reactCjsEnv,
         },
-        `${envId}:${index}:${spec.modulePath}`,
+        `${pluginEnvId ?? "shared"}:${index}:${spec.modulePath}`,
       ] as const;
     }),
   );
@@ -759,7 +1054,14 @@ async function applyBabelStage(
     parserOpts: {
       plugins: [
         ...(request.syntax.jsx ? ["jsx"] : []),
-        ...(request.syntax.ts ? ["typescript"] : []),
+        ...(request.syntax.ts
+          ? [
+              ["typescript", { isTSX: request.syntax.jsx }] as [
+                "typescript",
+                { isTSX: boolean },
+              ],
+            ]
+          : []),
       ],
     },
     plugins,
@@ -775,55 +1077,8 @@ async function applyBabelStage(
   };
 }
 
-function isEnvironmentIndependentSpec(
-  spec: WorkerBabelPluginSpec,
-  request: WorkerRequest,
-  code: string,
-): boolean {
-  if (spec.options?.__bundlerEnvironmentIndependent === true) {
-    return true;
-  }
-  return (
-    (spec.options?.__bundlerEnvironmentIndependentUnlessCommonJs === true &&
-      request.resolutionMeta?.format !== "commonjs") ||
-    (spec.options?.__bundlerEnvironmentIndependentUnlessModulePaths === true &&
-      !/\b(?:__dirname|__filename)\b|import\.meta/.test(code))
-  );
-}
-
 function isNodeModulesPath(filePath: string): boolean {
   return normalizePosixPath(filePath).split("/").includes("node_modules");
-}
-
-async function applyBabelStageToCells(
-  cells: CellRecord[],
-  request: WorkerRequest,
-  envId: string,
-  specs: WorkerBabelPluginSpec[],
-): Promise<CellRecord[]> {
-  if (specs.length === 0) {
-    return cells;
-  }
-  const transformed: CellRecord[] = [];
-  for (const cell of cells) {
-    if (cell.kind === "generated" || cell.code == null) {
-      transformed.push(cell);
-      continue;
-    }
-    const result = await applyBabelStage(
-      cell.code,
-      cell.map,
-      request,
-      envId,
-      specs,
-    );
-    transformed.push({
-      ...cell,
-      code: result.code,
-      map: result.map,
-    });
-  }
-  return transformed;
 }
 
 function composeSourceMaps(
@@ -1044,6 +1299,9 @@ function buildBaseModuleKey(request: WorkerRequest): string {
     importIntent: request.importIntent ?? "module",
     canonicalPath: request.canonicalPath ?? request.moduleIdentity,
     buildMode: request.buildMode ?? "development",
+    dev: {
+      hmr: request.dev?.hmr === true,
+    },
     transformConfig: request.transformConfig,
     resolutionMeta: request.resolutionMeta,
     envHashes,
@@ -1123,8 +1381,10 @@ function buildFileCachePaths(
   return {
     fileHash,
     fileDir,
+    artifactDir: path.join(cacheRoot, "variants", fileHash),
     modulePath: path.join(fileDir, "module.json"),
     remoteBaseKey: joinRemoteKey("files", fileHash, variantHash),
+    remoteArtifactBaseKey: joinRemoteKey("variants", fileHash),
   };
 }
 
@@ -1202,13 +1462,17 @@ async function writeFileCache(
   baseKey: string,
   dependencyRequestsByEnv: Record<string, WorkerImportRequest[]>,
   moduleIdentity: string,
+  variants: ModuleVariantRecord[],
 ): Promise<void> {
   await fs.rm(cachePaths.fileDir, { recursive: true, force: true });
   await ensureDir(cachePaths.fileDir);
+  await ensureDir(cachePaths.artifactDir);
 
-  for (const [envId, result] of Object.entries(sourceResultsByEnv)) {
-    const fileRecord = fileRecordsByEnv[envId];
-    await ensureDir(path.join(cachePaths.fileDir, envId));
+  for (const variant of variants) {
+    const representativeEnv = variant.environmentIds[0];
+    const result = sourceResultsByEnv[representativeEnv];
+    const fileRecord = variant.record;
+    await ensureDir(path.join(cachePaths.artifactDir, variant.variantId));
     for (const [index, cell] of (result.fileRecord?.cells ?? []).entries()) {
       if (cell.kind === "generated") {
         continue;
@@ -1217,10 +1481,14 @@ async function writeFileCache(
       if (!artifactPath) {
         continue;
       }
-      await writeFileAtomic(artifactPath, cell.code ?? "");
+      if (!(await fileExists(artifactPath))) {
+        await writeFileAtomic(artifactPath, cell.code ?? "");
+      }
       const mapArtifactPath = fileRecord.cells[index]?.mapArtifactPath;
       if (mapArtifactPath && cell.map) {
-        await writeFileAtomic(mapArtifactPath, cell.map);
+        if (!(await fileExists(mapArtifactPath))) {
+          await writeFileAtomic(mapArtifactPath, cell.map);
+        }
       }
     }
     for (const [name, output] of Object.entries(
@@ -1228,10 +1496,14 @@ async function writeFileCache(
     )) {
       const cachedOutput = fileRecord.extraOutputs?.[name];
       if (cachedOutput?.artifactPath && output.contents != null) {
-        await writeFileAtomic(cachedOutput.artifactPath, output.contents);
+        if (!(await fileExists(cachedOutput.artifactPath))) {
+          await writeFileAtomic(cachedOutput.artifactPath, output.contents);
+        }
       }
       if (cachedOutput?.mapArtifactPath && output.map) {
-        await writeFileAtomic(cachedOutput.mapArtifactPath, output.map);
+        if (!(await fileExists(cachedOutput.mapArtifactPath))) {
+          await writeFileAtomic(cachedOutput.mapArtifactPath, output.map);
+        }
       }
     }
   }
@@ -1240,6 +1512,14 @@ async function writeFileCache(
     baseKey,
     moduleKey,
     dependencyRequestsByEnv,
+    variants: variants.map((variant) => ({
+      ...variant,
+      record: toCachedFileRecord(
+        variant.record,
+        cachePaths.fileDir,
+        moduleIdentity,
+      ),
+    })),
     fileRecordsByEnv: toCachedFileRecords(
       fileRecordsByEnv,
       cachePaths.fileDir,
@@ -1282,6 +1562,7 @@ async function readModuleCache(
     baseKey: parsed.baseKey,
     moduleKey,
     dependencyRequestsByEnv: parsed.dependencyRequestsByEnv,
+    variants: parsed.variants,
     fileRecordsByEnv,
   };
 }
@@ -1290,7 +1571,6 @@ async function readRemoteModuleCache(
   remote: RemoteCacheAdapter,
   cachePaths: FileCachePaths,
   baseKey: string,
-  sourceMapsRequired: boolean,
   request: WorkerRequest,
 ): Promise<ModuleCacheRecord | null> {
   const raw = await remote.get(
@@ -1324,6 +1604,7 @@ async function readRemoteModuleCache(
 
   await fs.rm(cachePaths.fileDir, { recursive: true, force: true });
   await ensureDir(cachePaths.fileDir);
+  await ensureDir(cachePaths.artifactDir);
 
   for (const fileRecord of Object.values(hydrated.fileRecordsByEnv)) {
     for (const cell of fileRecord.cells) {
@@ -1331,10 +1612,10 @@ async function readRemoteModuleCache(
         continue;
       }
       const relativeArtifactPath = normalizePosixPath(
-        path.relative(cachePaths.fileDir, cell.artifactPath),
+        path.relative(cachePaths.artifactDir, cell.artifactPath),
       );
       const artifact = await remote.get(
-        joinRemoteKey(cachePaths.remoteBaseKey, relativeArtifactPath),
+        joinRemoteKey(cachePaths.remoteArtifactBaseKey, relativeArtifactPath),
       );
       if (artifact == null) {
         return null;
@@ -1342,10 +1623,10 @@ async function readRemoteModuleCache(
       await writeFileAtomic(cell.artifactPath, artifact);
       if (cell.mapArtifactPath) {
         const relativeMapPath = normalizePosixPath(
-          path.relative(cachePaths.fileDir, cell.mapArtifactPath),
+          path.relative(cachePaths.artifactDir, cell.mapArtifactPath),
         );
         const sourceMap = await remote.get(
-          joinRemoteKey(cachePaths.remoteBaseKey, relativeMapPath),
+          joinRemoteKey(cachePaths.remoteArtifactBaseKey, relativeMapPath),
         );
         if (sourceMap == null) {
           return null;
@@ -1356,10 +1637,10 @@ async function readRemoteModuleCache(
     for (const output of Object.values(fileRecord.extraOutputs ?? {})) {
       if (output.artifactPath) {
         const relativePath = normalizePosixPath(
-          path.relative(cachePaths.fileDir, output.artifactPath),
+          path.relative(cachePaths.artifactDir, output.artifactPath),
         );
         const encoded = await remote.get(
-          joinRemoteKey(cachePaths.remoteBaseKey, relativePath),
+          joinRemoteKey(cachePaths.remoteArtifactBaseKey, relativePath),
         );
         if (encoded == null) {
           return null;
@@ -1371,10 +1652,10 @@ async function readRemoteModuleCache(
       }
       if (output.mapArtifactPath) {
         const relativeMapPath = normalizePosixPath(
-          path.relative(cachePaths.fileDir, output.mapArtifactPath),
+          path.relative(cachePaths.artifactDir, output.mapArtifactPath),
         );
         const sourceMap = await remote.get(
-          joinRemoteKey(cachePaths.remoteBaseKey, relativeMapPath),
+          joinRemoteKey(cachePaths.remoteArtifactBaseKey, relativeMapPath),
         );
         if (sourceMap == null) {
           return null;
@@ -1392,9 +1673,7 @@ async function readRemoteModuleCache(
       request.moduleIdentity,
     ),
   });
-  if (
-    !(await hasCachedArtifacts(hydrated.fileRecordsByEnv, sourceMapsRequired))
-  ) {
+  if (!(await hasCachedArtifacts(hydrated.fileRecordsByEnv))) {
     return null;
   }
   return hydrated;
@@ -1408,11 +1687,20 @@ async function writeRemoteFileCache(
   baseKey: string,
   dependencyRequestsByEnv: Record<string, WorkerImportRequest[]>,
   moduleIdentity: string,
+  variants: ModuleVariantRecord[],
 ): Promise<void> {
   const remoteRecord: ModuleCacheRecord = {
     baseKey,
     moduleKey,
     dependencyRequestsByEnv,
+    variants: variants.map((variant) => ({
+      ...variant,
+      record: toCachedFileRecord(
+        variant.record,
+        cachePaths.fileDir,
+        moduleIdentity,
+      ),
+    })),
     fileRecordsByEnv: toCachedFileRecords(
       fileRecordsByEnv,
       cachePaths.fileDir,
@@ -1420,25 +1708,25 @@ async function writeRemoteFileCache(
     ),
   };
 
-  for (const fileRecord of Object.values(fileRecordsByEnv)) {
+  for (const fileRecord of variants.map((variant) => variant.record)) {
     for (const cell of fileRecord.cells) {
       if (cell.kind === "generated" || !cell.artifactPath) {
         continue;
       }
       const relativeArtifactPath = normalizePosixPath(
-        path.relative(cachePaths.fileDir, cell.artifactPath),
+        path.relative(cachePaths.artifactDir, cell.artifactPath),
       );
       const artifact = await fs.readFile(cell.artifactPath, "utf8");
       await remote.set(
-        joinRemoteKey(cachePaths.remoteBaseKey, relativeArtifactPath),
+        joinRemoteKey(cachePaths.remoteArtifactBaseKey, relativeArtifactPath),
         artifact,
       );
       if (cell.mapArtifactPath) {
         const relativeMapPath = normalizePosixPath(
-          path.relative(cachePaths.fileDir, cell.mapArtifactPath),
+          path.relative(cachePaths.artifactDir, cell.mapArtifactPath),
         );
         await remote.set(
-          joinRemoteKey(cachePaths.remoteBaseKey, relativeMapPath),
+          joinRemoteKey(cachePaths.remoteArtifactBaseKey, relativeMapPath),
           await fs.readFile(cell.mapArtifactPath, "utf8"),
         );
       }
@@ -1446,20 +1734,20 @@ async function writeRemoteFileCache(
     for (const output of Object.values(fileRecord.extraOutputs ?? {})) {
       if (output.artifactPath) {
         const relativePath = normalizePosixPath(
-          path.relative(cachePaths.fileDir, output.artifactPath),
+          path.relative(cachePaths.artifactDir, output.artifactPath),
         );
         const artifact = await fs.readFile(output.artifactPath);
         await remote.set(
-          joinRemoteKey(cachePaths.remoteBaseKey, relativePath),
+          joinRemoteKey(cachePaths.remoteArtifactBaseKey, relativePath),
           artifact.toString("base64"),
         );
       }
       if (output.mapArtifactPath) {
         const relativeMapPath = normalizePosixPath(
-          path.relative(cachePaths.fileDir, output.mapArtifactPath),
+          path.relative(cachePaths.artifactDir, output.mapArtifactPath),
         );
         await remote.set(
-          joinRemoteKey(cachePaths.remoteBaseKey, relativeMapPath),
+          joinRemoteKey(cachePaths.remoteArtifactBaseKey, relativeMapPath),
           await fs.readFile(output.mapArtifactPath, "utf8"),
         );
       }
@@ -1528,52 +1816,59 @@ function toCachedFileRecords(
   return Object.fromEntries(
     Object.entries(records).map(([envId, record]) => [
       envId,
-      {
-        ...record,
-        id: moduleIdentity,
-        filePath: moduleIdentity,
-        pkg: {
-          name: record.pkg.name,
-          version: record.pkg.version,
-          root: ".",
-        },
-        extraOutputs: record.extraOutputs
-          ? Object.fromEntries(
-              Object.entries(record.extraOutputs).map(([name, output]) => [
-                name,
-                {
-                  ...output,
-                  artifactPath: output.artifactPath
-                    ? normalizePosixPath(
-                        path.relative(fileDir, output.artifactPath),
-                      )
-                    : undefined,
-                  mapArtifactPath: output.mapArtifactPath
-                    ? normalizePosixPath(
-                        path.relative(fileDir, output.mapArtifactPath),
-                      )
-                    : undefined,
-                },
-              ]),
-            )
-          : undefined,
-        cells: record.cells.map((cell) => ({
-          ...cell,
-          artifactPath: cell.artifactPath
-            ? normalizePosixPath(path.relative(fileDir, cell.artifactPath))
-            : undefined,
-          mapArtifactPath: cell.mapArtifactPath
-            ? normalizePosixPath(path.relative(fileDir, cell.mapArtifactPath))
-            : undefined,
-        })),
-      },
+      toCachedFileRecord(record, fileDir, moduleIdentity),
     ]),
   );
 }
 
+function toCachedFileRecord(
+  record: FileRecord,
+  fileDir: string,
+  moduleIdentity: string,
+): FileRecord {
+  return {
+    ...record,
+    id: moduleIdentity,
+    filePath: moduleIdentity,
+    pkg: {
+      name: record.pkg.name,
+      version: record.pkg.version,
+      root: ".",
+    },
+    extraOutputs: record.extraOutputs
+      ? Object.fromEntries(
+          Object.entries(record.extraOutputs).map(([name, output]) => [
+            name,
+            {
+              ...output,
+              artifactPath: output.artifactPath
+                ? normalizePosixPath(
+                    path.relative(fileDir, output.artifactPath),
+                  )
+                : undefined,
+              mapArtifactPath: output.mapArtifactPath
+                ? normalizePosixPath(
+                    path.relative(fileDir, output.mapArtifactPath),
+                  )
+                : undefined,
+            },
+          ]),
+        )
+      : undefined,
+    cells: record.cells.map((cell) => ({
+      ...cell,
+      artifactPath: cell.artifactPath
+        ? normalizePosixPath(path.relative(fileDir, cell.artifactPath))
+        : undefined,
+      mapArtifactPath: cell.mapArtifactPath
+        ? normalizePosixPath(path.relative(fileDir, cell.mapArtifactPath))
+        : undefined,
+    })),
+  };
+}
+
 async function hasCachedArtifacts(
   fileRecordsByEnv: Record<string, FileRecord>,
-  sourceMapsRequired = false,
 ): Promise<boolean> {
   for (const fileRecord of Object.values(fileRecordsByEnv)) {
     for (const cell of fileRecord.cells) {
@@ -1581,13 +1876,6 @@ async function hasCachedArtifacts(
         continue;
       }
       if (!cell.artifactPath) {
-        return false;
-      }
-      if (
-        sourceMapsRequired &&
-        cell.kind === "worker" &&
-        !cell.mapArtifactPath
-      ) {
         return false;
       }
       if (!(await fileExists(cell.artifactPath))) {

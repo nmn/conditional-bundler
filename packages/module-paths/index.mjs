@@ -78,12 +78,6 @@ export function createModulePathReference(moduleIdentity, kind) {
 
 function replaceWithReference(targetPath, state, kind, t) {
   const options = state.opts ?? {};
-  const target = options.target ?? "browser";
-  if (target === "browser" && kind !== "module-url") {
-    throw targetPath.buildCodeFrameError(
-      `${kind === "module-dirname" ? "__dirname/import.meta.dirname" : "__filename/import.meta.filename"} is only available in Node-target bundles. Import an asset to obtain a browser URL.`,
-    );
-  }
   const reference = createModulePathReference(options.moduleIdentity, kind);
   const existing = state.file.metadata[METADATA_KEY] ?? [];
   if (!existing.some((item) => item.id === reference.id)) {

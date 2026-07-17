@@ -1,12 +1,10 @@
-export default function environmentIndependentPlugin() {
+export default function environmentIndependentPlugin(options = {}) {
   return {
     name: "environment-independent-plugin",
     transform: [
       [
         "./environment-independent-babel-plugin.mjs",
-        {
-          __bundlerEnvironmentIndependent: true,
-        },
+        { countFile: options.countFile },
       ],
     ],
   };

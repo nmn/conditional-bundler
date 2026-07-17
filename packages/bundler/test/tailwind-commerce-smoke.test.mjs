@@ -57,6 +57,45 @@ test("Tailwind commerce development serves SSR and RSC routes", async () => {
   });
 });
 
+test("Tailwind commerce replaces the initial stylesheet during HMR", async () => {
+  const cssPath = path.join(exampleDir, "src/tailwind.css");
+  const originalCss = await fs.readFile(cssPath, "utf8");
+  const updatedCss = originalCss.replace("#d7ff45", "#d8ff46");
+  expect(updatedCss).not.toBe(originalCss);
+  try {
+    await withServer("dev", async (baseUrl) => {
+      const initialHtml = await (await fetch(baseUrl)).text();
+      const style = (await readManifest()).assets.find(
+        (asset) => asset.type === "style",
+      );
+      expect(initialHtml).toContain(`data-bundler-style="${style.bundleKey}"`);
+
+      const socketUrl = new URL("/__bundler_hmr", baseUrl);
+      socketUrl.protocol = "ws:";
+      const socket = new WebSocket(socketUrl);
+      try {
+        await waitForWebSocketOpen(socket);
+        const nextMessage = waitForWebSocketMessage(socket);
+        await fs.writeFile(cssPath, updatedCss, "utf8");
+        const message = await nextMessage;
+        expect(message.type).toBe("patch");
+        expect(message.updates).toEqual([]);
+        expect(message.changedBundles).toEqual([]);
+        expect(message.styles).toHaveLength(1);
+        const updateUrl = new URL(message.styles[0], baseUrl);
+        expect(updateUrl.pathname).toMatch(
+          /^\/assets\/tailwind\.all\.[a-z0-9]+\.css$/,
+        );
+        expect(updateUrl.searchParams.get("key")).toBe(style.bundleKey);
+      } finally {
+        socket.close();
+      }
+    });
+  } finally {
+    await fs.writeFile(cssPath, originalCss, "utf8");
+  }
+});
+
 async function expectHealthyRoutes(baseUrl) {
   for (const route of [
     "/",
@@ -200,5 +239,58 @@ function getFreePort() {
       const port = typeof address === "object" && address ? address.port : 0;
       server.close((error) => (error ? reject(error) : resolve(port)));
     });
+  });
+}
+
+function waitForWebSocketOpen(socket) {
+  if (socket.readyState === WebSocket.OPEN) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error("Timed out opening the HMR socket.")),
+      10_000,
+    );
+    socket.addEventListener(
+      "open",
+      () => {
+        clearTimeout(timeout);
+        resolve();
+      },
+      { once: true },
+    );
+    socket.addEventListener(
+      "error",
+      () => {
+        clearTimeout(timeout);
+        reject(new Error("Failed to open the HMR socket."));
+      },
+      { once: true },
+    );
+  });
+}
+
+function waitForWebSocketMessage(socket) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error("Timed out waiting for an HMR message.")),
+      30_000,
+    );
+    socket.addEventListener(
+      "message",
+      (event) => {
+        clearTimeout(timeout);
+        resolve(JSON.parse(event.data));
+      },
+      { once: true },
+    );
+    socket.addEventListener(
+      "error",
+      () => {
+        clearTimeout(timeout);
+        reject(new Error("The HMR socket failed."));
+      },
+      { once: true },
+    );
   });
 }

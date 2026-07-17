@@ -237,7 +237,7 @@ function resolveImportIntent(
 function inferModuleType(filePath: string): ModuleType {
   const lower = filePath.toLowerCase();
   if (lower.endsWith(".css")) return "css";
-  if (/\.(?:[cm]?js|jsx|tsx?|mts|cts)$/.test(lower)) return "javascript";
+  if (/\.(?:[cm]?js|jsx|tsx?|mts|cts|json)$/.test(lower)) return "javascript";
   return "asset";
 }
 

@@ -47,6 +47,11 @@ export type Client = {
   socket: Socket;
 };
 
+export type RebuildScheduler = {
+  notify: () => void;
+  close: () => void;
+};
+
 type HmrUpdateResource = {
   body: string;
   expiresAt: number;
@@ -310,19 +315,73 @@ export function watchProject(
     .filter((item): item is string => Boolean(item))
     .map((item) => path.resolve(item));
 
+  const scheduler = createRebuildScheduler(onChange);
+  const watcher = fs.watch(
+    root,
+    { recursive: true },
+    (_eventType, fileName) => {
+      if (fileName) {
+        const changedPath = path.resolve(root, fileName.toString());
+        if (
+          ignoredRoots.some((ignored) => isPathInside(changedPath, ignored))
+        ) {
+          return;
+        }
+      }
+      scheduler.notify();
+    },
+  );
+  watcher.once("close", scheduler.close);
+  return watcher;
+}
+
+export function createRebuildScheduler(
+  onChange: () => Promise<void>,
+  debounceMs = 50,
+): RebuildScheduler {
   let timer: NodeJS.Timeout | undefined;
-  return fs.watch(root, { recursive: true }, (_eventType, fileName) => {
-    if (fileName) {
-      const changedPath = path.resolve(root, fileName.toString());
-      if (ignoredRoots.some((ignored) => isPathInside(changedPath, ignored))) {
+  let dirty = false;
+  let running = false;
+  let closed = false;
+
+  const drain = async () => {
+    if (running || closed || !dirty) {
+      return;
+    }
+    running = true;
+    try {
+      do {
+        dirty = false;
+        await onChange();
+      } while (dirty && !closed);
+    } finally {
+      running = false;
+    }
+  };
+
+  return {
+    notify() {
+      if (closed) {
         return;
       }
-    }
-    if (timer) {
-      clearTimeout(timer);
-    }
-    timer = setTimeout(() => void onChange(), 50);
-  });
+      dirty = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+      timer = setTimeout(() => {
+        timer = undefined;
+        void drain();
+      }, debounceMs);
+    },
+    close() {
+      closed = true;
+      dirty = false;
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    },
+  };
 }
 
 export function createPatch(

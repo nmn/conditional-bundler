@@ -214,6 +214,10 @@ retransformation or relinking.
 - Source maps are generated per transform cell and composed while
   concatenating selected cells.
 
+The supported ESM subset, conditional module dialect, and deliberate
+incompatibilities are documented in
+[`docs/esm-compatibility.md`](./docs/esm-compatibility.md).
+
 ## Packages
 
 - `packages/bundler`: coordinator, resolver, graph builder, linker, and CLI
@@ -224,8 +228,8 @@ retransformation or relinking.
 - `packages/cjs-to-esm`: CommonJS-to-ESM transform plugin
 
 More implementation detail is available in
-[`architecture.md`](./architecture.md), with configuration documented in
-[`config.md`](./config.md).
+[`architecture.md`](./docs/architecture.md), with configuration documented in
+[`config.md`](./docs/config.md).
 
 ## Build and Test
 

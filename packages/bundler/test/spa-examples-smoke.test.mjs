@@ -184,32 +184,56 @@ test("react-spa-stylex keeps StyleX definitions beside their components", async 
 });
 
 function expectBundleShape(manifest) {
-  const serverBundles = manifest.bundles.filter(
-    (bundle) => bundle.envId === "server",
+  expect(manifest.bundles).toHaveLength(8);
+  const serverOnlyBundles = manifest.bundles.filter(
+    (bundle) =>
+      bundle.environmentIds.length === 1 &&
+      bundle.environmentIds[0] === "server",
   );
-  const clientBundles = manifest.bundles.filter(
-    (bundle) => bundle.envId === "client",
+  const clientOnlyBundles = manifest.bundles.filter(
+    (bundle) =>
+      bundle.environmentIds.length === 1 &&
+      bundle.environmentIds[0] === "client",
   );
-  expect(serverBundles).toHaveLength(6);
-  expect(clientBundles).toHaveLength(6);
+  expect(serverOnlyBundles).toHaveLength(1);
+  expect(clientOnlyBundles).toHaveLength(1);
+  expect(serverOnlyBundles[0].entryId).toMatch(/server\.server\.jsx$/);
+  expect(clientOnlyBundles[0].entryId).toMatch(/client\.client\.jsx$/);
+
+  const universalBundles = manifest.bundles.filter(
+    (bundle) =>
+      bundle.environmentIds.includes("server") &&
+      bundle.environmentIds.includes("client"),
+  );
+  expect(universalBundles).toHaveLength(6);
   expect(
-    serverBundles.some((bundle) =>
-      bundle.entryId.endsWith("client.client.jsx"),
-    ),
-  ).toBe(false);
-  expect(
-    clientBundles.some((bundle) =>
-      bundle.entryId.endsWith("server.server.jsx"),
-    ),
-  ).toBe(false);
-  const dynamicNames = (bundles) =>
-    bundles
+    universalBundles
       .map((bundle) => path.basename(bundle.entryId))
       .filter((name) =>
         /^(Dashboard|Inventory|Reports|Settings)\.jsx$/.test(name),
       )
-      .sort();
-  expect(dynamicNames(serverBundles)).toEqual(dynamicNames(clientBundles));
+      .sort(),
+  ).toEqual(["Dashboard.jsx", "Inventory.jsx", "Reports.jsx", "Settings.jsx"]);
+  expect(
+    universalBundles.filter((bundle) =>
+      bundle.entryId.startsWith("bundler:shared:"),
+    ),
+  ).toHaveLength(2);
+  for (const routeName of [
+    "Dashboard.jsx",
+    "Inventory.jsx",
+    "Reports.jsx",
+    "Settings.jsx",
+  ]) {
+    const routePath = path.join(
+      path.dirname(serverOnlyBundles[0].entryId),
+      "routes",
+      routeName,
+    );
+    expect(manifest.entrypoints[`server:${routePath}`].fileName).toBe(
+      manifest.entrypoints[`client:${routePath}`].fileName,
+    );
+  }
 }
 
 function waitForWebSocketOpen(socket) {

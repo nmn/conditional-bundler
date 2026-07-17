@@ -2,6 +2,36 @@ import React from "react";
 import * as stylex from "@stylexjs/stylex";
 import { navItems } from "./router.js";
 
+export function App({ routeId, Route }) {
+  return (
+    <div {...stylex.props(styles.page)}>
+      <div {...stylex.props(styles.shell)}>
+        <aside {...stylex.props(styles.sidebar)}>
+          <strong {...stylex.props(styles.brand)}>Greenline Ops</strong>
+          <span {...stylex.props(styles.eyebrow)}>StyleX universal SPA</span>
+          <nav {...stylex.props(styles.nav)}>
+            {navItems.map((item) => (
+              <a
+                key={item.id}
+                href={item.href}
+                {...stylex.props(
+                  styles.navLink,
+                  item.id === routeId && styles.navActive,
+                )}
+              >
+                {item.label}
+              </a>
+            ))}
+          </nav>
+        </aside>
+        <main {...stylex.props(styles.main)}>
+          <Route />
+        </main>
+      </div>
+    </div>
+  );
+}
+
 const styles = stylex.create({
   page: {
     backgroundColor: "#0f1715",
@@ -63,33 +93,3 @@ const styles = stylex.create({
     gap: 20,
   },
 });
-
-export function App({ routeId, Route }) {
-  return (
-    <div {...stylex.props(styles.page)}>
-      <div {...stylex.props(styles.shell)}>
-        <aside {...stylex.props(styles.sidebar)}>
-          <strong {...stylex.props(styles.brand)}>Greenline Ops</strong>
-          <span {...stylex.props(styles.eyebrow)}>StyleX universal SPA</span>
-          <nav {...stylex.props(styles.nav)}>
-            {navItems.map((item) => (
-              <a
-                key={item.id}
-                href={item.href}
-                {...stylex.props(
-                  styles.navLink,
-                  item.id === routeId && styles.navActive,
-                )}
-              >
-                {item.label}
-              </a>
-            ))}
-          </nav>
-        </aside>
-        <main {...stylex.props(styles.main)}>
-          <Route />
-        </main>
-      </div>
-    </div>
-  );
-}

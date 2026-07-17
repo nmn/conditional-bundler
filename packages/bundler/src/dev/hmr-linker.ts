@@ -48,6 +48,13 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
   const bundleHandlers = new Map();
   const data = Object.create(null);
   let activeCellId = null;
+  let updateQueue = Promise.resolve();
+  const enqueueUpdate = (task) => {
+    updateQueue = updateQueue.then(task, task).catch((error) => {
+      console.error("[bundler] HMR update failed", error);
+      location.reload();
+    });
+  };
   const runtime = {
     hot(id) {
       const ownerId = activeCellId || id;
@@ -103,34 +110,49 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
           const module = await import(href);
           runtime.updateRscModuleCache(href, module);
         }
-        runtime.updateStyles(styles || []);
-        if (((updates || []).length > 0 || (imports || []).length > 0) && !runtime.performReactRefresh()) location.reload();
+        await runtime.updateStyles(styles || []);
+        const hasCodeUpdates = (updates || []).length > 0 || (imports || []).length > 0;
+        const refreshed = hasCodeUpdates && runtime.performReactRefresh();
+        if (rscChunks && Object.keys(rscChunks).length > 0) runtime.refreshRsc();
+        else if (hasCodeUpdates && !refreshed) location.reload();
       } catch (error) {
         console.error("[bundler] HMR patch failed", error);
         location.reload();
       }
     },
-    updateStyles(styles) {
+    async updateStyles(styles) {
       if (typeof document === "undefined") return;
-      for (const href of styles) {
+      await Promise.all((styles || []).map((href) => new Promise((resolve, reject) => {
         const url = new URL(href, location.href);
         const fileName = url.pathname.split("/").pop();
         const styleKey = url.searchParams.get("key") || fileName;
-        if (!fileName) continue;
+        if (!fileName) {
+          resolve();
+          return;
+        }
         const existing = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).find((link) => {
           const current = new URL(link.href, location.href);
           return current.pathname.split("/").pop() === fileName || link.getAttribute("data-bundler-style") === styleKey;
         });
-        if (existing) {
-          existing.href = href;
-          continue;
+        if (existing && new URL(existing.href, location.href).href === url.href) {
+          resolve();
+          return;
         }
         const link = document.createElement("link");
         link.rel = "stylesheet";
         link.href = href;
         link.setAttribute("data-bundler-style", styleKey);
-        document.head.appendChild(link);
-      }
+        link.addEventListener("load", () => {
+          if (existing) existing.remove();
+          resolve();
+        }, { once: true });
+        link.addEventListener("error", () => {
+          link.remove();
+          reject(new Error("HMR stylesheet request failed: " + href));
+        }, { once: true });
+        if (existing) existing.after(link);
+        else document.head.appendChild(link);
+      })));
     },
     updateRscModuleCache(href, module) {
       if (typeof URL !== "function" || typeof location === "undefined") return;
@@ -171,12 +193,14 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
       const socket = new WebSocket(protocol + "//" + location.host + "/__bundler_hmr");
       socket.addEventListener("message", (event) => {
         const message = JSON.parse(event.data);
-        if (message.type === "patch") runtime.applyPatch(message.updates || [], message.imports || [], message.styles || [], message.rscChunks);
+        if (message.type === "patch") enqueueUpdate(() => runtime.applyPatch(message.updates || [], message.imports || [], message.styles || [], message.rscChunks));
         if (message.type === "rsc-refresh") {
-          runtime.updateStyles(message.styles || []);
-          runtime.refreshRsc();
+          enqueueUpdate(async () => {
+            await runtime.updateStyles(message.styles || []);
+            runtime.refreshRsc();
+          });
         }
-        if (message.type === "reload") location.reload();
+        if (message.type === "reload") enqueueUpdate(() => location.reload());
         if (message.type === "error") console.error("[bundler] rebuild failed", message.message);
       });
       socket.addEventListener("close", () => setTimeout(() => runtime.connect(), 1000));

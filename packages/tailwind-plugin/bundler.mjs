@@ -24,7 +24,6 @@ export default function tailwindBundlerPlugin(options = {}) {
         "./extract-candidates.mjs",
         {
           __bundlerExcludeNodeModules: true,
-          __bundlerEnvironmentIndependent: true,
         },
       ],
     ],
@@ -64,7 +63,7 @@ export default function tailwindBundlerPlugin(options = {}) {
         sourceMapMode === "external" && mapFileName
           ? `${unannotatedCss}\n/*# sourceMappingURL=${path.basename(mapFileName)} */`
           : unannotatedCss;
-      const bundleKey = owner ? `${owner.envId}:${owner.entryId}` : undefined;
+      const bundleKey = owner?.id;
       context.emitFile({
         fileName,
         contents: css,
@@ -72,6 +71,7 @@ export default function tailwindBundlerPlugin(options = {}) {
         type: "style",
         contentType: "text/css; charset=utf-8",
         bundleKey,
+        global: true,
       });
       if (mapFileName) {
         context.emitFile({

@@ -49,10 +49,18 @@ export type ResolveImportContext = {
 
 export type BabelPluginSpec = string | [string, Record<string, unknown>];
 
+export type ScopedBabelPluginSpec =
+  | BabelPluginSpec
+  | {
+      plugin: BabelPluginSpec;
+      environments: "each" | string[];
+    };
+
 export type TransformStageContext = {
   id: string;
   filePath: string;
-  envId: string;
+  envs: string[];
+  envId?: string;
   pkg: { name: string; version: string; root: string };
   syntax: { jsx: boolean; ts: boolean };
 };
@@ -163,7 +171,18 @@ export type AfterCombineContext = {
 };
 
 export type BuildEndContext = {
-  bundles: Array<{ envId: string; entryId: string; fileName: string }>;
+  bundles: Array<{
+    id: string;
+    environmentIds: string[];
+    entrypoints: Array<{
+      envId: string;
+      entryId: string;
+      exportMode: "entry" | "dynamic";
+    }>;
+    envId: string;
+    entryId: string;
+    fileName: string;
+  }>;
   manifest: BundleManifest;
   diagnostics: Diagnostic[];
   modules: FileRecord[];
@@ -173,10 +192,21 @@ export type BuildEndContext = {
 };
 
 export type GenerateBundleResourcesContext = {
+  /**
+   * Pre-hash physical bundle descriptions. Resource bytes emitted here are
+   * part of the bundle fingerprint, so final filenames are available only to
+   * the post-finalization buildEnd hook.
+   */
   bundles: Array<{
+    id: string;
+    environmentIds: string[];
+    entrypoints: Array<{
+      envId: string;
+      entryId: string;
+      exportMode: "entry" | "dynamic";
+    }>;
     envId: string;
     entryId: string;
-    fileName: string;
     modules: string[];
   }>;
   modules: FileRecord[];
@@ -229,9 +259,10 @@ export type InlineBundlerPlugin = {
   afterCombine?: EnvValue<AfterCombineHook[]>;
   buildEnd?: BuildEndHook;
   generateBundleResources?: GenerateBundleResourcesHook;
-  transform?: EnvValue<BabelPluginSpec[]>;
-  transformPre?: EnvValue<BabelPluginSpec[]>;
-  transformPost?: EnvValue<BabelPluginSpec[]>;
+  manualChunk?: ManualChunkHook;
+  transform?: ScopedBabelPluginSpec[];
+  transformPre?: ScopedBabelPluginSpec[];
+  transformPost?: ScopedBabelPluginSpec[];
 };
 
 export type ModuleBundlerPlugin = {
@@ -247,6 +278,28 @@ export type NormalizedBabelPluginSpec = {
   options?: Record<string, unknown>;
 };
 
+export type NormalizedScopedBabelPluginSpec = {
+  plugin: NormalizedBabelPluginSpec;
+  environments?: "each" | string[];
+};
+
+export type ManualChunkModuleInfo = {
+  id: string;
+  moduleIdentity?: string;
+  filePath: string;
+  environmentIds: string[];
+  entryConsumers: string[];
+};
+
+export type ManualChunkContext = {
+  getModuleInfo: (id: string) => ManualChunkModuleInfo | undefined;
+};
+
+export type ManualChunkHook = (
+  module: ManualChunkModuleInfo,
+  context: ManualChunkContext,
+) => string | undefined;
+
 export type NormalizedPlugin = {
   name: string;
   modulePath?: string;
@@ -259,16 +312,17 @@ export type NormalizedPlugin = {
   afterCombine?: InlineBundlerPlugin["afterCombine"];
   buildEnd?: BuildEndHook;
   generateBundleResources?: GenerateBundleResourcesHook;
-  transform?: EnvValue<NormalizedBabelPluginSpec[]>;
-  transformPre?: EnvValue<NormalizedBabelPluginSpec[]>;
-  transformPost?: EnvValue<NormalizedBabelPluginSpec[]>;
+  manualChunk?: ManualChunkHook;
+  transform?: NormalizedScopedBabelPluginSpec[];
+  transformPre?: NormalizedScopedBabelPluginSpec[];
+  transformPost?: NormalizedScopedBabelPluginSpec[];
 };
 
 export type WorkerTransformProfile = {
   fingerprint: string;
-  transform: Record<string, NormalizedBabelPluginSpec[]>;
-  transformPre: Record<string, NormalizedBabelPluginSpec[]>;
-  transformPost: Record<string, NormalizedBabelPluginSpec[]>;
+  transform: NormalizedScopedBabelPluginSpec[];
+  transformPre: NormalizedScopedBabelPluginSpec[];
+  transformPost: NormalizedScopedBabelPluginSpec[];
 };
 
 export type ModuleResolution = {
@@ -285,5 +339,6 @@ export type ModuleResolution = {
 };
 
 export type WorkerTransformResult = {
+  variants: import("@bundler/shared").ModuleVariantRecord[];
   fileRecordsByEnv: Record<string, FileRecord>;
 };
