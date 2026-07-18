@@ -18,12 +18,16 @@ export default function staticAssetBabelPlugin(api) {
           }
           programPath.unshiftContainer(
             "body",
-            Array.from(imports.entries()).map(([request, identifier]) =>
-              t.importDeclaration(
+            Array.from(imports.entries()).map(([request, identifier]) => {
+              const declaration = t.importDeclaration(
                 [t.importDefaultSpecifier(t.cloneNode(identifier))],
                 t.stringLiteral(request),
-              ),
-            ),
+              );
+              declaration.attributes = [
+                t.importAttribute(t.identifier("as"), t.stringLiteral("url")),
+              ];
+              return declaration;
+            }),
           );
         },
       },
@@ -57,7 +61,7 @@ export default function staticAssetBabelPlugin(api) {
           imports.set(request, identifier);
         }
         const replacement = t.newExpression(t.identifier("URL"), [
-          t.memberExpression(t.cloneNode(identifier), t.identifier("src")),
+          t.cloneNode(identifier),
           t.cloneNode(newPath.node.arguments[1]),
         ]);
         replacement.loc = newPath.node.loc;

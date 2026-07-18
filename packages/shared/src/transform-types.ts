@@ -4,7 +4,6 @@ import type {
   ExportLocal,
   ExportStar,
   ReexportNamed,
-  DynamicImport,
   ConditionalImport,
   DiscoveredEntrypoint,
   ExtraTransformOutput,
@@ -15,7 +14,7 @@ import type {
 export type TransformResolvedImport = {
   target: DependencyTarget;
   type: "javascript" | "css" | "asset";
-  intent: "module" | "url" | "raw" | "base64" | "assetPath";
+  representation?: string;
   meta?: Record<string, unknown>;
 };
 
@@ -41,7 +40,6 @@ export type TransformMeta = {
   exportsLocal: ExportLocal[];
   exportStars: ExportStar[];
   reexportsNamed: ReexportNamed[];
-  dynamicImports: DynamicImport[];
   conditionalImports: ConditionalImport[];
   discoveredEntrypoints: DiscoveredEntrypoint[];
   extraOutputs?: Record<string, ExtraTransformOutput>;

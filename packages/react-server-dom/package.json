@@ -1,0 +1,16 @@
+{
+  "name": "@bundler/react-server-dom",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server": "./server.js",
+    "./server.node": "./server.node.js",
+    "./client.browser": "./client.browser.js",
+    "./client.node": "./client.node.js",
+    "./implementation-registry": "./implementation-registry.js"
+  },
+  "dependencies": {
+    "react-server-dom-webpack": "19.2.5"
+  }
+}

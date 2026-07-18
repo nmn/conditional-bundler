@@ -16,7 +16,7 @@ export * from "./exports/resolve.js";
 export * from "./linker/rewriter.js";
 export * from "./linker/namespace.js";
 export * from "./linker/conditional-markers.js";
-export * from "./linker/dynamic-import-constants.js";
+export * from "./linker/static-bundle-imports.js";
 export * from "./linker/strip-imports.js";
 export * from "./concat.js";
 export * from "./sourcemap/compose.js";

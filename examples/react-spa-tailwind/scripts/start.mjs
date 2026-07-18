@@ -8,7 +8,9 @@ const manifest = JSON.parse(
 );
 const serverBundle = manifest.bundles.find(
   (bundle) =>
-    bundle.envId === "server" && bundle.entryId.endsWith("server.server.jsx"),
+    bundle.targetIds.includes("server") &&
+    bundle.environmentIds.includes("javascript") &&
+    bundle.entryId.endsWith("server.server.jsx"),
 );
 
 if (!serverBundle) throw new Error("Missing Tailwind SPA server bundle.");

@@ -35,6 +35,9 @@ importers:
       jest:
         specifier: ^29.7.0
         version: 29.7.0(@types/node@20.19.30)
+      playwright:
+        specifier: ^1.61.1
+        version: 1.61.1
       prettier:
         specifier: ^3.8.1
         version: 3.8.1
@@ -53,63 +56,84 @@ importers:
       '@bundler/assets':
         specifier: workspace:*
         version: link:../../packages/assets
+      '@bundler/browser-package-resolver':
+        specifier: workspace:*
+        version: link:../../packages/browser-package-resolver
       '@bundler/bundler':
         specifier: workspace:*
         version: link:../../packages/bundler
       '@bundler/cjs-to-esm':
         specifier: workspace:*
         version: link:../../packages/cjs-to-esm
+      '@bundler/node-package-resolver':
+        specifier: workspace:*
+        version: link:../../packages/node-package-resolver
       '@bundler/react-rsc-plugin':
         specifier: workspace:*
         version: link:../../packages/react-rsc-plugin
+      '@bundler/react-server-dom':
+        specifier: workspace:*
+        version: link:../../packages/react-server-dom
       react:
         specifier: 19.2.5
         version: 19.2.5
       react-dom:
         specifier: 19.2.5
         version: 19.2.5(react@19.2.5)
-      react-server-dom-webpack:
-        specifier: 19.2.5
-        version: 19.2.5(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(webpack@5.106.2)
 
   examples/react-rsc-commerce:
     dependencies:
       '@bundler/assets':
         specifier: workspace:*
         version: link:../../packages/assets
+      '@bundler/browser-package-resolver':
+        specifier: workspace:*
+        version: link:../../packages/browser-package-resolver
       '@bundler/bundler':
         specifier: workspace:*
         version: link:../../packages/bundler
       '@bundler/cjs-to-esm':
         specifier: workspace:*
         version: link:../../packages/cjs-to-esm
+      '@bundler/node-package-resolver':
+        specifier: workspace:*
+        version: link:../../packages/node-package-resolver
       '@bundler/react-rsc-plugin':
         specifier: workspace:*
         version: link:../../packages/react-rsc-plugin
+      '@bundler/react-server-dom':
+        specifier: workspace:*
+        version: link:../../packages/react-server-dom
       react:
         specifier: 19.2.5
         version: 19.2.5
       react-dom:
         specifier: 19.2.5
         version: 19.2.5(react@19.2.5)
-      react-server-dom-webpack:
-        specifier: 19.2.5
-        version: 19.2.5(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(webpack@5.106.2)
 
   examples/react-rsc-commerce-stylex:
     dependencies:
       '@bundler/assets':
         specifier: workspace:*
         version: link:../../packages/assets
+      '@bundler/browser-package-resolver':
+        specifier: workspace:*
+        version: link:../../packages/browser-package-resolver
       '@bundler/bundler':
         specifier: workspace:*
         version: link:../../packages/bundler
       '@bundler/cjs-to-esm':
         specifier: workspace:*
         version: link:../../packages/cjs-to-esm
+      '@bundler/node-package-resolver':
+        specifier: workspace:*
+        version: link:../../packages/node-package-resolver
       '@bundler/react-rsc-plugin':
         specifier: workspace:*
         version: link:../../packages/react-rsc-plugin
+      '@bundler/react-server-dom':
+        specifier: workspace:*
+        version: link:../../packages/react-server-dom
       '@bundler/rsc-example-server':
         specifier: workspace:*
         version: link:../../packages/rsc-example-server
@@ -125,24 +149,30 @@ importers:
       react-dom:
         specifier: 19.2.5
         version: 19.2.5(react@19.2.5)
-      react-server-dom-webpack:
-        specifier: 19.2.5
-        version: 19.2.5(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(webpack@5.106.2)
 
   examples/react-rsc-commerce-tailwind:
     dependencies:
       '@bundler/assets':
         specifier: workspace:*
         version: link:../../packages/assets
+      '@bundler/browser-package-resolver':
+        specifier: workspace:*
+        version: link:../../packages/browser-package-resolver
       '@bundler/bundler':
         specifier: workspace:*
         version: link:../../packages/bundler
       '@bundler/cjs-to-esm':
         specifier: workspace:*
         version: link:../../packages/cjs-to-esm
+      '@bundler/node-package-resolver':
+        specifier: workspace:*
+        version: link:../../packages/node-package-resolver
       '@bundler/react-rsc-plugin':
         specifier: workspace:*
         version: link:../../packages/react-rsc-plugin
+      '@bundler/react-server-dom':
+        specifier: workspace:*
+        version: link:../../packages/react-server-dom
       '@bundler/rsc-example-server':
         specifier: workspace:*
         version: link:../../packages/rsc-example-server
@@ -155,21 +185,24 @@ importers:
       react-dom:
         specifier: 19.2.5
         version: 19.2.5(react@19.2.5)
-      react-server-dom-webpack:
-        specifier: 19.2.5
-        version: 19.2.5(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(webpack@5.106.2)
 
   examples/react-spa-stylex:
     dependencies:
       '@bundler/assets':
         specifier: workspace:*
         version: link:../../packages/assets
+      '@bundler/browser-package-resolver':
+        specifier: workspace:*
+        version: link:../../packages/browser-package-resolver
       '@bundler/bundler':
         specifier: workspace:*
         version: link:../../packages/bundler
       '@bundler/cjs-to-esm':
         specifier: workspace:*
         version: link:../../packages/cjs-to-esm
+      '@bundler/node-package-resolver':
+        specifier: workspace:*
+        version: link:../../packages/node-package-resolver
       '@bundler/react-jsx-plugin':
         specifier: workspace:*
         version: link:../../packages/react-jsx-plugin
@@ -200,12 +233,18 @@ importers:
       '@bundler/assets':
         specifier: workspace:*
         version: link:../../packages/assets
+      '@bundler/browser-package-resolver':
+        specifier: workspace:*
+        version: link:../../packages/browser-package-resolver
       '@bundler/bundler':
         specifier: workspace:*
         version: link:../../packages/bundler
       '@bundler/cjs-to-esm':
         specifier: workspace:*
         version: link:../../packages/cjs-to-esm
+      '@bundler/node-package-resolver':
+        specifier: workspace:*
+        version: link:../../packages/node-package-resolver
       '@bundler/react-jsx-plugin':
         specifier: workspace:*
         version: link:../../packages/react-jsx-plugin
@@ -228,11 +267,19 @@ importers:
         specifier: 0.27.0
         version: 0.27.0
 
+  packages/asset-imports:
+    dependencies:
+      '@babel/core':
+        specifier: ^7.24.0
+        version: 7.28.6
+
   packages/assets:
     dependencies:
       '@bundler/shared':
         specifier: workspace:*
         version: link:../shared
+
+  packages/browser-package-resolver: {}
 
   packages/bundler:
     dependencies:
@@ -248,6 +295,9 @@ importers:
       '@bundler/assets':
         specifier: workspace:*
         version: link:../assets
+      '@bundler/browser-package-resolver':
+        specifier: workspace:*
+        version: link:../browser-package-resolver
       '@bundler/css-plugin':
         specifier: workspace:*
         version: link:../css-plugin
@@ -260,6 +310,9 @@ importers:
       '@bundler/module-paths':
         specifier: workspace:*
         version: link:../module-paths
+      '@bundler/node-package-resolver':
+        specifier: workspace:*
+        version: link:../node-package-resolver
       '@bundler/shared':
         specifier: workspace:*
         version: link:../shared
@@ -316,6 +369,12 @@ importers:
         specifier: ^1.29.1
         version: 1.32.0
 
+  packages/dynamic-imports:
+    dependencies:
+      '@babel/core':
+        specifier: ^7.24.0
+        version: 7.28.6
+
   packages/html-plugin:
     dependencies:
       '@bundler/shared':
@@ -328,6 +387,12 @@ importers:
         specifier: ^7.2.1
         version: 7.3.0
 
+  packages/import-attributes:
+    dependencies:
+      '@babel/core':
+        specifier: ^7.24.0
+        version: 7.28.6
+
   packages/json-plugin:
     dependencies:
       '@babel/core':
@@ -335,6 +400,14 @@ importers:
         version: 7.28.6
 
   packages/module-paths:
+    dependencies:
+      '@babel/core':
+        specifier: ^7.24.0
+        version: 7.28.6
+
+  packages/node-package-resolver: {}
+
+  packages/query-imports:
     dependencies:
       '@babel/core':
         specifier: ^7.24.0
@@ -357,21 +430,30 @@ importers:
       '@bundler/cjs-to-esm':
         specifier: workspace:*
         version: link:../cjs-to-esm
+      '@bundler/react-server-dom':
+        specifier: workspace:*
+        version: link:../react-server-dom
       source-map-support:
         specifier: 0.5.21
         version: 0.5.21
 
+  packages/react-server-dom:
+    dependencies:
+      react-server-dom-webpack:
+        specifier: 19.2.5
+        version: 19.2.5(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(webpack@5.106.2)
+
   packages/rsc-example-server:
     dependencies:
+      '@bundler/react-server-dom':
+        specifier: workspace:*
+        version: link:../react-server-dom
       react:
         specifier: 19.2.5
         version: 19.2.5
       react-dom:
         specifier: 19.2.5
         version: 19.2.5(react@19.2.5)
-      react-server-dom-webpack:
-        specifier: 19.2.5
-        version: 19.2.5(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(webpack@5.106.2)
 
   packages/shared: {}
 
@@ -1520,6 +1602,11 @@ packages:
   fs.realpath@1.0.0:
     resolution: {integrity: sha512-OO0pH2lK6a0hZnAdau5ItzHPI6pUlvI7jMVnxUQRtw4owF2wk8lOSabtGDCTP4Ggrg2MbGnWO9X8K1t4+fGMDw==}
 
+  fsevents@2.3.2:
+    resolution: {integrity: sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==}
+    engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
+    os: [darwin]
+
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
@@ -2097,6 +2184,16 @@ packages:
   pkg-dir@4.2.0:
     resolution: {integrity: sha512-HRDzbaKjC+AOWVXxAU/x54COGeIv9eb+6CkDSQoNTt4XyWoIJvuPsXizxu/Fr23EiekbtZwmh1IcIG/l/a10GQ==}
     engines: {node: '>=8'}
+
+  playwright-core@1.61.1:
+    resolution: {integrity: sha512-h7Qlt6m4REp25qvIdvbDtVmD4LqVXfpRxhORv9L0jzETM05p4fuPJ3dKyuSXQxDSbXnmS79HAgi9589lGSpLkg==}
+    engines: {node: '>=18'}
+    hasBin: true
+
+  playwright@1.61.1:
+    resolution: {integrity: sha512-DWnY5o3YbLWK4GovuAVwpqL+1VwGNdUGrRr++8j8PtQQzvAVZUIMjKQ90fY689sEJZJBbZVw1rXaOKSTitkzPQ==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   postcss-value-parser@4.2.0:
     resolution: {integrity: sha512-1NNCs6uurfkVbeXG4S8JFT9t19m45ICnif8zWLd5oPSZ50QnwMfK+H3jv408d4jw/7Bttv5axS5IiHoLaVNHeQ==}
@@ -3779,6 +3876,9 @@ snapshots:
 
   fs.realpath@1.0.0: {}
 
+  fsevents@2.3.2:
+    optional: true
+
   fsevents@2.3.3:
     optional: true
 
@@ -4478,6 +4578,14 @@ snapshots:
   pkg-dir@4.2.0:
     dependencies:
       find-up: 4.1.0
+
+  playwright-core@1.61.1: {}
+
+  playwright@1.61.1:
+    dependencies:
+      playwright-core: 1.61.1
+    optionalDependencies:
+      fsevents: 2.3.2
 
   postcss-value-parser@4.2.0: {}
 

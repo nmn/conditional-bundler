@@ -9,7 +9,10 @@ const manifest = JSON.parse(
   fs.readFileSync(path.join(root, "dist/manifest.json"), "utf8"),
 );
 const serverBundle = manifest.bundles.find(
-  (bundle) => bundle.envId === "rsc" && bundle.entryId.endsWith("server.jsx"),
+  (bundle) =>
+    bundle.targetIds.includes("server") &&
+    bundle.environmentIds.includes("react.server") &&
+    bundle.entryId.endsWith("server.jsx"),
 );
 
 if (!serverBundle) {

@@ -65,28 +65,16 @@ async function transformSnapshot(
   };
 }
 
-test("rewrites dynamic import to constant", async () => {
+test("preserves native dynamic imports after pre-core normalization", async () => {
   const result = await transformSnapshot(
     "export async function load() { return import('./dep.js'); }",
   );
   expect(result.code).toBe(
-    `async function ji19ybwd_load() {\n  return __IMPORT_a4tfu7r6i();\n}`,
+    `async function ji19ybwd_load() {\n  return import('./dep.js');\n}`,
   );
   expect(result.meta).toMatchObject({
     conditionalImports: [],
-    discoveredEntrypoints: ["src/dep.js"],
-    dynamicImports: [
-      expect.objectContaining({
-        hashKey: "__IMPORT_a4tfu7r6i",
-        request: "./dep.js",
-        source: "src/dep.js",
-        target: {
-          kind: "file",
-          moduleId: "fixture@0.0.0::src/dep.js",
-          canonicalPath: "fixture@0.0.0::src/dep.js",
-        },
-      }),
-    ],
+    discoveredEntrypoints: [],
     exportsLocal: [{ exported: "load", kind: "func", local: "load" }],
     imports: [],
     reexportsNamed: [],

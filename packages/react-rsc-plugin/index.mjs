@@ -6,8 +6,11 @@ import { createCjsModuleIdentity } from "@bundler/cjs-to-esm";
 const requireFromPlugin = createRequire(import.meta.url);
 const reactPackageRequests = new Set([
   "react",
+  "react-server",
   "react/jsx-runtime",
   "react/jsx-dev-runtime",
+  "react-server/jsx-runtime",
+  "react-server/jsx-dev-runtime",
   "react-dom",
   "react-dom/client",
   "react-dom/server",
@@ -25,15 +28,17 @@ export default function reactRscPlugin(options) {
 
 export function createReactRscPlugin(options) {
   const root = options.root;
-  if (!root) {
-    throw new Error("reactRscPlugin requires a project root.");
-  }
-  const clientEnv = options.clientEnv ?? options.client?.env ?? "client";
-  const rscEnv = options.rscEnv ?? options.server?.env ?? "rsc";
-  const clientManifestFile =
-    options.clientManifestFile ??
-    options.client?.manifestFile ??
-    "rsc-client-manifest.json";
+  if (!root) throw new Error("reactRscPlugin requires a project root.");
+
+  const serverEnvironment =
+    options.serverEnvironment ??
+    options.rscEnvironment ??
+    options.rscEnv ??
+    "react.server";
+  const clientEnvironment =
+    options.clientEnvironment ?? options.clientEnv ?? "react.client";
+  const serverTarget = options.serverTarget ?? "server";
+  const clientTarget = options.clientTarget ?? "client";
   const rawClientEntry = options.clientEntry ?? options.client?.entry;
   const clientEntry =
     rawClientEntry === false
@@ -43,10 +48,6 @@ export function createReactRscPlugin(options) {
     root,
     options.clientReferenceEntry ?? options.client?.referenceEntry,
   );
-  const discoverClientEntrypoints =
-    options.discoverClientEntrypoints ??
-    options.client?.discoverClientEntrypoints ??
-    true;
   const runtimeEntry =
     options.runtimeEntry === false || options.client?.runtimeEntry === false
       ? undefined
@@ -62,11 +63,23 @@ export function createReactRscPlugin(options) {
       ? { runtime: "classic" }
       : { runtime: "automatic", importSource: "react" };
   const projectRequire = createRequire(path.join(root, "package.json"));
+  const rscBindingRequire = createRequire(
+    requireFromPlugin.resolve("@bundler/react-server-dom/server.node"),
+  );
+
   return {
-    name: options.name ?? "react-rsc-example",
+    name: options.name ?? "react-rsc",
+    representations: {
+      "rsc-client-chunks": { extends: "url_and_deps_array" },
+      "rsc-ssr-chunks": { extends: "url_and_deps_array" },
+    },
     buildStart({ addEntry }) {
       if (clientEntry) {
-        addEntry({ id: "client", path: clientEntry, envs: [clientEnv] });
+        addEntry({
+          path: clientEntry,
+          environment: clientEnvironment,
+          targets: [clientTarget],
+        });
       }
       if (
         clientReferenceEntry &&
@@ -74,34 +87,47 @@ export function createReactRscPlugin(options) {
         !runtimeEntry
       ) {
         addEntry({
-          id: "client-references",
           path: clientReferenceEntry,
-          envs: [clientEnv],
+          environment: clientEnvironment,
+          targets: [clientTarget],
         });
       }
       if (runtimeEntry) {
-        addEntry({ id: "client", path: runtimeEntry, envs: [clientEnv] });
+        addEntry({
+          path: runtimeEntry,
+          environment: clientEnvironment,
+          targets: [clientTarget],
+        });
       }
     },
     resolveImport(context) {
-      if (!reactPackageRequests.has(context.request)) {
-        return undefined;
-      }
+      if (!reactPackageRequests.has(context.request)) return undefined;
 
-      const parentEnv = context.importerMeta?.reactCjsEnv ?? context.envId;
-      const cjsEnv = getReactCjsEnvId(context.request, parentEnv, clientEnv);
+      const runtimeEnvironment =
+        context.importerMeta?.reactRuntimeEnvironment ??
+        context.importerMeta?.reactCjsEnv ??
+        context.environmentId;
+      const resolvedEnvironment = getReactRuntimeEnvironment(
+        context.request,
+        runtimeEnvironment,
+        clientEnvironment,
+      );
       const filePath = resolveReactImplementation(
         projectRequire,
+        rscBindingRequire,
         context.request,
-        cjsEnv,
-        rscEnv,
+        resolvedEnvironment === serverEnvironment,
       );
       return {
         id: filePath,
         filePath,
         moduleIdentity: createCjsModuleIdentity(filePath),
         type: "javascript",
-        meta: { format: "commonjs", reactCjsEnv: cjsEnv },
+        meta: {
+          format: "commonjs",
+          reactRuntimeEnvironment: resolvedEnvironment,
+          reactCjsEnv: resolvedEnvironment,
+        },
       };
     },
     transform: [
@@ -124,102 +150,123 @@ export function createReactRscPlugin(options) {
           "./transform.mjs",
           {
             root,
-            clientEnv,
-            rscEnv,
-            discoverClientEntrypoints,
+            serverEnvironment,
+            clientEnvironment,
+            serverTarget,
+            clientTarget,
           },
         ],
-        environments: [rscEnv],
+        environments: [serverEnvironment],
       },
+      "./inline-runtime-transform.mjs",
+    ],
+    transformPre: [
       {
-        plugin: ["./webpack-shim-transform.mjs", { clientEnv }],
-        environments: [clientEnv],
+        plugin: [
+          "./react-server-import-transform.mjs",
+          {
+            clientEnvironment,
+            rewriteRequires: true,
+          },
+        ],
+        environments: [serverEnvironment],
       },
     ],
-    buildEnd({ manifest, modules, outputs, emitFile }) {
-      const records = {};
-      for (const moduleRecord of modules) {
+    transformFinalize: [
+      {
+        plugin: [
+          "./react-server-import-transform.mjs",
+          {
+            clientEnvironment,
+            rewriteRequires: false,
+          },
+        ],
+        environments: [serverEnvironment],
+      },
+    ],
+    buildEnd(context) {
+      const clientReferenceBundles = {};
+      for (const moduleRecord of context.modules) {
+        const representation = moduleRecord.resolutionMeta?.representation;
         if (
-          !(moduleRecord.environmentIds ?? moduleRecord.envs ?? []).includes(
-            rscEnv,
-          )
+          representation !== "rsc-client-chunks" &&
+          representation !== "rsc-ssr-chunks"
         ) {
           continue;
         }
-        const raw =
-          moduleRecord.extraOutputs?.["rsc-client-reference"]?.metadata;
-        if (!raw || typeof raw !== "object") {
-          continue;
-        }
-        const metadata = raw;
-        const bundle = findClientReferenceBundle(
-          manifest,
-          clientEnv,
-          moduleRecord.id,
-          { clientReferenceEntry, runtimeEntry },
+        const outputId = moduleRecord.linkReferences?.find(
+          (reference) =>
+            reference.kind === "output-url" &&
+            reference.outputType === "script",
+        )?.outputId;
+        if (!outputId) continue;
+        const referenceTarget = moduleRecord.linkReferences?.find(
+          (reference) =>
+            reference.kind === "output-url" &&
+            reference.outputType === "script",
+        )?.targetId;
+        const assetId = moduleRecord.resolutionMeta?.assetId;
+        const relative =
+          typeof assetId === "string" && assetId.includes("::")
+            ? assetId.slice(assetId.indexOf("::") + 2)
+            : path
+                .relative(root, moduleRecord.filePath)
+                .split(path.sep)
+                .join("/");
+        const sourcePath = path.resolve(root, relative);
+        const bundle = context.bundles.find(
+          (candidate) =>
+            (!referenceTarget ||
+              candidate.targetIds.includes(referenceTarget)) &&
+            (candidate.entryId === outputId ||
+              candidate.entryId === sourcePath ||
+              candidate.modules.includes(outputId) ||
+              candidate.modules.includes(sourcePath) ||
+              candidate.entrypoints.some(
+                (entrypoint) =>
+                  entrypoint.entryId === outputId ||
+                  entrypoint.entryId === sourcePath,
+              )),
         );
-        if (!bundle) {
-          continue;
-        }
-        for (const exportName of metadata.exports ?? []) {
-          const symbolName = clientReferenceEntry
-            ? exportName
-            : findExportSymbol(moduleRecord, exportName);
-          const stableModuleId = bundle.entryId ?? metadata.clientId;
-          records[`${metadata.clientId}#${exportName}`] = {
-            id: stableModuleId,
-            fileName: bundle.fileName,
-            url: joinRootURL(
-              outputs.rootURL ?? outputs.publicPath ?? "/",
-              bundle.fileName,
-            ),
-            name: symbolName,
-            chunks: [stableModuleId, bundle.fileName],
-            async: false,
-          };
-        }
+        if (!bundle) continue;
+        const logicalId = relative.startsWith("/") ? relative : `/${relative}`;
+        clientReferenceBundles[logicalId] ??= {};
+        clientReferenceBundles[logicalId][referenceTarget ?? bundle.targetId] =
+          bundle.id;
       }
-      emitFile({
-        fileName: clientManifestFile,
-        type: "manifest",
-        contents: JSON.stringify(records, null, 2),
-      });
+      context.manifest.metadata.rsc = {
+        inline: true,
+        clientReferenceBundles,
+      };
     },
   };
 }
 
-function joinRootURL(rootURL, fileName) {
-  const root = rootURL.replace(/\/+$/, "");
-  const relativePath = fileName.replaceAll("\\", "/").replace(/^\/+/, "");
-  return root ? `${root}/${relativePath}` : `/${relativePath}`;
-}
-
 function resolveReactImplementation(
   requireFromProject,
+  requireFromRscBinding,
   request,
-  envId,
-  rscEnv,
+  reactServer,
 ) {
-  const reactServer = envId === rscEnv;
   const packageRoot = (pkg) =>
     path.dirname(requireFromProject.resolve(`${pkg}/package.json`));
+  const rscPackageRoot = path.dirname(
+    requireFromRscBinding.resolve("react-server-dom-webpack/package.json"),
+  );
 
   switch (request) {
     case "react":
-      return path.join(
-        packageRoot("react"),
-        reactServer ? "react.react-server.js" : "index.js",
-      );
+      return path.join(packageRoot("react"), "index.js");
+    case "react-server":
+      return path.join(packageRoot("react"), "react.react-server.js");
     case "react/jsx-runtime":
-      return path.join(
-        packageRoot("react"),
-        reactServer ? "jsx-runtime.react-server.js" : "jsx-runtime.js",
-      );
+      return path.join(packageRoot("react"), "jsx-runtime.js");
     case "react/jsx-dev-runtime":
-      return path.join(
-        packageRoot("react"),
-        reactServer ? "jsx-dev-runtime.react-server.js" : "jsx-dev-runtime.js",
-      );
+      return path.join(packageRoot("react"), "jsx-dev-runtime.js");
+    case "react-server/jsx-runtime":
+      return path.join(packageRoot("react"), "jsx-runtime.react-server.js");
+    case "react-server/jsx-dev-runtime":
+      return path.join(packageRoot("react"), "jsx-dev-runtime.react-server.js");
     case "react-dom":
       return path.join(
         packageRoot("react-dom"),
@@ -232,80 +279,29 @@ function resolveReactImplementation(
       return path.join(packageRoot("react-dom"), "server.node.js");
     case "react-server-dom-webpack/client.browser":
     case "react-server-dom-webpack/client":
-      return path.join(
-        packageRoot("react-server-dom-webpack"),
-        "client.browser.js",
-      );
+      return path.join(rscPackageRoot, "client.browser.js");
     case "react-server-dom-webpack/client.node":
-      return path.join(
-        packageRoot("react-server-dom-webpack"),
-        "client.node.js",
-      );
+      return path.join(rscPackageRoot, "client.node.js");
     case "react-server-dom-webpack/server":
     case "react-server-dom-webpack/server.node":
-      return path.join(
-        packageRoot("react-server-dom-webpack"),
-        "server.node.js",
-      );
+      return path.join(rscPackageRoot, "server.node.js");
     default:
       throw new Error(`Unsupported React RSC package import '${request}'.`);
   }
 }
 
-function getReactCjsEnvId(request, envId, clientEnv) {
+function getReactRuntimeEnvironment(request, environmentId, clientEnvironment) {
   if (
     request === "react-dom/server" ||
     request === "react-dom/server.node" ||
     request === "react-server-dom-webpack/client.node"
   ) {
-    return clientEnv;
+    return clientEnvironment;
   }
-  return envId;
+  return environmentId;
 }
 
 function resolveProjectPath(root, value) {
-  if (!value) {
-    return undefined;
-  }
+  if (!value) return undefined;
   return path.isAbsolute(value) ? value : path.join(root, value);
-}
-
-function findClientReferenceBundle(
-  manifest,
-  clientEnv,
-  moduleId,
-  { clientReferenceEntry, runtimeEntry } = {},
-) {
-  const findEntrypointBundle = (entryId) => {
-    const record = manifest.entrypoints?.[`${clientEnv}:${entryId}`];
-    return record
-      ? manifest.bundles.find((bundle) => bundle.id === record.bundleId)
-      : undefined;
-  };
-  return (
-    (clientReferenceEntry && runtimeEntry
-      ? findEntrypointBundle(runtimeEntry)
-      : undefined) ??
-    (clientReferenceEntry
-      ? findEntrypointBundle(clientReferenceEntry)
-      : undefined) ??
-    findEntrypointBundle(moduleId) ??
-    manifest.bundles.find(
-      (bundle) =>
-        bundle.environmentIds?.includes(clientEnv) &&
-        bundle.modules?.[0] === moduleId,
-    ) ??
-    manifest.bundles.find(
-      (bundle) =>
-        bundle.environmentIds?.includes(clientEnv) &&
-        bundle.modules?.includes(moduleId),
-    )
-  );
-}
-
-function findExportSymbol(moduleRecord, exportName) {
-  const local =
-    moduleRecord.exportsLocal?.find((item) => item.exported === exportName)
-      ?.local ?? exportName;
-  return `${moduleRecord.prefix}_${local}`;
 }

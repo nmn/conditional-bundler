@@ -28,6 +28,19 @@ export type HmrBundleRecord = {
 
 export type HmrBuildState = {
   bundles: Record<string, HmrBundleRecord>;
+  /**
+   * Transform metadata that can change a generated resource without changing
+   * an executable HMR cell (for example StyleX rules).
+   */
+  moduleMetadata?: Record<
+    string,
+    {
+      environmentId: string;
+      targetId: string;
+      filePath: string;
+      hash: string;
+    }
+  >;
 };
 
 export type EmittedHmrCell = {
@@ -92,7 +105,7 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
     registerBundle(key, handler) {
       bundleHandlers.set(key, handler);
     },
-    async applyPatch(updates, imports, styles, rscChunks) {
+    async applyPatch(updates, imports, styles, rscModules) {
       try {
         const sources = await Promise.all((updates || []).map(async (update) => {
           const response = await fetch(update.url, { cache: "no-store" });
@@ -105,7 +118,6 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
           if (!handler) throw new Error("HMR bundle is not loaded: " + update.bundleKey);
           handler(sources[index]);
         }
-        if (rscChunks) Object.assign(globalThis.__BUNDLER_RSC_CHUNKS__ ??= {}, rscChunks);
         for (const href of imports || []) {
           const module = await import(href);
           runtime.updateRscModuleCache(href, module);
@@ -113,8 +125,10 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
         await runtime.updateStyles(styles || []);
         const hasCodeUpdates = (updates || []).length > 0 || (imports || []).length > 0;
         const refreshed = hasCodeUpdates && runtime.performReactRefresh();
-        if (rscChunks && Object.keys(rscChunks).length > 0) runtime.refreshRsc();
-        else if (hasCodeUpdates && !refreshed) location.reload();
+        if (hasCodeUpdates && !refreshed) {
+          if (rscModules && rscModules.length > 0) runtime.refreshRsc();
+          else location.reload();
+        }
       } catch (error) {
         console.error("[bundler] HMR patch failed", error);
         location.reload();
@@ -157,14 +171,15 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
     updateRscModuleCache(href, module) {
       if (typeof URL !== "function" || typeof location === "undefined") return;
       const url = new URL(href, location.href);
-      const rscId = url.searchParams.get("rsc-id");
-      if (!rscId) return;
+      const rscIds = url.searchParams.getAll("rsc-id");
+      if (rscIds.length === 0) return;
       const fileName = url.searchParams.get("hmr") || url.pathname.split("/").pop();
-      const chunks = globalThis.__BUNDLER_RSC_CHUNKS__ ??= {};
-      if (fileName) chunks[rscId] = fileName;
-      const cache = globalThis.__BUNDLER_RSC_MODULE_CACHE__;
+      const runtime = globalThis.__BUNDLER_RSC_CLIENT_RUNTIME__;
+      const cache = runtime?.moduleCache;
+      for (const rscId of rscIds) {
+        if (cache && typeof cache.set === "function") cache.set(rscId, module);
+      }
       if (!cache || typeof cache.set !== "function") return;
-      cache.set(rscId, module);
       if (fileName) cache.set(fileName, module);
     },
     reactRefreshRegister(type, id) {
@@ -193,7 +208,7 @@ const __BUNDLER_HMR__ = globalThis.__BUNDLER_HMR__ ??= (() => {
       const socket = new WebSocket(protocol + "//" + location.host + "/__bundler_hmr");
       socket.addEventListener("message", (event) => {
         const message = JSON.parse(event.data);
-        if (message.type === "patch") enqueueUpdate(() => runtime.applyPatch(message.updates || [], message.imports || [], message.styles || [], message.rscChunks));
+        if (message.type === "patch") enqueueUpdate(() => runtime.applyPatch(message.updates || [], message.imports || [], message.styles || [], message.rscModules));
         if (message.type === "rsc-refresh") {
           enqueueUpdate(async () => {
             await runtime.updateStyles(message.styles || []);

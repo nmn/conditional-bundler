@@ -10,14 +10,13 @@ import type {
   ExportLocal,
   ExportStar,
   ReexportNamed,
-  DynamicImport,
   ConditionalImport,
   CellRecord,
   FileRecord,
   CellExternalDep,
   DependencyTarget,
 } from "@bundler/shared";
-import { importConstKey, filePrefix, contentHash } from "@bundler/shared";
+import { filePrefix, contentHash } from "@bundler/shared";
 import { modulePrefixIdentity } from "../module-identity.js";
 
 export type CoreTransformOptions = {
@@ -125,10 +124,15 @@ function scanImportRequestsFromAst(ast: t.File): CoreImportRequest[] {
         Object.keys(attributes).length > 0 ? attributes : undefined,
       );
       if (attributes.else) {
+        const elseAttributes = Object.fromEntries(
+          Object.entries(attributes).filter(
+            ([key]) => key !== "condition" && key !== "else",
+          ),
+        );
         add(
           "conditional-else",
           attributes.else,
-          attributes.type ? { type: attributes.type } : undefined,
+          Object.keys(elseAttributes).length > 0 ? elseAttributes : undefined,
         );
       }
     },
@@ -139,16 +143,6 @@ function scanImportRequestsFromAst(ast: t.File): CoreImportRequest[] {
     },
     ExportAllDeclaration(path: NodePath<t.ExportAllDeclaration>) {
       add("reexport", path.node.source.value);
-    },
-    Import(path: NodePath<t.Import>) {
-      const parent = path.parentPath.node;
-      if (
-        t.isCallExpression(parent) &&
-        parent.arguments.length === 1 &&
-        t.isStringLiteral(parent.arguments[0])
-      ) {
-        add("dynamic-import", parent.arguments[0].value);
-      }
     },
     CallExpression(path: NodePath<t.CallExpression>) {
       if (
@@ -170,16 +164,6 @@ export function transformWithCore(
   options: CoreTransformOptions,
   prepared?: PreparedCoreTransform,
 ): TransformResult {
-  const dynamicImportMap = new Map<
-    string,
-    {
-      source: string;
-      request: string;
-      hashKey: string;
-      target: DependencyTarget;
-    }
-  >();
-
   const ast =
     prepared?.ast ??
     parse(input.code, {
@@ -203,7 +187,7 @@ export function transformWithCore(
 
   const moduleIdentity = transformModuleIdentity(input);
   const canonical = parseCanonicalPath(
-    input.symbolIdentity ?? input.canonicalPath ?? moduleIdentity,
+    input.symbolIdentity ?? moduleIdentity ?? input.canonicalPath,
   );
   const prefix = filePrefix(
     canonical.pkg.name,
@@ -288,43 +272,6 @@ export function transformWithCore(
         renameModuleBinding(binding, name, nextName);
         delete path.scope.bindings[name];
         path.scope.bindings[nextName] = binding;
-      }
-    },
-    Import(path: NodePath<t.Import>) {
-      const parentPath = path.parentPath;
-      const parent = parentPath.node;
-      if (t.isCallExpression(parent) && parent.arguments.length === 1) {
-        const arg = parent.arguments[0];
-        if (t.isStringLiteral(arg)) {
-          const resolved = resolveImportForHash(
-            input,
-            arg.value,
-            "dynamic-import",
-          );
-          if (resolved.target.kind === "runtime") {
-            dynamicImportMap.set(arg.value, {
-              source: arg.value,
-              request: arg.value,
-              hashKey: arg.value,
-              target: resolved.target,
-            });
-            return;
-          }
-          const key = importConstKey(
-            resolved.pkg.name,
-            resolved.pkg.version,
-            resolved.relPath,
-          );
-          dynamicImportMap.set(key, {
-            source: resolved.relPath,
-            request: arg.value,
-            hashKey: `__IMPORT_${key}`,
-            target: resolved.target,
-          });
-          parentPath.replaceWith(
-            t.callExpression(t.identifier(`__IMPORT_${key}`), []),
-          );
-        }
       }
     },
     NewExpression(path: NodePath<t.NewExpression>) {
@@ -548,15 +495,6 @@ export function transformWithCore(
           },
           input.code,
         );
-  const dynamicImports: DynamicImport[] = Array.from(
-    dynamicImportMap.values(),
-  ).map((entry) => ({
-    hashKey: entry.hashKey,
-    source: entry.source,
-    request: entry.request,
-    target: entry.target,
-  }));
-
   let transformedCode = output?.code ?? "";
   const conditionalBindingCells = buildConditionalBindingCells(
     importMeta.imports,
@@ -608,9 +546,8 @@ export function transformWithCore(
       sideEffects: true,
       needsNamespaceObject: importMeta.needsNamespaceObject,
     },
-    dynamicImports,
     conditionalImports: importMeta.conditionalImports,
-    discoveredEntrypoints: dynamicImports.map((entry) => entry.source),
+    discoveredEntrypoints: [],
     cells,
     importRanges: [],
     exportRanges: [],
@@ -625,9 +562,8 @@ export function transformWithCore(
       exportsLocal,
       exportStars,
       reexportsNamed,
-      dynamicImports,
       conditionalImports: importMeta.conditionalImports,
-      discoveredEntrypoints: dynamicImports.map((entry) => entry.source),
+      discoveredEntrypoints: [],
       importRanges: [],
       exportRanges: [],
       flags: {
@@ -680,7 +616,11 @@ function collectImports(
               input,
               elseAttr,
               "conditional-else",
-              typeAttr ? { type: typeAttr } : undefined,
+              Object.fromEntries(
+                Object.entries(attributes).filter(
+                  ([key]) => key !== "condition" && key !== "else",
+                ),
+              ),
             )
           : undefined;
         condition = {
@@ -693,8 +633,6 @@ function collectImports(
           elseTarget: elseResolved?.target,
         };
         conditionalImports.push(condition);
-        delete attributes.condition;
-        delete attributes.else;
       }
 
       const specifiers: ImportSpecifier[] = [];
@@ -894,7 +832,7 @@ function buildConditionalBindingCells(
           input,
           conditionalImport.elseRequest ?? conditionalImport.elseSource,
           "conditional-else",
-          entry.attributes ?? undefined,
+          withoutConditionalAttributes(entry.attributes ?? undefined),
         );
         const elsePrefix = resolvedImportPrefix(elseResolved);
         fallback = `__NS__${elsePrefix}`;
@@ -953,7 +891,7 @@ function buildConditionalBindingCells(
           input,
           conditionalImport.elseRequest ?? conditionalImport.elseSource,
           "conditional-else",
-          entry.attributes ?? undefined,
+          withoutConditionalAttributes(entry.attributes ?? undefined),
         );
         const elsePrefix = resolvedImportPrefix(elseResolved);
         fallback = conditionalImportTarget(entry, spec, elsePrefix);
@@ -1690,8 +1628,26 @@ function toImportResolutionKey(
   request: string,
   importAttributes?: Record<string, string>,
 ): string {
-  const type = importAttributes?.type;
-  return `${kind}:${request}${type ? `:type=${type}` : ""}`;
+  const attributes = importAttributes
+    ? Object.entries(importAttributes).sort(([left], [right]) =>
+        left.localeCompare(right),
+      )
+    : [];
+  return `${kind}:${request}${
+    attributes.length > 0 ? `:attributes=${JSON.stringify(attributes)}` : ""
+  }`;
+}
+
+function withoutConditionalAttributes(
+  attributes: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!attributes) return undefined;
+  const filtered = Object.fromEntries(
+    Object.entries(attributes).filter(
+      ([key]) => key !== "condition" && key !== "else",
+    ),
+  );
+  return Object.keys(filtered).length > 0 ? filtered : undefined;
 }
 
 function isImportMetaUrl(node: t.MemberExpression): boolean {
@@ -1725,10 +1681,11 @@ function readImportAttributes(
   return attributes.reduce<Record<string, string>>((acc, attr) => {
     if (
       t.isImportAttribute(attr) &&
-      t.isIdentifier(attr.key) &&
+      (t.isIdentifier(attr.key) || t.isStringLiteral(attr.key)) &&
       t.isStringLiteral(attr.value)
     ) {
-      acc[attr.key.name] = attr.value.value;
+      acc[t.isIdentifier(attr.key) ? attr.key.name : attr.key.value] =
+        attr.value.value;
     }
     return acc;
   }, {});

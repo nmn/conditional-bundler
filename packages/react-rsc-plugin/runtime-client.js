@@ -5,7 +5,7 @@ import { createRoot, hydrateRoot } from "react-dom/client";
 import {
   createFromFetch,
   createFromReadableStream,
-} from "react-server-dom-webpack/client.browser";
+} from "@bundler/react-server-dom/client.browser";
 
 const rscEndpoint = "__BUNDLER_RSC_ENDPOINT__";
 
@@ -75,14 +75,6 @@ function readInitialRouteState() {
   };
 }
 
-function installInitialChunkMap() {
-  const script = document.getElementById("__BUNDLER_RSC_CHUNKS__");
-  if (!script) return;
-  const chunks = (globalThis.__BUNDLER_RSC_CHUNKS__ ??= {});
-  Object.assign(chunks, JSON.parse(script.textContent || "{}"));
-  script.remove();
-}
-
 function createFlightStream(payload) {
   const bytes = new TextEncoder().encode(payload);
   return new ReadableStream({
@@ -104,7 +96,6 @@ function normalizePath(routePath) {
 }
 
 if (typeof document !== "undefined") {
-  installInitialChunkMap();
   const rootElement = document.getElementById("root");
   const app = React.createElement(ClientApp, {
     initialRoute: readInitialRouteState(),

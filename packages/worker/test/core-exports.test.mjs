@@ -72,7 +72,6 @@ test("keeps export declaration shape", async () => {
 {
   "conditionalImports": [],
   "discoveredEntrypoints": [],
-  "dynamicImports": [],
   "exportRanges": [],
   "exportStars": [],
   "exportsLocal": [
@@ -107,7 +106,6 @@ test("rewrites default export to renamed binding", async () => {
 {
   "conditionalImports": [],
   "discoveredEntrypoints": [],
-  "dynamicImports": [],
   "exportRanges": [],
   "exportStars": [],
   "exportsLocal": [
@@ -137,7 +135,6 @@ test("records export stars and reexports", async () => {
   expect(result.meta).toMatchObject({
     conditionalImports: [],
     discoveredEntrypoints: [],
-    dynamicImports: [],
     exportStars: [
       expect.objectContaining({
         request: "./dep.js",

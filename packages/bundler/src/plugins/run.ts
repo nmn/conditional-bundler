@@ -28,6 +28,31 @@ export async function runResolveImport(
   envId: string,
   context: ResolveImportContext,
 ): Promise<ResolveImportResult | undefined> {
+  if (context.representation) {
+    for (const plugin of plugins) {
+      const handler = plugin.representations?.[context.representation];
+      if (!handler) continue;
+      const result = await handler.resolve!({
+        ...context,
+        representation: handler.resolveAs ?? context.representation,
+      });
+      if (result !== undefined) {
+        if ("preserve" in result) return result;
+        return {
+          ...result,
+          representation: context.representation,
+          meta: {
+            ...(result.meta ?? {}),
+            representation: context.representation,
+            representationHandler: handler.identity,
+            ...(handler.resolveAs
+              ? { representationBase: handler.resolveAs }
+              : {}),
+          },
+        };
+      }
+    }
+  }
   for (const plugin of plugins) {
     const hook = getEnvValue(plugin.resolveImport, envId);
     if (!hook) {

@@ -79,7 +79,6 @@ test("records import use ranges", async () => {
   expect(result.meta).toMatchObject({
     conditionalImports: [],
     discoveredEntrypoints: [],
-    dynamicImports: [],
     exportsLocal: [],
     flags: {
       hasTopLevelAwait: false,

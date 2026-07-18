@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 export type CachePaths = {
   codePath: string;
@@ -48,9 +49,13 @@ export async function writeFileAtomic(
 ): Promise<void> {
   const dir = path.dirname(filePath);
   await ensureDir(dir);
-  const tempPath = `${filePath}.tmp`;
-  await fs.writeFile(tempPath, content);
-  await fs.rename(tempPath, filePath);
+  const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(tempPath, content);
+    await fs.rename(tempPath, filePath);
+  } finally {
+    await fs.rm(tempPath, { force: true });
+  }
 }
 
 export async function writeJsonAtomic(

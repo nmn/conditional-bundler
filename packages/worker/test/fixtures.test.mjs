@@ -80,7 +80,6 @@ export { foo };"
 {
   "conditionalImports": [],
   "discoveredEntrypoints": [],
-  "dynamicImports": [],
   "exportRanges": [],
   "exportStars": [],
   "exportsLocal": [

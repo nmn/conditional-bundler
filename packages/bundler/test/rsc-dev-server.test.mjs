@@ -259,7 +259,7 @@ test("ignores server filename churn caused only by changed style resources", () 
   ).toEqual({ type: "patch", patch });
 });
 
-test("ignores generated RSC manifest churn and keeps client updates granular", () => {
+test("ignores ordinary build manifest churn and keeps client updates granular", () => {
   const entryId = "/app/src/island.jsx";
   const key = `client:${entryId}`;
   const previous = fakeBuild([
@@ -271,11 +271,9 @@ test("ignores generated RSC manifest churn and keeps client updates granular", (
   previous.hmr = hmrState(key, "old-hash");
   next.hmr = hmrState(key, "new-hash");
   previous.manifest.emittedFiles = [
-    manifestAsset("rsc-client-manifest.json", "old-manifest"),
+    manifestAsset("manifest.json", "old-manifest"),
   ];
-  next.manifest.emittedFiles = [
-    manifestAsset("rsc-client-manifest.json", "new-manifest"),
-  ];
+  next.manifest.emittedFiles = [manifestAsset("manifest.json", "new-manifest")];
 
   expect(createPatch(previous, next)).toBeNull();
   expect(
@@ -328,6 +326,13 @@ test("adds dynamic imports for changed client chunks but not the client entry", 
       "/app/src/island.jsx",
     ]),
   ]);
+  build.manifest.metadata.rsc = {
+    clientReferenceBundles: {
+      "/src/island.jsx": {
+        client: "client:/app/src/island.jsx",
+      },
+    },
+  };
   const patch = {
     type: "patch",
     updates: [
@@ -344,9 +349,43 @@ test("adds dynamic imports for changed client chunks but not the client entry", 
     ...patch,
     updates: [patch.updates[0]],
     imports: [
-      "/island.new.js?hmr=island.new.js&rsc-id=%2Fapp%2Fsrc%2Fisland.jsx&v=7",
+      "/island.new.js?hmr=island.new.js&rsc-id=%2Fsrc%2Fisland.jsx&v=7",
     ],
-    rscChunks: { "/app/src/island.jsx": "island.new.js" },
+    rscModules: ["/src/island.jsx"],
+  });
+});
+
+test("updates every portable client reference exposed by a shared bundle", () => {
+  const build = fakeBuild([
+    bundle("client", "/app/src/islands.jsx", "islands.new.js", [
+      "/app/src/a.jsx",
+      "/app/src/b.jsx",
+    ]),
+  ]);
+  build.manifest.metadata.rsc = {
+    clientReferenceBundles: {
+      "/src/a.jsx": {
+        client: "client:/app/src/islands.jsx",
+      },
+      "/src/b.jsx": {
+        client: "client:/app/src/islands.jsx",
+      },
+    },
+  };
+  const key = "client:/app/src/islands.jsx";
+  const patch = {
+    type: "patch",
+    updates: [update(key)],
+    changedBundles: [key],
+  };
+
+  expect(addClientPatchImports(patch, build, "client", 2)).toEqual({
+    ...patch,
+    updates: [],
+    imports: [
+      "/islands.new.js?hmr=islands.new.js&rsc-id=%2Fsrc%2Fa.jsx&rsc-id=%2Fsrc%2Fb.jsx&v=2",
+    ],
+    rscModules: ["/src/a.jsx", "/src/b.jsx"],
   });
 });
 
@@ -357,9 +396,13 @@ test("creates style-only HMR patches for changed CSS assets", () => {
     ]),
   ]);
   const next = fakeBuild([
-    bundle("client", "/app/src/client.jsx", "client.same.js", [
+    bundle(
+      "client",
       "/app/src/client.jsx",
-    ]),
+      "client.same.js",
+      ["/app/src/client.jsx"],
+      "client-runtime-after-style-change",
+    ),
   ]);
   previous.hmr = fakeHmrState();
   next.hmr = fakeHmrState();
@@ -379,6 +422,109 @@ test("creates style-only HMR patches for changed CSS assets", () => {
       "/assets/client.new.css?hmr=client.new.css&key=client%3A%2Fapp%2Fsrc%2Fclient.jsx",
     ],
   });
+  expect(
+    classifyRscDevChange({
+      previous,
+      next,
+      patch,
+      clientEntryId: "client",
+      serverEntryId: "server",
+    }),
+  ).toEqual({ type: "patch", patch });
+});
+
+test("refreshes RSC when server transform metadata changes without a code cell", () => {
+  const previous = fakeBuild([
+    bundle("server::react.server", "/app/src/server.jsx", "server.js", [
+      "/app/src/server.jsx",
+    ]),
+    bundle(
+      "client::react.client",
+      "/app/runtime-client.js",
+      "client.js",
+      ["/app/runtime-client.js"],
+      "client-runtime",
+      "client",
+    ),
+  ]);
+  const next = structuredClone(previous);
+  for (const build of [previous, next]) {
+    const server = build.bundles.find((item) =>
+      item.entryId.endsWith("server.jsx"),
+    );
+    server.environmentId = "react.server";
+    server.targetId = "server";
+  }
+  previous.hmr = {
+    bundles: {},
+    moduleMetadata: {
+      "server::react.server:/app/src/server.jsx": {
+        environmentId: "react.server",
+        targetId: "server",
+        filePath: "/app/src/App.jsx",
+        hash: "old-stylex-rules",
+      },
+    },
+  };
+  next.hmr = {
+    bundles: {},
+    moduleMetadata: {
+      "server::react.server:/app/src/server.jsx": {
+        environmentId: "react.server",
+        targetId: "server",
+        filePath: "/app/src/App.jsx",
+        hash: "new-stylex-rules",
+      },
+    },
+  };
+
+  expect(
+    classifyRscDevChange({
+      previous,
+      next,
+      patch: {
+        type: "patch",
+        updates: [],
+        changedBundles: [],
+        styles: ["/assets/stylex.new.css"],
+      },
+      clientEntryId: "client",
+      serverEntryId: "server",
+    }),
+  ).toEqual({
+    type: "reload",
+    reason: "server-transform-metadata-changed",
+  });
+});
+
+test("finds the client runtime by target after arbitrary entry ids are removed", () => {
+  const previous = fakeBuild([
+    bundle(
+      "client::react.client",
+      "/app/runtime-client.js",
+      "runtime.same.js",
+      ["/app/runtime-client.js"],
+      "runtime-before-style-change",
+      "client",
+    ),
+  ]);
+  const next = fakeBuild([
+    bundle(
+      "client::react.client",
+      "/app/runtime-client.js",
+      "runtime.same.js",
+      ["/app/runtime-client.js"],
+      "runtime-after-style-change",
+      "client",
+    ),
+  ]);
+  const patch = {
+    type: "patch",
+    updates: [],
+    changedBundles: [],
+    styles: ["/assets/app.new.css"],
+  };
+
   expect(
     classifyRscDevChange({
       previous,
@@ -421,36 +567,53 @@ test("serializes rebuilds and coalesces changes received during a build", async 
 });
 
 test("replaces changed modules in the server-side RSC chunk cache", async () => {
-  const previousNodeModules = globalThis.__BUNDLER_RSC_NODE_MODULE_CACHE__;
-  const previousChunks = globalThis.__BUNDLER_RSC_CHUNKS__;
+  const previousImplementations = globalThis.__BUNDLER_RSC_IMPLEMENTATIONS__;
   const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "bundler-rsc-hmr-"));
   try {
-    globalThis.__BUNDLER_RSC_NODE_MODULE_CACHE__ = new Map([
-      ["/app/src/island.jsx", { stale: true }],
-      ["/app/src/unchanged.jsx", { marker: "unchanged" }],
+    globalThis.__BUNDLER_RSC_IMPLEMENTATIONS__ = new Map([
+      ["/src/island.jsx#marker", { status: "fulfilled", value: "stale" }],
+      [
+        "/src/unchanged.jsx#marker",
+        { status: "fulfilled", value: "unchanged" },
+      ],
     ]);
-    globalThis.__BUNDLER_RSC_CHUNKS__ = {
-      "/app/src/island.jsx": "island.old.mjs",
-      "/app/src/unchanged.jsx": "unchanged.mjs",
-    };
     await fs.writeFile(
       path.join(outDir, "island.new.mjs"),
       'export const marker = "new";',
     );
     const previous = fakeBuild([
-      bundle("client", "/app/src/island.jsx", "island.old.mjs", [
+      bundle(
+        "server::react.client",
         "/app/src/island.jsx",
-      ]),
+        "island.old.mjs",
+        ["/app/src/island.jsx"],
+        "island.old.mjs",
+        "server",
+      ),
     ]);
     const next = fakeBuild([
-      bundle("client", "/app/src/island.jsx", "island.new.mjs", [
+      bundle(
+        "server::react.client",
         "/app/src/island.jsx",
-      ]),
+        "island.new.mjs",
+        ["/app/src/island.jsx"],
+        "island.new.mjs",
+        "server",
+      ),
     ]);
+    next.manifest.metadata.rsc = {
+      clientReferenceBundles: {
+        "/src/island.jsx": {
+          server: "server::react.client:/app/src/island.jsx",
+        },
+      },
+    };
 
     await syncChangedRscNodeModules(
       {
-        envs: { client: { target: "browser" } },
+        targets: { server: { platform: "node" } },
+        environments: { "react.client": {} },
+        entries: [],
         outputs: { outDir },
       },
       previous,
@@ -459,20 +622,16 @@ test("replaces changed modules in the server-side RSC chunk cache", async () => 
     );
 
     expect(
-      globalThis.__BUNDLER_RSC_NODE_MODULE_CACHE__.get("/app/src/island.jsx")
-        .marker,
+      globalThis.__BUNDLER_RSC_IMPLEMENTATIONS__.get("/src/island.jsx#marker")
+        .value,
     ).toBe("new");
     expect(
-      globalThis.__BUNDLER_RSC_NODE_MODULE_CACHE__.get("/app/src/unchanged.jsx")
-        .marker,
+      globalThis.__BUNDLER_RSC_IMPLEMENTATIONS__.get(
+        "/src/unchanged.jsx#marker",
+      ).value,
     ).toBe("unchanged");
-    expect(globalThis.__BUNDLER_RSC_CHUNKS__).toEqual({
-      "/app/src/island.jsx": "island.new.mjs",
-      "/app/src/unchanged.jsx": "unchanged.mjs",
-    });
   } finally {
-    globalThis.__BUNDLER_RSC_NODE_MODULE_CACHE__ = previousNodeModules;
-    globalThis.__BUNDLER_RSC_CHUNKS__ = previousChunks;
+    globalThis.__BUNDLER_RSC_IMPLEMENTATIONS__ = previousImplementations;
     await fs.rm(outDir, { recursive: true, force: true });
   }
 });
@@ -559,11 +718,21 @@ function manifestAsset(fileName, contentHash) {
   };
 }
 
-function bundle(envId, entryId, fileName, modules, runtimeHash = fileName) {
+function bundle(
+  envId,
+  entryId,
+  fileName,
+  modules,
+  runtimeHash = fileName,
+  targetId = envId === "client" ? "client" : "server",
+) {
   return {
     id: `${envId}:${entryId}`,
+    scopeIds: [envId],
     environmentIds: [envId],
-    entrypoints: [{ envId, entryId, exportMode: "dynamic" }],
+    targetIds: [targetId],
+    entrypoints: [{ envId, entryId, exportMode: "dynamic", targetId }],
+    targetId,
     envId,
     entryId,
     fileName,

@@ -1,13 +1,20 @@
 export type BundleManifest = {
   bundles: Array<{
     id: string;
+    scopeIds: string[];
     environmentIds: string[];
+    targetIds: string[];
     entrypoints: Array<{
       envId: string;
+      environmentId: string;
+      targetId: string;
       entryId: string;
       exportMode: "entry" | "dynamic";
     }>;
-    /** Primary environment retained for compatibility with single-env consumers. */
+    environmentId: string;
+    targetId: string;
+    platform: "node" | "browser";
+    /** Concrete environment/target scope used by internal lookup keys. */
     envId: string;
     entryId: string;
     fileName: string;
@@ -27,6 +34,8 @@ export type BundleManifest = {
       bundleId: string;
       fileName: string;
       exportMode: "entry" | "dynamic";
+      environmentId: string;
+      targetId: string;
       /** Physical script files in the entrypoint's static dependency closure. */
       bundles: string[];
       /** Static stylesheet files the server should load for this entrypoint. */
@@ -39,7 +48,11 @@ export type BundleManifest = {
     originalFileName: string;
     type: "asset" | "document" | "manifest" | "style" | "source-map";
     envId?: string;
+    environmentId?: string;
+    targetId?: string;
+    scopeIds?: string[];
     environmentIds?: string[];
+    targetIds?: string[];
     contentType?: string;
     bundleKey?: string;
     contentHash?: string;
@@ -50,7 +63,11 @@ export type BundleManifest = {
     type: "script" | "style" | "asset" | "document" | "manifest" | "source-map";
     contentType: string;
     envId?: string;
+    environmentId?: string;
+    targetId?: string;
+    scopeIds?: string[];
     environmentIds?: string[];
+    targetIds?: string[];
     entryId?: string;
     bundleKey?: string;
     global?: boolean;
@@ -59,6 +76,8 @@ export type BundleManifest = {
   }>;
   documents?: Array<{
     envId: string;
+    environmentId: string;
+    targetId: string;
     entryId: string;
     fileName: string;
     scripts: string[];

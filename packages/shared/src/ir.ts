@@ -46,20 +46,16 @@ export type ExportStar = {
   sourceOrder?: number;
 };
 
-export type DynamicImport = {
-  source: string;
+export type DiscoveredEntrypoint = {
   request?: string;
-  target: DependencyTarget;
-  hashKey: string;
+  environment?: string;
+  targets?: string[];
+  exportMode?: "entry" | "dynamic";
+  /** Select the represented file's ordinary module variant portably. */
+  self?: "normal";
+  moduleIdentity?: string;
+  moduleType?: "javascript" | "css" | "asset";
 };
-
-export type DiscoveredEntrypoint =
-  | string
-  | {
-      id?: string;
-      request: string;
-      envs?: string[];
-    };
 
 export type ReferenceEncoding =
   | "javascript-expression"
@@ -89,8 +85,18 @@ export type LinkReference =
       id: string;
       kind: "output-url";
       outputId: string;
-      outputType: "script" | "style";
+      outputType: "script" | "style" | "asset" | "document" | string;
+      symbol?: string;
       ownerId?: string;
+      request?: string;
+      usage?: "javascript" | "css-variable";
+      /** Resolve the script output and its complete static bundle closure. */
+      includeDependencies?: boolean;
+      /** Emit public-root URLs instead of URLs relative to the importing module. */
+      urlMode?: "module-relative" | "public";
+      /** Select a logical output produced for another environment/target scope. */
+      environment?: string;
+      targetId?: string;
     }
   | {
       id: string;
@@ -120,6 +126,11 @@ export type ResourceTemplate = {
 };
 
 export type ExtraTransformOutput = {
+  /** Portable logical identity used by output-url references. */
+  outputId?: string;
+  /** Portable output-name pattern for independently emitted resources. */
+  fileName?: string;
+  contentType?: string;
   /** Portable semantic type understood by link-time plugins. */
   type?: string;
   contents?: string | Uint8Array;
@@ -193,7 +204,6 @@ export type FileIR = {
   reexportsNamed: ReexportNamed[];
   exportStars: ExportStar[];
   exportsLocal: ExportLocal[];
-  dynamicImports: DynamicImport[];
   conditionalImports: ConditionalImport[];
   discoveredEntrypoints: DiscoveredEntrypoint[];
   extraOutputs?: Record<string, ExtraTransformOutput>;
@@ -219,7 +229,6 @@ export type FileRecord = Pick<
   | "exportStars"
   | "exportsLocal"
   | "flags"
-  | "dynamicImports"
   | "conditionalImports"
   | "discoveredEntrypoints"
   | "extraOutputs"
@@ -230,6 +239,10 @@ export type FileRecord = Pick<
   | "exportRanges"
   | "pkg"
 > & {
+  /** Flat semantic environment used to transform this module. */
+  environment?: string;
+  /** Named targets that reuse this exact record. */
+  targetIds?: string[];
   /** Stable transform/link variant identity shared by compatible environments. */
   variantId?: string;
   /** Environments that reuse this exact record and its cached artifacts. */
@@ -243,8 +256,20 @@ export type FileRecord = Pick<
 
 export type ModuleVariantRecord = {
   variantId: string;
+  environment?: string;
+  targetIds?: string[];
   environmentIds: string[];
   record: FileRecord;
+};
+
+export type ModuleTransformRecord = {
+  transformKey: string;
+  environment: string;
+  representation: string;
+  variants: Array<{
+    targetIds: string[];
+    record: FileRecord;
+  }>;
 };
 
 export type IRHeader = FileRecord;

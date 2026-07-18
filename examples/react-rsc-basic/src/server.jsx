@@ -2,15 +2,15 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import {
   createEnvironmentConditionEvaluator,
   transformConditionalBundle,
 } from "@bundler/assets/runtime";
 import React from "react";
 import { renderToPipeableStream as renderHtmlToPipeableStream } from "react-dom/server";
-import { createFromNodeStream } from "react-server-dom-webpack/client.node";
-import { renderToPipeableStream as renderRscToPipeableStream } from "react-server-dom-webpack/server.node";
+import { createFromNodeStream } from "@bundler/react-server-dom/client.node";
+import { renderToPipeableStream as renderRscToPipeableStream } from "@bundler/react-server-dom/server.node";
 import App from "./App.jsx";
 
 const distDir = path.dirname(fileURLToPath(import.meta.url));
@@ -45,7 +45,7 @@ export async function handleBasicRequest({
 
   if (url.pathname === "/rsc") {
     response.setHeader("content-type", "text/x-component");
-    renderRscPayload(context.clientManifest).pipe(response);
+    renderRscPayload().pipe(response);
     return;
   }
 
@@ -96,43 +96,39 @@ function loadBasicContext({ dist = distDir, clientBundle } = {}) {
   const manifest = JSON.parse(
     fs.readFileSync(path.join(dist, "manifest.json"), "utf8"),
   );
-  const logicalEntry = Object.entries(manifest.entrypoints ?? {}).find(
-    ([key]) =>
-      key.startsWith("client:") &&
-      (key.endsWith("runtime-client.js") || key.endsWith("client.jsx")),
-  )?.[1];
   const resolvedClientBundle =
     clientBundle ??
-    (logicalEntry
-      ? manifest.bundles.find((bundle) => bundle.id === logicalEntry.bundleId)
-      : manifest.bundles.find(
-          (bundle) =>
-            (bundle.environmentIds ?? [bundle.envId]).includes("client") &&
-            (bundle.entryId.endsWith("runtime-client.js") ||
-              bundle.entryId.endsWith("client.jsx")),
-        ));
-  const clientManifest = JSON.parse(
-    fs.readFileSync(path.join(dist, "rsc-client-manifest.json"), "utf8"),
-  );
-
+    manifest.bundles.find(
+      (bundle) =>
+        bundle.targetIds.includes("client") &&
+        bundle.environmentIds.includes("react.client") &&
+        (bundle.entryId.endsWith("runtime-client.js") ||
+          bundle.entryId.endsWith("client.jsx")),
+    );
   if (!resolvedClientBundle) {
     throw new Error("Missing client bundle. Run the bundler build first.");
   }
 
-  const serverRoot = manifest.bundles
-    .flatMap((bundle) => bundle.entrypoints ?? [])
-    .find(
+  const serverBundle = manifest.bundles.find((bundle) =>
+    (bundle.entrypoints ?? []).some(
       (entrypoint) =>
-        entrypoint.envId === "rsc" && entrypoint.exportMode === "entry",
-    );
-  const serverEntrypoint = serverRoot
-    ? manifest.entrypoints?.[`rsc:${serverRoot.entryId}`]
-    : undefined;
-  const clientEntrypoint =
-    logicalEntry ??
-    Object.values(manifest.entrypoints ?? {}).find(
-      (entrypoint) => entrypoint.bundleId === resolvedClientBundle.id,
-    );
+        entrypoint.targetId === "server" &&
+        entrypoint.environmentId === "react.server" &&
+        entrypoint.exportMode === "entry",
+    ),
+  );
+  const serverEntrypoint = Object.values(manifest.entrypoints ?? {}).find(
+    (entrypoint) =>
+      entrypoint.bundleId === serverBundle?.id &&
+      entrypoint.targetId === "server" &&
+      entrypoint.environmentId === "react.server",
+  );
+  const clientEntrypoint = Object.values(manifest.entrypoints ?? {}).find(
+    (entrypoint) =>
+      entrypoint.bundleId === resolvedClientBundle.id &&
+      entrypoint.targetId === "client" &&
+      entrypoint.environmentId === "react.client",
+  );
   return {
     manifest,
     clientBundle: resolvedClientBundle,
@@ -143,8 +139,6 @@ function loadBasicContext({ dist = distDir, clientBundle } = {}) {
         ...(clientEntrypoint?.styles ?? []),
       ]),
     ),
-    clientManifest,
-    serverConsumerManifest: createServerConsumerManifest(clientManifest),
   };
 }
 
@@ -156,8 +150,8 @@ if (!globalThis.__BUNDLER_RSC_DEV__) {
   });
 }
 
-function renderRscPayload(clientManifest) {
-  return renderRscToPipeableStream(<App />, clientManifest);
+function renderRscPayload() {
+  return renderRscToPipeableStream(<App />);
 }
 
 async function renderHtml(url, context, dist) {
@@ -174,7 +168,6 @@ async function renderHtml(url, context, dist) {
   </head>
   <body>
     <div id="root">${initialRoute.markup}</div>
-    <script id="__BUNDLER_RSC_CHUNKS__" type="application/json">${serializeJsonForScript(createRscChunkMap(context.clientManifest, true))}</script>
     <script id="__BUNDLER_RSC_DATA__" type="application/json" data-path="${escapeAttribute(routePath)}">${serializeJsonForScript(initialRoute.flight)}</script>
     <script type="module" src="/${context.clientBundle.fileName}"></script>
   </body>
@@ -219,19 +212,15 @@ function resolveStaticAssetRequest(manifest, pathname) {
 }
 
 async function renderInitialRoute({ context, dist }) {
-  installNodeChunkLoader(dist, context.clientManifest);
-  const flight = await renderRscPayloadToString(context.clientManifest);
-  const model = await createFromNodeStream(
-    Readable.from([flight]),
-    context.serverConsumerManifest,
-  );
+  const flight = await renderRscPayloadToString();
+  const model = await createFromNodeStream(Readable.from([flight]));
   return {
     flight,
     markup: await renderReactMarkup(model),
   };
 }
 
-function renderRscPayloadToString(clientManifest) {
+function renderRscPayloadToString() {
   return new Promise((resolve, reject) => {
     const output = new PassThrough();
     let payload = "";
@@ -241,7 +230,7 @@ function renderRscPayloadToString(clientManifest) {
     });
     output.on("end", () => resolve(payload));
     output.on("error", reject);
-    renderRscPayload(clientManifest).pipe(output);
+    renderRscPayload().pipe(output);
   });
 }
 
@@ -275,72 +264,6 @@ function renderReactMarkup(model) {
       },
     });
   });
-}
-
-function createServerConsumerManifest(clientManifest) {
-  const moduleMap = {};
-  for (const record of Object.values(clientManifest)) {
-    moduleMap[record.id] ??= {};
-    moduleMap[record.id][record.name] = {
-      id: record.id,
-      chunks: record.chunks,
-      name: record.name,
-      async: record.async,
-    };
-  }
-  return {
-    moduleMap,
-    moduleLoading: null,
-    serverModuleMap: {},
-  };
-}
-
-function installNodeChunkLoader(dist, clientManifest) {
-  const cache = (globalThis.__BUNDLER_RSC_NODE_MODULE_CACHE__ ??= new Map());
-  const chunkFiles = (globalThis.__BUNDLER_RSC_CHUNKS__ ??= {});
-  Object.assign(chunkFiles, createRscChunkMap(clientManifest));
-  globalThis.__webpack_require__ = (id) => {
-    const module = cache.get(id);
-    if (!module || typeof module.then === "function") {
-      throw new Error(`RSC client chunk has not loaded: ${id}`);
-    }
-    return module;
-  };
-  globalThis.__webpack_require__.u = (chunkId) =>
-    chunkFiles[chunkId] ?? chunkId;
-  globalThis.__webpack_get_script_filename__ = (chunkId) =>
-    globalThis.__webpack_require__.u(chunkId);
-  globalThis.__webpack_chunk_load__ = (chunkId) => {
-    const cached = cache.get(chunkId);
-    if (cached) {
-      return typeof cached.then === "function"
-        ? cached
-        : Promise.resolve(cached);
-    }
-    const fileName = globalThis.__webpack_require__.u(chunkId);
-    const loading = import(pathToFileURL(path.join(dist, fileName)).href).then(
-      (module) => {
-        cache.set(chunkId, module);
-        cache.set(fileName, module);
-        return module;
-      },
-    );
-    cache.set(chunkId, loading);
-    cache.set(fileName, loading);
-    return loading;
-  };
-}
-
-function createRscChunkMap(clientManifest, browser = false) {
-  const chunks = {};
-  for (const record of Object.values(clientManifest)) {
-    if (record?.id && record?.fileName) {
-      chunks[record.id] = browser
-        ? (record.url ?? record.fileName)
-        : record.fileName;
-    }
-  }
-  return chunks;
 }
 
 function serializeJsonForScript(value) {

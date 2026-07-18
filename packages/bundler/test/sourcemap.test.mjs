@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { withTestConfig } from "./test-config.mjs";
 import {
   AnyMap,
   originalPositionFor,
@@ -16,7 +17,8 @@ async function buildSimple(mode, plugins = [], options = {}) {
   const outDir = path.join(outRoot, mode);
   const cacheDir = path.join(cacheRoot, mode);
   await fs.rm(outDir, { recursive: true, force: true });
-  const { buildProject } = await import("../dist/builder.js");
+  const { buildProject: rawBuildProject } = await import("../dist/builder.js");
+  const buildProject = withTestConfig(rawBuildProject);
   const result = await buildProject(
     {
       envs: {
@@ -86,7 +88,7 @@ test("emits one indexed map whose cell sections trace across modules", async () 
     }),
   );
 
-  const entryPosition = generatedPosition(code, "const a33jpi1jb_value");
+  const entryPosition = generatedPosition(code, "const hf46egd0_value");
   const entryOriginal = originalPositionFor(traceMap, entryPosition);
   expect(entryOriginal.source).toBe(
     portableSource("fixture-simple@0.0.0::src/index.js"),
@@ -96,7 +98,7 @@ test("emits one indexed map whose cell sections trace across modules", async () 
     'import { foo } from "./foo.js"',
   );
 
-  const dependencyPosition = generatedPosition(code, "const k7isotkd_foo");
+  const dependencyPosition = generatedPosition(code, "const c0ha17fb_foo");
   const dependencyOriginal = originalPositionFor(traceMap, dependencyPosition);
   expect(dependencyOriginal.source).toBe(
     portableSource("fixture-simple@0.0.0::src/foo.js"),
@@ -187,7 +189,7 @@ test("accepts generated beforeCombine parts and a mapped afterCombine change", a
   );
   const original = originalPositionFor(
     new AnyMap(map),
-    generatedPosition(code, "const a33jpi1jb_value"),
+    generatedPosition(code, "const hf46egd0_value"),
   );
 
   expect(code).toContain("/* before */");
@@ -214,7 +216,7 @@ test("composes pre and post Babel maps into each cell map", async () => {
   const map = JSON.parse(
     await fs.readFile(path.join(outDir, bundle.mapFileName), "utf8"),
   );
-  const position = generatedPosition(code, "const a33jpi1jb_value");
+  const position = generatedPosition(code, "const hf46egd0_value");
   const original = originalPositionFor(new AnyMap(map), position);
 
   expect(original.source).toBe(
@@ -246,7 +248,7 @@ test("maps HMR installers and emits mapped eval patch records", async () => {
   const map = JSON.parse(
     await fs.readFile(path.join(outDir, bundle.mapFileName), "utf8"),
   );
-  const position = generatedPosition(code, "a33jpi1jb_value =");
+  const position = generatedPosition(code, "hf46egd0_value =");
   const original = originalPositionFor(new AnyMap(map), position);
   const hmrBundle = result.hmr.bundles[`${bundle.envId}:${bundle.entryId}`];
   const mappedPatches = await Promise.all(
@@ -304,7 +306,8 @@ test("offsets entry mappings past dynamic-import headers and maps dynamic bundle
   const outDir = path.join(outRoot, "dynamic-import");
   const entryPath = path.join(fixturesDir, "dynamic-import/src/index.js");
   await fs.rm(outDir, { recursive: true, force: true });
-  const { buildProject } = await import("../dist/builder.js");
+  const { buildProject: rawBuildProject } = await import("../dist/builder.js");
+  const buildProject = withTestConfig(rawBuildProject);
   const result = await buildProject(
     {
       envs: {
@@ -334,7 +337,7 @@ test("offsets entry mappings past dynamic-import headers and maps dynamic bundle
     await fs.readFile(path.join(outDir, entryBundle.mapFileName), "utf8"),
   );
   const entryDeclaration = entryCode.match(/async function [a-z0-9]+_loadFoo/);
-  expect(entryCode).toMatch(/^const __IMPORT_/);
+  expect(entryCode).toMatch(/^const __bundler_.*_output_url/);
   expect(entryDeclaration).not.toBeNull();
   expect(
     originalPositionFor(
@@ -389,7 +392,8 @@ test("offsets entry and common maps past static bundle imports", async () => {
     'import { shared } from "./shared.js";\nexport const b = shared + 2;\n',
   );
 
-  const { buildProject } = await import("../dist/builder.js");
+  const { buildProject: rawBuildProject } = await import("../dist/builder.js");
+  const buildProject = withTestConfig(rawBuildProject);
   const result = await buildProject(
     {
       envs: { browser: { conditions: ["default"], target: "browser" } },

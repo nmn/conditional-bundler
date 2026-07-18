@@ -1,4 +1,7 @@
-import { transformAsset } from "../dist/transform/asset.js";
+import {
+  prepareAssetTransform,
+  transformAsset,
+} from "../dist/transform/asset.js";
 import { analyzeCss, finalizeCssTransform } from "../dist/transform/css.js";
 
 const canonicalPath = "portable-fixture@1.0.0::src/styles.css";
@@ -27,16 +30,16 @@ function cssResolutions() {
     "css-import:./theme.css": {
       target: { kind: "file", moduleId: theme, canonicalPath: theme },
       type: "css",
-      intent: "module",
+      representation: undefined,
     },
     "css-url:./mark.svg": {
       target: {
         kind: "file",
-        moduleId: `${asset}::intent=assetPath`,
+        moduleId: `${asset}::as=url`,
         canonicalPath: asset,
       },
       type: "asset",
-      intent: "assetPath",
+      representation: "url",
       meta: { assetId: asset },
     },
   });
@@ -104,27 +107,53 @@ test("CSS module names use development and production contracts", () => {
   ).toBe(true);
 });
 
-test("asset transforms are deterministic, portable, and intent-specific", () => {
+test("asset transforms are deterministic, portable, and representation-specific", () => {
   const bytes = Buffer.from(
     '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="7"></svg>',
   );
-  const makeInput = (root, intent) =>
+  const makeInput = (root, representation) =>
     Object.freeze({
       id: `${root}/src/mark.svg`,
-      moduleIdentity: `portable-fixture@1.0.0::src/mark.svg::intent=${intent}`,
+      moduleIdentity: `portable-fixture@1.0.0::src/mark.svg::as=${representation}`,
       canonicalPath: "portable-fixture@1.0.0::src/mark.svg",
       realPath: `${root}/src/mark.svg`,
       bytes,
-      intent,
+      representation,
       assetId: "portable-fixture@1.0.0::src/mark.svg",
+      normalModuleIdentity: "portable-fixture@1.0.0::src/mark.svg",
+      normalType: "asset",
+      primaryOutputType: "asset",
       pkg: { name: "portable-fixture", version: "1.0.0", root },
       envs: ["browser"],
       envId: "browser",
     });
+  const transform = (input) => {
+    const preparation = prepareAssetTransform(input);
+    const resolved = Object.fromEntries(
+      preparation.prepared.importRequests.map((request) => [
+        request.key,
+        {
+          target: {
+            kind: "file",
+            moduleId: "portable-fixture@1.0.0::src/mark.svg::as=url",
+            canonicalPath: "portable-fixture@1.0.0::src/mark.svg",
+          },
+          type: "asset",
+          representation: "url",
+          meta: {
+            assetId: "portable-fixture@1.0.0::src/mark.svg",
+          },
+        },
+      ]),
+    );
+    return transformAsset(input, resolved, preparation);
+  };
 
-  const first = transformAsset(makeInput("/checkout/one", "url"));
-  const relocated = transformAsset(
-    makeInput("/different/machine/checkout/two", "url"),
+  const first = transform(
+    makeInput("/checkout/one", "image-reference-with-size"),
+  );
+  const relocated = transform(
+    makeInput("/different/machine/checkout/two", "image-reference-with-size"),
   );
   expect(JSON.stringify(first)).toBe(JSON.stringify(relocated));
   const descriptorCode = first.fileRecord.cells
@@ -132,12 +161,61 @@ test("asset transforms are deterministic, portable, and intent-specific", () => 
     .join("\n");
   expect(descriptorCode).toContain("width: 12");
   expect(descriptorCode).toContain("height: 7");
-  expect(first.fileRecord.extraOutputs["bundler-asset"].metadata.copy).toBe(
-    true,
-  );
+  expect(first.fileRecord.extraOutputs).toBeUndefined();
+  expect(first.fileRecord.imports).toEqual([
+    expect.objectContaining({
+      attributes: { as: "url" },
+      target: expect.objectContaining({
+        moduleId: expect.stringContaining("::as=url"),
+      }),
+    }),
+  ]);
 
-  const raw = transformAsset(makeInput("/checkout/one", "raw"));
-  const base64 = transformAsset(makeInput("/checkout/one", "base64"));
+  const url = transform(makeInput("/checkout/one", "url"));
+  expect(url.fileRecord.extraOutputs["bundler-asset"].metadata.copy).toBe(true);
+
+  const urlCode = url.fileRecord.cells
+    .map((cell) => cell.code ?? "")
+    .join("\n");
+  expect(urlCode).not.toContain("width:");
+  expect(urlCode).toContain("_output_url");
+
+  const dependencyUrls = transformAsset({
+    id: "/checkout/one/src/feature.js",
+    moduleIdentity:
+      "portable-fixture@1.0.0::src/feature.js::as=url_and_deps_array",
+    canonicalPath: "portable-fixture@1.0.0::src/feature.js",
+    realPath: "/checkout/one/src/feature.js",
+    bytes: Buffer.from("export const value = 1;"),
+    representation: "url_and_deps_array",
+    assetId: "portable-fixture@1.0.0::src/feature.js",
+    normalModuleIdentity: "portable-fixture@1.0.0::src/feature.js",
+    normalType: "javascript",
+    primaryOutputType: "script",
+    pkg: {
+      name: "portable-fixture",
+      version: "1.0.0",
+      root: "/checkout/one",
+    },
+    envs: ["browser"],
+    envId: "browser",
+  });
+  expect(dependencyUrls.fileRecord.linkReferences).toEqual([
+    expect.objectContaining({
+      kind: "output-url",
+      outputId: "portable-fixture@1.0.0::src/feature.js",
+      includeDependencies: true,
+    }),
+  ]);
+  expect(dependencyUrls.fileRecord.discoveredEntrypoints).toEqual([
+    expect.objectContaining({
+      self: "normal",
+      moduleIdentity: "portable-fixture@1.0.0::src/feature.js",
+    }),
+  ]);
+
+  const raw = transform(makeInput("/checkout/one", "raw"));
+  const base64 = transform(makeInput("/checkout/one", "base64"));
   expect(raw.fileRecord.extraOutputs).toBeUndefined();
   expect(base64.fileRecord.extraOutputs).toBeUndefined();
   expect(raw.fileRecord.cells[0].code).toContain(
@@ -153,12 +231,15 @@ test("raw assets reject invalid UTF-8", () => {
   expect(() =>
     transformAsset({
       id: "/checkout/src/data.bin",
-      moduleIdentity: "portable-fixture@1.0.0::src/data.bin::intent=raw",
+      moduleIdentity: "portable-fixture@1.0.0::src/data.bin::as=raw",
       canonicalPath: "portable-fixture@1.0.0::src/data.bin",
       realPath: "/checkout/src/data.bin",
       bytes,
-      intent: "raw",
+      representation: "raw",
       assetId: "portable-fixture@1.0.0::src/data.bin",
+      normalModuleIdentity: "portable-fixture@1.0.0::src/data.bin",
+      normalType: "asset",
+      primaryOutputType: "asset",
       pkg: { name: "portable-fixture", version: "1.0.0", root: "/checkout" },
       envs: ["browser"],
       envId: "browser",

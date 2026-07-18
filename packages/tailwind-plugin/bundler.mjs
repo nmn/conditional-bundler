@@ -50,11 +50,22 @@ export default function tailwindBundlerPlugin(options = {}) {
         return;
       }
       const owner = context.bundles[0];
-      const pattern = context.outputs.cssFileName ?? "[entry].[env].[hash].css";
+      const pattern =
+        context.outputs.cssFileName ??
+        "[entry].[target].[environment].[hash].css";
+      const environment = outputAxisToken(
+        context.bundles.flatMap((bundle) => bundle.environmentIds),
+        options.environmentName,
+      );
+      const target = outputAxisToken(
+        context.bundles.flatMap((bundle) => bundle.targetIds),
+        options.targetName,
+      );
       const fileName = normalizePosixPath(
         pattern
           .replaceAll("[entry]", options.entryName ?? "tailwind")
-          .replaceAll("[env]", options.envName ?? "all")
+          .replaceAll("[environment]", environment)
+          .replaceAll("[target]", target)
           .replaceAll("[hash]", contentHashShort(unannotatedCss)),
       );
       const sourceMapMode = resolveSourceMapMode(context.outputs.sourceMap);
@@ -94,6 +105,12 @@ export default function tailwindBundlerPlugin(options = {}) {
       }
     },
   };
+}
+
+function outputAxisToken(values, override) {
+  if (override) return override;
+  const unique = Array.from(new Set(values)).sort();
+  return unique.length === 1 ? unique[0] : "all";
 }
 
 function normalizeCssFiles(value) {

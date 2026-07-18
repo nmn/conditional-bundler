@@ -84,8 +84,14 @@ identified by:
 
 - the file's normalized identity: project-relative for workspace files and
   package-relative for dependencies;
+- its normalized `as` representation and exact, flat environment;
 - the file's contents; and
 - the fingerprint of the transform configuration and plugins.
+
+Target is deliberately not part of transformation identity. A transformation
+owns grouped target records: target defines, target-scoped plugins, and
+target-specific package resolution can split the record, while structurally
+identical target records and linked artifacts are shared.
 
 The transform may resolve the import specifiers found in
 that file. It receives portable identities for those imports, but it does not
@@ -186,7 +192,7 @@ retransformation or relinking.
   that reads undeclared external state, embeds local absolute paths, or mutates
   the filesystem breaks portable caching.
 - **Transforms may resolve only their own imports.** Aliases, package exports,
-  target conditions, and resolver plugins are supported, but their results
+  target profiles, and resolver plugins are supported, but their results
   must become explicit, portable inputs rather than hidden filesystem
   dependencies.
 - **The linker is parser-free.** Any operation that requires understanding or
@@ -203,8 +209,13 @@ retransformation or relinking.
 
 ## Smaller Implementation Details
 
-- Environment-specific package conditions and `node`/`browser` targets are
-  resolved independently.
+- `as`, flat inherited environments, and named targets are independent axes.
+  Package entry selection and browser-field behavior belong to each target's
+  fingerprinted package resolver.
+- RSC `"use client"` boundaries produce a side-effect-free `react.server`
+  Client Reference facade and a separate `react.client` implementation. Inline
+  references contain the logical path, export name, and URL-only chunk array;
+  no RSC client manifest or Webpack runtime is emitted.
 - Static namespace access is reduced to named symbol dependencies. Namespace
   objects are generated only when dynamic namespace behavior is required.
 - The linker may inject a small prelude for generated asset URLs, dynamic
@@ -221,11 +232,15 @@ incompatibilities are documented in
 ## Packages
 
 - `packages/bundler`: coordinator, resolver, graph builder, linker, and CLI
+- `packages/browser-package-resolver` and `packages/node-package-resolver`:
+  fingerprinted target-owned package entry policies
 - `packages/assets`: conditional variant materialization and permutation cache
   keys
 - `packages/worker`: atomic Babel-based file transforms and cell generation
 - `packages/shared`: portable IR, condition types, hashing, and cache utilities
 - `packages/cjs-to-esm`: CommonJS-to-ESM transform plugin
+- `packages/react-rsc-plugin` and `packages/react-server-dom`: RSC boundary
+  transforms plus the pinned inline-reference serializer and client runtimes
 
 More implementation detail is available in
 [`architecture.md`](./docs/architecture.md), with configuration documented in
@@ -238,3 +253,33 @@ pnpm install
 pnpm -r build
 pnpm test
 ```
+
+### Browser example regression suite
+
+The HMR script clears each example's cache, starts it with `pnpm run dev`, and
+drives its real UI. It edits and restores both server/app-shell and
+client-component sources, checking text updates, newly generated styles
+(including StyleX and Tailwind), client interaction and state preservation,
+full-page reloads, and browser console errors. After the HMR checks, it builds
+the unmodified example, starts it in production mode, and verifies its initial
+UI, client interaction, asset requests, and console again.
+
+Install the Playwright browser once, then run the complete suite:
+
+```bash
+pnpm test:hmr:install
+pnpm test:hmr
+```
+
+To delete every example cache without running the browser suite:
+
+```bash
+pnpm clean:example-caches
+```
+
+Use `pnpm test:hmr -- --example react-rsc-commerce-tailwind` to isolate an
+example, or add `--headed`, `--browser webkit`, and `--keep-going` while
+debugging. Install an additional engine with
+`pnpm exec playwright install webkit` (or `firefox`) before selecting it.
+Source files are restored byte-for-byte even when a scenario fails; the script
+refuses to overwrite a file that changed outside the test.

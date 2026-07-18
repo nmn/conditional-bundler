@@ -1195,8 +1195,11 @@ function createCompatibilityWrapper(programPath, context) {
   const defaultId = t.identifier("__cjs_default__");
   const moduleId = t.identifier("__cjs_module__");
   const exportsId = t.identifier("__cjs_exports__");
+  const cacheModuleIdentity = runtimeEnvironment
+    ? moduleIdentity.replace(/::environment=[^:]+$/, "")
+    : moduleIdentity;
   const cacheKeyLiteral = t.stringLiteral(
-    `${moduleIdentity}${runtimeEnvironment ? `::runtime=${runtimeEnvironment}` : ""}::NODE_ENV=${nodeEnv}`,
+    `${cacheModuleIdentity}${runtimeEnvironment ? `::runtime=${runtimeEnvironment}` : ""}::NODE_ENV=${nodeEnv}`,
   );
   const usesFilename =
     context.linkModulePaths && usesUnboundGlobal(programPath, "__filename");

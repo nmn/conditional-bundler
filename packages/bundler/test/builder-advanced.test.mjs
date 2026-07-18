@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { withTestConfig } from "./test-config.mjs";
 
 const rootDir = path.resolve(process.cwd());
 const fixturesDir = path.join(rootDir, "test/fixtures");
@@ -12,7 +13,8 @@ async function buildFixture(name, options = {}) {
   const cacheDir = options.cacheDir ?? path.join(cacheRoot, name);
   await fs.rm(outDir, { recursive: true, force: true });
   await fs.mkdir(outDir, { recursive: true });
-  const { buildProject } = await import("../dist/builder.js");
+  const { buildProject: rawBuildProject } = await import("../dist/builder.js");
+  const buildProject = withTestConfig(rawBuildProject);
   return buildProject(
     {
       envs: { browser: { conditions: ["default"], target: "browser" } },
@@ -60,17 +62,17 @@ test("bundles complex exports", async () => {
 {
   "name": "complex-exports",
   "output": "
-const a11gvr3t_star = 5;
-const a11gvr3t_shared = 2;
-const juo8zpng_foo = 10;
-const a60qcqth9_thing = "ok";
-const a60qcqth9_default = a60qcqth9_thing;
-const rgvw7xif_local = 1;
-const rgvw7xif_foo = juo8zpng_foo;
-const rgvw7xif_Thing = a60qcqth9_default;
-const rgvw7xif_star = a11gvr3t_star;
-const rgvw7xif_shared = a11gvr3t_shared;
-export { rgvw7xif_local as local, rgvw7xif_star as star, rgvw7xif_shared as shared, rgvw7xif_foo as foo, rgvw7xif_Thing as Thing };",
+const a3r8ltykg_star = 5;
+const a3r8ltykg_shared = 2;
+const g3mk7imh_foo = 10;
+const a9fgiq3zb_thing = "ok";
+const a9fgiq3zb_default = a9fgiq3zb_thing;
+const ovq22obp_local = 1;
+const ovq22obp_foo = g3mk7imh_foo;
+const ovq22obp_Thing = a9fgiq3zb_default;
+const ovq22obp_star = a3r8ltykg_star;
+const ovq22obp_shared = a3r8ltykg_shared;
+export { ovq22obp_local as local, ovq22obp_star as star, ovq22obp_shared as shared, ovq22obp_foo as foo, ovq22obp_Thing as Thing };",
 }
 `);
 });
@@ -82,23 +84,23 @@ test("bundles complex conditional imports", async () => {
   "name": "complex-conditional",
   "output": "
 /////##CONDITION_START##"COND_A"
-const a7fe542m3_pick = value => \`pick:\${value}\`;
+const a36rbcmmg_pick = value => \`pick:\${value}\`;
 /////##CONDITION_END##
-const mag3x3is_shared = "shared";
+const a9anu99qu_shared = "shared";
 /////##CONDITION_START##{"NOT":"COND_A"}
-const m1lyft9j_pick = value => \`alt:\${value}\`;
+const a325y4qo2_pick = value => \`alt:\${value}\`;
 /////##CONDITION_END##
-let a1wam17ob_pick;
+let rhc85okp_pick;
 /////##CONDITION_START##"COND_A"
-a1wam17ob_pick = a7fe542m3_pick;
+rhc85okp_pick = a36rbcmmg_pick;
 /////##CONDITION_END##
 /////##CONDITION_START##{"NOT":"COND_A"}
-a1wam17ob_pick = m1lyft9j_pick;
+rhc85okp_pick = a325y4qo2_pick;
 /////##CONDITION_END##
-function a1wam17ob_run() {
-  return a1wam17ob_pick(mag3x3is_shared);
+function rhc85okp_run() {
+  return rhc85okp_pick(a9anu99qu_shared);
 }
-export { a1wam17ob_run as run };",
+export { rhc85okp_run as run };",
 }
 `);
 });
@@ -108,12 +110,15 @@ test("bundles complex dynamic imports", async () => {
   expect(snapshot).toMatchInlineSnapshot(`
 {
   "name": "complex-dynamic",
-  "output": "const __IMPORT_a7s65xr38 = () => import("./complex-dynamic.browser.ro04z6a2.js").then((mod) => Object.freeze({ "value": mod["a7s65xr38_value"] }));
-async function ia6xmlu2_load() {
-  const mod = await __IMPORT_a7s65xr38();
+  "output": "const __bundler_d9pkv5gb60_output_url = [new URL("./complex-dynamic.browser.2rqcnap5.js", import.meta.url).href];
+
+const hadi3ogo_default = __bundler_d9pkv5gb60_output_url;
+const a5wq2vqaf__bundler_dynamic_import = () => Promise.all(hadi3ogo_default.map(_bundler_dynamic_dependency_url => import(_bundler_dynamic_dependency_url))).then(_bundler_dynamic_modules => _bundler_dynamic_modules[0]);
+async function a5wq2vqaf_load() {
+  const mod = await a5wq2vqaf__bundler_dynamic_import();
   return mod.value;
 }
-export { ia6xmlu2_load as load };",
+export { a5wq2vqaf_load as load };",
 }
 `);
 });
@@ -124,12 +129,12 @@ test("bundles complex namespace usage", async () => {
 {
   "name": "complex-namespace",
   "output": "
-const k0ehfg11_alpha = 1;
-const k0ehfg11_beta = 2;
-function s509r9pf_run() {
-  return k0ehfg11_alpha + k0ehfg11_beta;
+const a492lhg63_alpha = 1;
+const a492lhg63_beta = 2;
+function ogrrjbmv_run() {
+  return a492lhg63_alpha + a492lhg63_beta;
 }
-export { s509r9pf_run as run };",
+export { ogrrjbmv_run as run };",
 }
 `);
 });
@@ -140,14 +145,14 @@ test("treeshakes unrelated exports within a single module", async () => {
 {
   "name": "tree-shake-cells",
   "output": "
-function g9pzx5of_helper() {
+function hbrhdh5h_helper() {
   return "used";
 }
-function g9pzx5of_used() {
-  return g9pzx5of_helper();
+function hbrhdh5h_used() {
+  return hbrhdh5h_helper();
 }
-const a8vmhxs1s_value = g9pzx5of_used();
-export { a8vmhxs1s_value as value };",
+const a5nhkkydu_value = hbrhdh5h_used();
+export { a5nhkkydu_value as value };",
 }
 `);
 });
@@ -158,10 +163,10 @@ test("only includes demanded reexports from a barrel", async () => {
 {
   "name": "barrel-selective",
   "output": "
-const rlqi3qi7_alpha = 1;
-const r4a3qt0n_alpha = rlqi3qi7_alpha;
-const a1z0h9fqf_value = r4a3qt0n_alpha;
-export { a1z0h9fqf_value as value };",
+const a9vf2wzpd_alpha = 1;
+const a7g48s548_alpha = a9vf2wzpd_alpha;
+const ltuletut_value = a7g48s548_alpha;
+export { ltuletut_value as value };",
 }
 `);
 });
@@ -172,37 +177,40 @@ test("bundles a hybrid graph with conditionals, barrels, and dynamic namespace u
 {
   "name": "hybrid",
   "outputs": {
-    "hybrid.browser.ci4x8uvy.js": "const __IMPORT_kh774klk = () => import("./hybrid.browser.qxq4sqrp.js").then((mod) => Object.freeze({ "default": mod["kh774klk_default"] }));
-const kbgjp98n_label = "base";
-const a7c4iu3zz_label = kbgjp98n_label;
+    "hybrid.browser.bl8rpatp.js": "const __bundler_d7xkyvhykn_output_url = [new URL("./hybrid.browser.oml7x7qy.js", import.meta.url).href];
+
+const a2w8rxzb5_default = __bundler_d7xkyvhykn_output_url;
+const oueauf3s_label = "base";
+const a1zfnyfv5_label = oueauf3s_label;
 /////##CONDITION_START##"FLAG_A"
-const e68ec7o1_feature = "alpha";
+const mydb1tex_feature = "alpha";
 /////##CONDITION_END##
 /////##CONDITION_START##{"NOT":"FLAG_A"}
-const dvxo7bsl_feature = "beta";
+const j1cn3xqj_feature = "beta";
 /////##CONDITION_END##
-let a54u0cy4f_feature;
+let cl2aeuiz_feature;
 /////##CONDITION_START##"FLAG_A"
-a54u0cy4f_feature = e68ec7o1_feature;
+cl2aeuiz_feature = mydb1tex_feature;
 /////##CONDITION_END##
 /////##CONDITION_START##{"NOT":"FLAG_A"}
-a54u0cy4f_feature = dvxo7bsl_feature;
+cl2aeuiz_feature = j1cn3xqj_feature;
 /////##CONDITION_END##
-async function a54u0cy4f_run(key) {
-  const mod = await __IMPORT_kh774klk();
-  return mod.default(\`\${a7c4iu3zz_label}:\${a54u0cy4f_feature}:\${key}\`);
+const cl2aeuiz__bundler_dynamic_import = () => Promise.all(a2w8rxzb5_default.map(_bundler_dynamic_dependency_url => import(_bundler_dynamic_dependency_url))).then(_bundler_dynamic_modules => _bundler_dynamic_modules[0]);
+async function cl2aeuiz_run(key) {
+  const mod = await cl2aeuiz__bundler_dynamic_import();
+  return mod.default(\`\${a1zfnyfv5_label}:\${cl2aeuiz_feature}:\${key}\`);
 }
-export { a54u0cy4f_run as run };",
-    "hybrid.browser.qxq4sqrp.js": "
-const o5ufutef_suffix = "tail";
-const __NS__o5ufutef = Object.create(null);
-Object.defineProperty(__NS__o5ufutef, Symbol.toStringTag, { value: "Module" });
-Object.defineProperty(__NS__o5ufutef, "suffix", { enumerable: true, get: () => o5ufutef_suffix });
-Object.preventExtensions(__NS__o5ufutef);
-const kh774klk_default = function kh774klk_finish(input) {
-  return \`\${input}:\${__NS__o5ufutef.suffix}:\${__NS__o5ufutef["suffix"]}\`;
+export { cl2aeuiz_run as run };",
+    "hybrid.browser.oml7x7qy.js": "
+const f29lxr59_suffix = "tail";
+const __NS__f29lxr59 = Object.create(null);
+Object.defineProperty(__NS__f29lxr59, Symbol.toStringTag, { value: "Module" });
+Object.defineProperty(__NS__f29lxr59, "suffix", { enumerable: true, get: () => f29lxr59_suffix });
+Object.preventExtensions(__NS__f29lxr59);
+const a3twm4c4q_default = function a3twm4c4q_finish(input) {
+  return \`\${input}:\${__NS__f29lxr59.suffix}:\${__NS__f29lxr59["suffix"]}\`;
 };
-export { kh774klk_default };",
+export { a3twm4c4q_default as default };",
   },
 }
 `);
@@ -213,8 +221,8 @@ test("reports when a conditional module also becomes unconditional", async () =>
   expect(result.diagnostics).toEqual([
     {
       code: "W_CONDITIONAL_ESCAPED",
-      envId: "browser",
-      file: path.join(fixturesDir, "conditional-warning", "src/helper.js"),
+      envId: "browser::browser",
+      file: "conditional-warning@1.0.0::src/helper.js::environment=browser",
       message:
         "Module is reachable both conditionally and unconditionally; emitting it unconditionally.",
       severity: "warning",

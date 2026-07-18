@@ -36,19 +36,19 @@ export function createSpaExampleServer({
       response.end(fs.readFileSync(path.join(dist, asset.fileName)));
       return;
     }
-    const logicalEntry = Object.entries(manifest.entrypoints ?? {}).find(
-      ([key]) => key.startsWith("client:") && key.endsWith(clientEntrySuffix),
-    )?.[1];
-    const clientBundle = logicalEntry
-      ? manifest.bundles.find((bundle) => bundle.id === logicalEntry.bundleId)
-      : manifest.bundles.find(
-          (bundle) =>
-            (bundle.environmentIds ?? [bundle.envId]).includes("client") &&
-            bundle.entryId.endsWith(clientEntrySuffix),
-        );
+    const clientBundle = manifest.bundles.find(
+      (bundle) =>
+        bundle.targetIds.includes("client") &&
+        bundle.entryId.endsWith(clientEntrySuffix),
+    );
     if (!clientBundle) {
       throw new Error("Missing SPA client bundle.");
     }
+    const logicalEntry = Object.values(manifest.entrypoints ?? {}).find(
+      (entrypoint) =>
+        entrypoint.bundleId === clientBundle.id &&
+        entrypoint.targetId === "client",
+    );
     const markup = await render(url);
     const styles =
       logicalEntry?.styles ??

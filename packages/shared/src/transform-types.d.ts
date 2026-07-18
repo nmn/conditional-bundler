@@ -4,7 +4,6 @@ import type {
   ExportLocal,
   ExportStar,
   ReexportNamed,
-  DynamicImport,
   ConditionalImport,
 } from "./ir.js";
 export type TransformInput = {
@@ -26,7 +25,6 @@ export type TransformMeta = {
   exportsLocal: ExportLocal[];
   exportStars: ExportStar[];
   reexportsNamed: ReexportNamed[];
-  dynamicImports: DynamicImport[];
   conditionalImports: ConditionalImport[];
   discoveredEntrypoints: string[];
   importRanges: Array<[number, number]>;

@@ -83,7 +83,7 @@ ji19ybwd_pick = rzh0ycy4_pick;
 ji19ybwd_pick = gb2g3nny_pick;
 /////##CONDITION_END##
 const ji19ybwd_default = async function ji19ybwd_run(key) {
-  const mod = await __IMPORT_a38syydlx();
+  const mod = await import("./lazy.js");
   return a4tfu7r6i_default + a4tfu7r6i_foo + __NS__aykq3vp9[key] + ji19ybwd_pick + mod.value;
 };`,
     meta: {
@@ -98,15 +98,7 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           target: fileTarget("src/feature.js"),
         }),
       ],
-      discoveredEntrypoints: ["src/lazy.js"],
-      dynamicImports: [
-        expect.objectContaining({
-          hashKey: "__IMPORT_a38syydlx",
-          request: "./lazy.js",
-          source: "src/lazy.js",
-          target: fileTarget("src/lazy.js"),
-        }),
-      ],
+      discoveredEntrypoints: [],
       exportRanges: [],
       exportStars: [],
       exportsLocal: [
@@ -164,7 +156,10 @@ const ji19ybwd_default = async function ji19ybwd_run(key) {
           ],
         }),
         expect.objectContaining({
-          attributes: undefined,
+          attributes: {
+            condition: "COND_A",
+            else: "./fallback.js",
+          },
           condition: "COND_A",
           isDefault: false,
           isNamespace: false,

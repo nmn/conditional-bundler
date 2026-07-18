@@ -3,9 +3,11 @@ import path from "node:path";
 export default function reactRscTransformBabelPlugin(api, options) {
   const t = api.types;
   const root = options.root;
-  const rscEnv = options.rscEnv ?? "rsc";
-  const clientEnv = options.clientEnv ?? "client";
-  const discoverClientEntrypoints = options.discoverClientEntrypoints !== false;
+  const serverEnvironment =
+    options.serverEnvironment ?? options.rscEnvironment ?? "react.server";
+  const clientEnvironment = options.clientEnvironment ?? "react.client";
+  const serverTarget = options.serverTarget ?? "server";
+  const clientTarget = options.clientTarget ?? "client";
 
   return {
     name: "react-rsc-transform",
@@ -17,41 +19,47 @@ export default function reactRscTransformBabelPlugin(api, options) {
           (directive) => directive.value.value === "use client",
         );
 
-        if (!hasUseClient) {
-          return;
-        }
-
-        if (options.envId !== rscEnv) {
+        if (!hasUseClient || options.environmentId !== serverEnvironment) {
           return;
         }
 
         const exports = collectExports(programPath.node.body, t);
-        if (discoverClientEntrypoints) {
-          state.file.metadata.conditionalBundlerDiscoveredEntrypoints = [
-            {
-              id: clientId,
-              request: `./${path.basename(filePath)}`,
-              envs: [clientEnv],
-            },
-          ];
-        }
-        state.file.metadata.conditionalBundlerExtraOutputs = {
-          "rsc-client-reference": {
-            contents: JSON.stringify({ clientId, exports }, null, 2),
-            metadata: { clientId, exports },
-          },
-        };
-
-        const registerClientReferenceLocal = "__rsc_registerClientReference__";
+        const selfRequest = `./${path.basename(filePath)}`;
+        const clientChunksLocal = "__rsc_client_chunks__";
+        const ssrChunksLocal = "__rsc_ssr_chunks__";
+        const registerLocal = "__rsc_registerClientReference__";
+        const implementationLocal = "__rsc_createClientImplementation__";
         const body = [
+          createChunkImport(
+            clientChunksLocal,
+            selfRequest,
+            "rsc-client-chunks",
+            clientEnvironment,
+            clientTarget,
+            "public",
+            t,
+          ),
+          createChunkImport(
+            ssrChunksLocal,
+            selfRequest,
+            "rsc-ssr-chunks",
+            clientEnvironment,
+            serverTarget,
+            "module-relative",
+            t,
+          ),
           t.importDeclaration(
             [
               t.importSpecifier(
-                t.identifier(registerClientReferenceLocal),
+                t.identifier(registerLocal),
                 t.identifier("registerClientReference"),
               ),
+              t.importSpecifier(
+                t.identifier(implementationLocal),
+                t.identifier("createClientImplementation"),
+              ),
             ],
-            t.stringLiteral("react-server-dom-webpack/server"),
+            t.stringLiteral("@bundler/react-server-dom/server"),
           ),
         ];
 
@@ -60,26 +68,19 @@ export default function reactRscTransformBabelPlugin(api, options) {
             exportName === "default"
               ? "__rsc_default__"
               : `__rsc_${exportName}`;
+          const implementation = t.callExpression(
+            t.identifier(implementationLocal),
+            [t.identifier(ssrChunksLocal), t.stringLiteral(exportName)],
+          );
           body.push(
             t.variableDeclaration("const", [
               t.variableDeclarator(
                 t.identifier(localName),
-                t.callExpression(t.identifier(registerClientReferenceLocal), [
-                  t.functionExpression(
-                    exportName === "default" ? null : t.identifier(exportName),
-                    [],
-                    t.blockStatement([
-                      t.throwStatement(
-                        t.newExpression(t.identifier("Error"), [
-                          t.stringLiteral(
-                            "Client references cannot be called on the server.",
-                          ),
-                        ]),
-                      ),
-                    ]),
-                  ),
+                t.callExpression(t.identifier(registerLocal), [
+                  implementation,
                   t.stringLiteral(clientId),
                   t.stringLiteral(exportName),
+                  t.identifier(clientChunksLocal),
                 ]),
               ),
             ]),
@@ -103,8 +104,33 @@ export default function reactRscTransformBabelPlugin(api, options) {
   };
 }
 
+function createChunkImport(
+  localName,
+  request,
+  representation,
+  environment,
+  target,
+  urlMode,
+  t,
+) {
+  const declaration = t.importDeclaration(
+    [t.importDefaultSpecifier(t.identifier(localName))],
+    t.stringLiteral(request),
+  );
+  declaration.attributes = [
+    t.importAttribute(t.identifier("as"), t.stringLiteral(representation)),
+    t.importAttribute(
+      t.identifier("environment"),
+      t.stringLiteral(environment),
+    ),
+    t.importAttribute(t.identifier("target"), t.stringLiteral(target)),
+    t.importAttribute(t.identifier("urlMode"), t.stringLiteral(urlMode)),
+  ];
+  return declaration;
+}
+
 function normalizeClientId(root, filePath) {
-  return path.relative(root, filePath).split(path.sep).join("/");
+  return `/${path.relative(root, filePath).split(path.sep).join("/")}`;
 }
 
 function collectExports(body, t) {
@@ -114,9 +140,7 @@ function collectExports(body, t) {
       exports.add("default");
       continue;
     }
-    if (!t.isExportNamedDeclaration(statement)) {
-      continue;
-    }
+    if (!t.isExportNamedDeclaration(statement)) continue;
     if (statement.declaration) {
       collectDeclarationExports(statement.declaration, exports, t);
       continue;
@@ -143,12 +167,8 @@ function collectDeclarationExports(declaration, exports, t) {
     exports.add(declaration.id.name);
     return;
   }
-  if (!t.isVariableDeclaration(declaration)) {
-    return;
-  }
+  if (!t.isVariableDeclaration(declaration)) return;
   for (const item of declaration.declarations) {
-    if (t.isIdentifier(item.id)) {
-      exports.add(item.id.name);
-    }
+    if (t.isIdentifier(item.id)) exports.add(item.id.name);
   }
 }

@@ -13,14 +13,14 @@ const examples = [
     title: "Greenline Ops",
     route: "/inventory",
     heading: "Stock without guesswork.",
-    stylePattern: /^stylex\.all\.[a-z0-9]+\.css$/,
+    stylePattern: /^stylex\.all\.javascript\.[a-z0-9]+\.css$/,
   },
   {
     name: "react-spa-tailwind",
     title: "Signal House",
     route: "/reports",
     heading: "Signals, not spreadsheet fog.",
-    stylePattern: /^tailwind\.all\.[a-z0-9]+\.css$/,
+    stylePattern: /^tailwind\.all\.javascript\.[a-z0-9]+\.css$/,
   },
 ];
 
@@ -45,11 +45,14 @@ for (const example of examples) {
       expect(bundle.mapFileName).toBe(`${bundle.fileName}.map`);
     }
 
-    const appRecords = await findCacheRecords(cacheDir, "::src/App.jsx");
+    const appRecords = await findCacheRecords(
+      cacheDir,
+      "::src/App.jsx::environment=javascript",
+    );
     expect(appRecords).toHaveLength(1);
     expect(Object.keys(appRecords[0].fileRecordsByEnv).sort()).toEqual([
-      "client",
-      "server",
+      "client::javascript",
+      "server::javascript",
     ]);
     for (const route of [
       "Dashboard.jsx",
@@ -59,12 +62,12 @@ for (const example of examples) {
     ]) {
       const routeRecords = await findCacheRecords(
         cacheDir,
-        `::src/routes/${route}`,
+        `::src/routes/${route}::environment=javascript`,
       );
       expect(routeRecords).toHaveLength(1);
       expect(Object.keys(routeRecords[0].fileRecordsByEnv).sort()).toEqual([
-        "client",
-        "server",
+        "client::javascript",
+        "server::javascript",
       ]);
     }
 
@@ -121,8 +124,8 @@ test("react-spa-stylex dev serves only browser entries and publishes browser HMR
     await waitForServer(child, port, () => output);
     const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
     expect(html.match(/<script type="module"/g)).toHaveLength(1);
-    expect(html).toContain("client.client.client.");
-    expect(html).not.toContain("server.server.server.");
+    expect(html).toContain("client.client.javascript.");
+    expect(html).not.toContain("server.server.javascript.");
     expect(html).not.toContain("Dashboard.client.");
     const clientEntryUrl = html.match(
       /<script type="module" src="([^"]+)"><\/script>/,
@@ -146,10 +149,12 @@ test("react-spa-stylex dev serves only browser entries and publishes browser HMR
     expect(message.type).toBe("patch");
     expect(message.updates.length).toBeGreaterThan(0);
     expect(
-      message.updates.every((update) => update.bundleKey.startsWith("client:")),
+      message.updates.every((update) =>
+        update.bundleKey.startsWith("client::javascript:"),
+      ),
     ).toBe(true);
     expect(message.styles).toHaveLength(1);
-    expect(message.styles[0]).toContain("/assets/stylex.all.");
+    expect(message.styles[0]).toContain("/assets/stylex.all.javascript.");
   } finally {
     await fs.writeFile(dashboardPath, originalDashboard, "utf8");
     socket?.close();
@@ -187,13 +192,11 @@ function expectBundleShape(manifest) {
   expect(manifest.bundles).toHaveLength(8);
   const serverOnlyBundles = manifest.bundles.filter(
     (bundle) =>
-      bundle.environmentIds.length === 1 &&
-      bundle.environmentIds[0] === "server",
+      bundle.targetIds.length === 1 && bundle.targetIds[0] === "server",
   );
   const clientOnlyBundles = manifest.bundles.filter(
     (bundle) =>
-      bundle.environmentIds.length === 1 &&
-      bundle.environmentIds[0] === "client",
+      bundle.targetIds.length === 1 && bundle.targetIds[0] === "client",
   );
   expect(serverOnlyBundles).toHaveLength(1);
   expect(clientOnlyBundles).toHaveLength(1);
@@ -202,8 +205,8 @@ function expectBundleShape(manifest) {
 
   const universalBundles = manifest.bundles.filter(
     (bundle) =>
-      bundle.environmentIds.includes("server") &&
-      bundle.environmentIds.includes("client"),
+      bundle.targetIds.includes("server") &&
+      bundle.targetIds.includes("client"),
   );
   expect(universalBundles).toHaveLength(6);
   expect(
@@ -230,9 +233,9 @@ function expectBundleShape(manifest) {
       "routes",
       routeName,
     );
-    expect(manifest.entrypoints[`server:${routePath}`].fileName).toBe(
-      manifest.entrypoints[`client:${routePath}`].fileName,
-    );
+    expect(
+      manifest.entrypoints[`server::javascript:${routePath}`].fileName,
+    ).toBe(manifest.entrypoints[`client::javascript:${routePath}`].fileName);
   }
 }
 

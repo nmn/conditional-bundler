@@ -17,6 +17,28 @@ export default function cssBundlerPlugin(options = {}) {
   return {
     name: options.name ?? "css-plugin",
     resourceFingerprint: `css-plugin-v3:lightningcss@${lightningCssPackage.version}`,
+    representations: {
+      "css-dependency": {
+        async resolve(context) {
+          const resolved = await context.resolveDefault();
+          if ("preserve" in resolved) return resolved;
+          if (!resolved.filePath.toLowerCase().endsWith(".css")) {
+            throw new Error(
+              `E_REPRESENTATION_TYPE: as: 'css-dependency' requires CSS, received '${context.request}'.`,
+            );
+          }
+          return {
+            ...resolved,
+            type: "css",
+            representation: "css-dependency",
+            meta: {
+              request: context.request,
+              cssDependency: true,
+            },
+          };
+        },
+      },
+    },
     async generateBundleResources(context) {
       const moduleOutputs = new Map();
       for (const moduleRecord of context.modules) {
@@ -39,7 +61,7 @@ export default function cssBundlerPlugin(options = {}) {
       for (const bundle of context.bundles) {
         const selected = Array.from(
           new Map(
-            bundle.environmentIds
+            bundle.scopeIds
               .flatMap((envId) =>
                 bundle.modules.map((moduleId) =>
                   moduleOutputs.get(`${envId}:${moduleId}`),
@@ -54,16 +76,24 @@ export default function cssBundlerPlugin(options = {}) {
         }
         const entry = sanitizeBundleName(bundle.entryId);
         const pattern =
-          context.outputs.cssFileName ?? "[entry].[env].[hash].css";
+          context.outputs.cssFileName ??
+          "[entry].[target].[environment].[hash].css";
         const scope =
+          bundle.scopeIds.length === 1 ? bundle.scopeIds[0] : "universal";
+        const environment =
           bundle.environmentIds.length === 1
             ? bundle.environmentIds[0]
-            : "universal";
+            : `shared-${bundle.environmentIds.join("-")}`;
+        const target =
+          bundle.targetIds.length === 1
+            ? bundle.targetIds[0]
+            : `shared-${bundle.targetIds.join("-")}`;
         const provisional = normalizePosixPath(
           pattern
             .replaceAll("[entry]", entry)
             .replaceAll("[scope]", scope)
-            .replaceAll("[env]", scope)
+            .replaceAll("[environment]", environment)
+            .replaceAll("[target]", target)
             .replaceAll("[hash]", "RESOURCE_HASH"),
         );
         const selectedById = new Map(

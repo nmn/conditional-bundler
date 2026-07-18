@@ -77,9 +77,7 @@ Snapshot behavior applies to:
 
 - renamed local exports such as `export { value as current }`;
 - named re-exports and aliases created by `export *`;
-- named, default, and namespace bindings selected by a conditional import; and
-- properties on the namespace-like object returned by a rewritten internal
-  dynamic import.
+- named, default, and namespace bindings selected by a conditional import.
 
 For example:
 
@@ -196,7 +194,8 @@ ESM behavior except where an explicit exception appears above:
 - import immutability;
 - explicit export precedence and `export *` ambiguity handling;
 - static namespace-access reduction;
-- dynamic-import Promise behavior and code splitting;
+- dynamic-import Promise behavior, native namespace semantics, parallel
+  dependency fetches, and code splitting;
 - tree shaking and shared-chunk extraction; and
 - physical bundle coalescing, content hashing, and source-map composition.
 

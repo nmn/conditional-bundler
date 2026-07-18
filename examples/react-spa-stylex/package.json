@@ -12,8 +12,10 @@
   },
   "dependencies": {
     "@bundler/assets": "workspace:*",
+    "@bundler/browser-package-resolver": "workspace:*",
     "@bundler/bundler": "workspace:*",
     "@bundler/cjs-to-esm": "workspace:*",
+    "@bundler/node-package-resolver": "workspace:*",
     "@bundler/react-jsx-plugin": "workspace:*",
     "@bundler/react-rsc-plugin": "workspace:*",
     "@bundler/spa-example-server": "workspace:*",

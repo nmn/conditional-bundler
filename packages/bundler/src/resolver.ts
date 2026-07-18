@@ -1,7 +1,8 @@
 import path from "node:path";
 import fs from "node:fs";
-import { builtinModules } from "node:module";
+import { builtinModules, createRequire } from "node:module";
 import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import {
   findPkgRoot,
   packagePathIdentity,
@@ -9,9 +10,9 @@ import {
   readPkgSafe,
 } from "@bundler/shared";
 import { runResolveImport } from "./plugins/run.js";
-import type { BundlerConfig } from "./config.js";
+import { buildScopeId, type InternalBundlerConfig } from "./config.js";
+import type { PackageResolverReference, Platform } from "./config.js";
 import type {
-  ImportIntent,
   ModuleType,
   ModuleResolution,
   NormalizedPlugin,
@@ -30,17 +31,44 @@ export type Resolver = (
   importerMeta?: Record<string, unknown>,
 ) => Promise<ModuleResolution>;
 
+export type PackageResolveOptions = {
+  exportConditions?: string[];
+  browserField?: boolean;
+};
+
+export type PackageResolverContext = {
+  fromFilePath: string;
+  request: string;
+  environmentId: string;
+  targetId: string;
+  platform: Platform;
+  kind: ResolveImportKind;
+  importAttributes?: Record<string, string>;
+  resolveDefault: (
+    options?: PackageResolveOptions,
+  ) => Promise<ResolveImportResult>;
+};
+
+export type PackageResolverHook = (
+  context: PackageResolverContext,
+) => Promise<ResolveImportResult | undefined> | ResolveImportResult | undefined;
+
 type ResolverOptions = {
-  config: BundlerConfig;
+  config: InternalBundlerConfig;
   plugins: NormalizedPlugin[];
   cacheDir: string;
 };
 
 type DefaultResolveOptions = {
-  conditions?: string[];
-  target?: "node" | "browser";
+  exportConditions?: string[];
+  platform?: "node" | "browser";
+  browserField?: boolean;
   aliasState?: AliasState;
   seenAliases?: Set<string>;
+};
+
+type LoadedPackageResolver = {
+  resolve: PackageResolverHook;
 };
 
 type AliasState = {
@@ -77,8 +105,11 @@ const runtimeBuiltins = new Set(
   builtinModules.flatMap((name) => [name, `node:${name}`]),
 );
 
-export function createResolver(options: ResolverOptions): Resolver {
+export async function createResolver(
+  options: ResolverOptions,
+): Promise<Resolver> {
   const aliasState = createAliasState();
+  const packageResolvers = await loadTargetPackageResolvers(options.config);
   return async (
     fromId: string,
     fromFilePath: string,
@@ -88,38 +119,88 @@ export function createResolver(options: ResolverOptions): Resolver {
     importAttributes,
     importerMeta,
   ) => {
-    const envConfig = options.config.envs[envId];
-    if (!envConfig) {
+    const importerScope = options.config.envs[envId];
+    if (!importerScope) {
       throw new Error(`Unknown environment '${envId}'.`);
     }
+    const environmentId =
+      importAttributes?.environment ?? importerScope.environmentId;
+    const targetId = importAttributes?.target ?? importerScope.targetId;
+    if (!options.config.environments[environmentId]) {
+      throw new Error(
+        `Import '${source}' from '${fromFilePath}' selects unknown environment '${environmentId}'.`,
+      );
+    }
+    if (!options.config.targets[targetId]) {
+      throw new Error(
+        `Import '${source}' from '${fromFilePath}' selects unknown target '${targetId}'.`,
+      );
+    }
+    const selectedScopeId = buildScopeId(environmentId, targetId);
+    const envConfig = options.config.envs[selectedScopeId];
+    const requestedRepresentation = resolveImportRepresentation(
+      kind,
+      importAttributes,
+    );
+    // A representation is consumed by its importer. Its `target` attribute
+    // selects the represented output (for example, a browser chunk URL), not
+    // the target in which the small representation facade executes.
+    const resolvedScopeId = buildScopeId(
+      environmentId,
+      requestedRepresentation ? importerScope.targetId : targetId,
+    );
 
+    const resolveWithTarget = async (): Promise<ResolveImportResult> => {
+      const resolveDefaultForTarget = (overrides: PackageResolveOptions = {}) =>
+        resolveDefault(fromFilePath, source, {
+          exportConditions:
+            overrides.exportConditions ?? envConfig.packageConditions,
+          platform: envConfig.platform,
+          browserField:
+            overrides.browserField ?? envConfig.platform === "browser",
+          aliasState,
+        });
+      const packageResolver = packageResolvers.get(envConfig.targetId);
+      if (!packageResolver) return resolveDefaultForTarget();
+      const result = await packageResolver.resolve({
+        fromFilePath,
+        request: source,
+        environmentId: envConfig.environmentId,
+        targetId: envConfig.targetId,
+        platform: envConfig.platform,
+        kind,
+        importAttributes,
+        resolveDefault: resolveDefaultForTarget,
+      });
+      if (result === undefined) return resolveDefaultForTarget();
+      return result;
+    };
     const context: ResolveImportContext = {
       fromId,
       fromFilePath,
       request: source,
-      envId,
-      conditions: envConfig.conditions,
-      target: envConfig.target,
+      environmentId: envConfig.environmentId,
+      targetId: envConfig.targetId,
+      platform: envConfig.platform,
       kind,
-      intent: resolveImportIntent(kind, importAttributes),
+      representation: requestedRepresentation,
       importAttributes,
       importerMeta,
-      resolveDefault: async () =>
-        resolveDefault(fromFilePath, source, {
-          conditions: envConfig.conditions,
-          target: envConfig.target,
-          aliasState,
-        }),
+      resolveDefault: resolveWithTarget,
     };
     const pluginResult = await runResolveImport(
       options.plugins,
-      envId,
+      envConfig.environmentId,
       context,
     );
     const resolved =
-      pluginResult === undefined
-        ? await context.resolveDefault()
-        : pluginResult;
+      pluginResult === undefined ? await resolveWithTarget() : pluginResult;
+
+    if (pluginResult === undefined && context.representation) {
+      throw new Error(
+        `E_UNKNOWN_REPRESENTATION: No plugin handles as: '${context.representation}' for '${source}'.`,
+      );
+    }
 
     if (resolved == null || typeof resolved !== "object") {
       throw new Error(
@@ -128,15 +209,21 @@ export function createResolver(options: ResolverOptions): Resolver {
     }
 
     if ("preserve" in resolved) {
+      if (context.representation) {
+        throw new Error(
+          `E_EXTERNAL_REPRESENTATION: Runtime dependency '${source}' cannot provide as: '${context.representation}'.`,
+        );
+      }
       const pkgRoot = findPkgRoot(fromFilePath) ?? path.dirname(fromFilePath);
       return {
         id: source,
         moduleIdentity: `runtime::${source}`,
         filePath: source,
+        scopeId: resolvedScopeId,
         pkg: readPkgSafe(pkgRoot),
         target: { kind: "runtime", specifier: source },
         type: "javascript",
-        intent: context.intent,
+        representation: context.representation,
       };
     }
 
@@ -163,25 +250,141 @@ export function createResolver(options: ResolverOptions): Resolver {
     const pkgRoot = findPkgRoot(filePath) ?? path.dirname(filePath);
     const pkg = readPkg(pkgRoot);
     const canonicalPath = packagePathIdentity(pkg, filePath);
+    const representation = resolved.representation ?? context.representation;
+    const baseModuleIdentity = resolved.moduleIdentity ?? canonicalPath;
+    const normalizedAttributes = normalizeVariantAttributes(
+      importAttributes,
+      representation,
+    );
+    const representationSuffix = normalizedAttributes
+      .map(([key, value]) =>
+        key === "as"
+          ? `::as=${encodeURIComponent(value)}`
+          : `::attr=${encodeURIComponent(key)}=${encodeURIComponent(value)}`,
+      )
+      .join("");
+    const environmentSuffix = `::environment=${encodeURIComponent(
+      envConfig.environmentId,
+    )}`;
+    const moduleIdentity = `${baseModuleIdentity}${representationSuffix}${environmentSuffix}`;
     return {
-      id: resolved.id,
-      moduleIdentity: resolved.moduleIdentity ?? canonicalPath,
+      id: moduleIdentity,
+      moduleIdentity,
       filePath,
+      scopeId: resolvedScopeId,
       pkg,
       target: {
         kind: "file",
-        moduleId: resolved.moduleIdentity ?? canonicalPath,
+        moduleId: moduleIdentity,
         canonicalPath,
       },
       type: resolved.type ?? inferModuleType(filePath),
-      intent: resolved.intent ?? context.intent,
-      meta: resolved.meta,
+      representation,
+      meta: {
+        ...(resolved.meta ?? {}),
+        ...(representation ? { representation } : {}),
+        ...(importAttributes?.environment
+          ? { requestedEnvironment: importAttributes.environment }
+          : {}),
+        ...(importAttributes?.target
+          ? { requestedTarget: importAttributes.target }
+          : {}),
+        ...(normalizedAttributes.length > 0
+          ? {
+              importAttributes: Object.fromEntries(normalizedAttributes),
+            }
+          : {}),
+      },
     };
   };
 }
 
+async function loadTargetPackageResolvers(
+  config: InternalBundlerConfig,
+): Promise<Map<string, LoadedPackageResolver>> {
+  const loaded = new Map<string, LoadedPackageResolver>();
+  for (const [targetId, target] of Object.entries(config.targets)) {
+    if (!target.packageResolver) continue;
+    const modulePath = resolvePackageResolverModule(
+      target.packageResolver,
+      config.configFile,
+    );
+    const imported = await import(pathToFileURL(modulePath).href);
+    const factory = imported.default ?? imported.packageResolver ?? imported;
+    const value =
+      typeof factory === "function"
+        ? await factory(target.packageResolver.options ?? {})
+        : factory;
+    const resolve =
+      typeof value === "function"
+        ? value
+        : value && typeof value.resolvePackage === "function"
+          ? value.resolvePackage.bind(value)
+          : undefined;
+    if (!resolve) {
+      throw new Error(
+        `Package resolver '${target.packageResolver.module}' for target '${targetId}' must export a resolver function or { resolvePackage() }.`,
+      );
+    }
+    loaded.set(targetId, { resolve });
+  }
+  return loaded;
+}
+
+export function resolvePackageResolverModule(
+  reference: PackageResolverReference,
+  configFile?: string,
+): string {
+  const fromFile = configFile
+    ? path.resolve(configFile)
+    : path.join(process.cwd(), "package.json");
+  if (path.isAbsolute(reference.module)) return reference.module;
+  if (reference.module.startsWith(".")) {
+    return path.resolve(path.dirname(fromFile), reference.module);
+  }
+  return createRequire(fromFile).resolve(reference.module);
+}
+
+export function collectPackageResolverCacheIdentity(
+  config: InternalBundlerConfig,
+): Array<{
+  targetId: string;
+  modulePath: string;
+  contentHash: string;
+  packageName: string;
+  packageVersion: string;
+}> {
+  return Object.entries(config.targets)
+    .filter(
+      (
+        entry,
+      ): entry is [
+        string,
+        (typeof entry)[1] & {
+          packageResolver: PackageResolverReference;
+        },
+      ] => Boolean(entry[1].packageResolver),
+    )
+    .map(([targetId, target]) => {
+      const modulePath = resolvePackageResolverModule(
+        target.packageResolver,
+        config.configFile,
+      );
+      const packageRoot = findPkgRoot(modulePath) ?? path.dirname(modulePath);
+      const pkg = readPkgSafe(packageRoot);
+      return {
+        targetId,
+        modulePath,
+        contentHash: hashString(fs.readFileSync(modulePath, "utf8")),
+        packageName: pkg.name,
+        packageVersion: pkg.version,
+      };
+    })
+    .sort((left, right) => left.targetId.localeCompare(right.targetId));
+}
+
 export function collectResolverAliasCacheIdentity(
-  config: BundlerConfig,
+  config: InternalBundlerConfig,
   entries: Array<{ path: string }>,
 ): AliasIdentityInput[] {
   const files = collectAliasConfigFiles(config, entries);
@@ -217,21 +420,27 @@ export function resolveDefault(
   });
 }
 
-function resolveImportIntent(
+function resolveImportRepresentation(
   kind: ResolveImportKind,
   attributes?: Record<string, string>,
-): ImportIntent {
-  if (kind === "css-url") return "assetPath";
-  const requested = attributes?.type;
-  if (
-    requested === "url" ||
-    requested === "raw" ||
-    requested === "base64" ||
-    requested === "assetPath"
-  ) {
-    return requested;
-  }
-  return "module";
+): string | undefined {
+  if (kind === "css-url") return "url";
+  if (attributes?.as) return attributes.as;
+  const legacy = attributes?.type;
+  return legacy === "url" || legacy === "raw" || legacy === "base64"
+    ? legacy
+    : undefined;
+}
+
+function normalizeVariantAttributes(
+  _attributes: Record<string, string> | undefined,
+  representation: string | undefined,
+): Array<[string, string]> {
+  // Representation is the only import-attribute axis in transformation
+  // identity. Environment is appended separately and target selects a record
+  // variant; source assertions and request/link metadata do not create a
+  // second transformation of the represented file.
+  return representation ? [["as", representation]] : [];
 }
 
 function inferModuleType(filePath: string): ModuleType {
@@ -335,7 +544,7 @@ function resolvePackageAlias(
     pkg._moduleAliases,
   ];
   if (
-    options.target === "browser" &&
+    (options.browserField ?? options.platform === "browser") &&
     pkg.browser &&
     typeof pkg.browser === "object"
   ) {
@@ -467,7 +676,8 @@ function resolvePackage(
   }
 
   const entry =
-    (options.target === "browser" && typeof pkg.browser === "string"
+    ((options.browserField ?? options.platform === "browser") &&
+    typeof pkg.browser === "string"
       ? pkg.browser
       : undefined) ??
     pkg.module ??
@@ -533,8 +743,8 @@ function resolveConditionalTarget(
     return undefined;
   }
   const conditions = new Set([
-    ...(options.conditions ?? []),
-    ...(options.target ? [options.target] : []),
+    ...(options.exportConditions ?? []),
+    ...(options.platform ? [options.platform] : []),
     "import",
   ]);
   for (const [condition, value] of Object.entries(target)) {
@@ -576,7 +786,8 @@ function tryResolveFileOrDirectory(
     const pkg = readPackageJson(path.join(filePath, "package.json"));
     const entry =
       pkg &&
-      ((options.target === "browser" && typeof pkg.browser === "string"
+      (((options.browserField ?? options.platform === "browser") &&
+      typeof pkg.browser === "string"
         ? pkg.browser
         : undefined) ??
         pkg.module ??
@@ -804,13 +1015,13 @@ function resolveTsConfigExtends(fromFile: string, request: string): string {
     return path.resolve(path.dirname(fromFile), withJson);
   }
   return resolvePackage(path.dirname(fromFile), withJson, {
-    conditions: ["default"],
-    target: "node",
+    exportConditions: ["default"],
+    platform: "node",
   });
 }
 
 function collectAliasConfigFiles(
-  config: BundlerConfig,
+  config: InternalBundlerConfig,
   entries: Array<{ path: string }>,
 ): Set<string> {
   const startDirs = new Set<string>([process.cwd()]);

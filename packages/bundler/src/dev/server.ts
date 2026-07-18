@@ -4,7 +4,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import type { Socket } from "node:net";
 import { buildProject, type BuildResult } from "../builder.js";
-import type { BundlerConfig } from "../config.js";
+import { parseBuildScopeId, type BundlerConfig } from "../config.js";
 import { materializeHmrPatch, type HmrCellRecord } from "./hmr-linker.js";
 import { resolveDevOptions } from "./options.js";
 import { readDevAsset, resolveConditionalCode } from "./conditional-assets.js";
@@ -23,7 +23,7 @@ export type HmrPatchPlan = {
   changedBundles: string[];
   imports?: string[];
   styles?: string[];
-  rscChunks?: Record<string, string>;
+  rscModules?: string[];
 };
 
 export type HmrPatchOptions = {
@@ -37,7 +37,7 @@ export type HmrMessage =
       changedBundles: string[];
       imports?: string[];
       styles?: string[];
-      rscChunks?: Record<string, string>;
+      rscModules?: string[];
     }
   | { type: "rsc-refresh"; styles?: string[] }
   | { type: "reload" }
@@ -89,7 +89,7 @@ export class HmrUpdateStore {
       changedBundles: patch.changedBundles,
       imports: patch.imports,
       styles: patch.styles,
-      rscChunks: patch.rscChunks,
+      rscModules: patch.rscModules,
     };
   }
 
@@ -192,7 +192,7 @@ function filterPatchForBrowser(
   }
   const isBrowserBundle = (bundleKey: string) => {
     const envId = build.hmr?.bundles[bundleKey]?.envId;
-    return envId != null && config.envs[envId]?.target === "browser";
+    return envId != null && scopePlatform(config, envId) === "browser";
   };
   return {
     ...patch,
@@ -273,12 +273,7 @@ function renderIndex(config: BundlerConfig, build: BuildResult): string {
     )
     .join("\n");
   const scripts = build.bundles
-    .filter(
-      (bundle) =>
-        config.envs[bundle.envId]?.target === "browser" &&
-        bundle.exportMode === "entry" &&
-        !bundle.entryId.startsWith("bundler:"),
-    )
+    .filter((bundle) => isConfiguredBrowserEntry(config, bundle))
     .map(
       (bundle) =>
         `<script type="module" src="/${escapeHtml(bundle.fileName)}"></script>`,
@@ -289,6 +284,28 @@ function renderIndex(config: BundlerConfig, build: BuildResult): string {
   <head><meta charset="utf-8"><title>conditional-bundler dev</title>${styles}</head>
   <body><div id="root"></div>${scripts}</body>
 </html>`;
+}
+
+function isConfiguredBrowserEntry(
+  config: BundlerConfig,
+  bundle: BuildResult["bundles"][number],
+): boolean {
+  const entryPath = path.resolve(bundle.entryId);
+  return config.entries.some((entry) => {
+    if (path.resolve(entry.path) !== entryPath) {
+      return false;
+    }
+    const requestedTargets = entry.targets ?? Object.keys(config.targets);
+    return requestedTargets.some(
+      (targetId) =>
+        (bundle.targetIds ?? []).includes(targetId) &&
+        config.targets[targetId]?.platform === "browser",
+    );
+  });
+}
+
+function scopePlatform(config: BundlerConfig, scopeId: string) {
+  return config.targets[parseBuildScopeId(scopeId).targetId]?.platform;
 }
 
 export function watchProject(

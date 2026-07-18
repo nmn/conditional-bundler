@@ -1,4 +1,9 @@
-import type { BundleTarget } from "./dynamic-import-constants.js";
+export type BundleTarget = {
+  fileName: string;
+  exportMode: "entry" | "dynamic";
+  /** Static script dependency closure, excluding fileName itself. */
+  dependencyFileNames?: string[];
+};
 
 export type StaticBundleImport = {
   entryId: string;

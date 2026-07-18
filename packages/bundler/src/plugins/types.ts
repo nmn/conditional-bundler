@@ -6,7 +6,7 @@ import type {
   ResourceTemplate,
 } from "@bundler/shared";
 import type { BundleManifest } from "../manifest.js";
-import type { OutputSpec } from "../config.js";
+import type { OutputSpec, Platform } from "../config.js";
 
 export type EnvValue<T> = T | ({ default?: T } & Record<string, T | undefined>);
 
@@ -20,7 +20,6 @@ export type ResolveImportKind =
   | "css-url";
 
 export type ModuleType = "javascript" | "css" | "asset";
-export type ImportIntent = "module" | "url" | "raw" | "base64" | "assetPath";
 
 export type ResolveImportResult =
   | { preserve: true }
@@ -29,7 +28,7 @@ export type ResolveImportResult =
       moduleIdentity?: string;
       filePath: string;
       type?: ModuleType;
-      intent?: ImportIntent;
+      representation?: string;
       meta?: Record<string, unknown>;
     };
 
@@ -37,35 +36,70 @@ export type ResolveImportContext = {
   fromId: string;
   fromFilePath: string;
   request: string;
-  envId: string;
-  conditions: string[];
-  target: "node" | "browser";
+  environmentId: string;
+  targetId: string;
+  platform: Platform;
   kind: ResolveImportKind;
-  intent: ImportIntent;
+  representation?: string;
   importAttributes?: Record<string, string>;
   importerMeta?: Record<string, unknown>;
   resolveDefault: () => Promise<ResolveImportResult>;
 };
 
 export type BabelPluginSpec = string | [string, Record<string, unknown>];
+export type RepresentationWorkerTransformSpec =
+  | string
+  | [string, Record<string, unknown>];
+
+export type RepresentationWorkerTransformContext = {
+  id: string;
+  moduleIdentity: string;
+  canonicalPath: string;
+  representation: string;
+  environmentId: string;
+  environmentIds: string[];
+  targetId: string;
+  targetIds: string[];
+  platform: Platform;
+  source: string;
+  bytes: Uint8Array;
+  metadata?: Record<string, unknown>;
+  pkg: { name: string; version: string };
+  buildMode: string;
+  dev: { hmr: boolean };
+};
+
+export type RepresentationWorkerTransformResult = {
+  code: string;
+  map?: string;
+  extraOutputs?: Record<string, import("@bundler/shared").ExtraTransformOutput>;
+  discoveredEntrypoints?: import("@bundler/shared").DiscoveredEntrypoint[];
+  linkReferences?: LinkReference[];
+};
 
 export type ScopedBabelPluginSpec =
   | BabelPluginSpec
   | {
       plugin: BabelPluginSpec;
-      environments: "each" | string[];
+      environments?: "each" | string[];
+      targets?: "each" | string[];
     };
 
 export type TransformStageContext = {
   id: string;
   filePath: string;
-  envs: string[];
-  envId?: string;
+  environments: string[];
+  environmentId?: string;
+  targets: string[];
+  targetId?: string;
+  platform?: Platform;
   pkg: { name: string; version: string; root: string };
   syntax: { jsx: boolean; ts: boolean };
 };
 
 export type EmitFileInput = {
+  /** Portable logical identity used by output-url references. */
+  outputId?: string;
   fileName: string;
   contents: string | Uint8Array;
   envId?: string;
@@ -81,20 +115,13 @@ export type EmitFile = (file: EmitFileInput) => void;
 
 export type BuildStartContext = {
   addEntry: (entry: {
-    id: string;
     path: string;
-    envs?: string[];
+    environment?: string;
+    targets?: string[];
     kind?: "auto" | "script" | "html" | "style";
     outputFileName?: string;
   }) => void;
   emitFile: EmitFile;
-};
-
-export type DynamicImportDraft = {
-  hashKey: string;
-  resolvedId: string | null;
-  externalRequest?: string;
-  exports?: Array<{ exported: string; symbol: string }>;
 };
 
 export type StaticBundleImportDraft = {
@@ -112,8 +139,9 @@ export type BundlePart = {
 export type DocumentTransformContext = {
   id: string;
   filePath: string;
-  envId: string;
-  target: "node" | "browser";
+  environmentId: string;
+  targetId: string;
+  platform: Platform;
   source: string;
 };
 
@@ -151,7 +179,6 @@ export type BundlePlanDraft = {
   conditionNames: string[];
   orderedParts: BundlePart[];
   staticImports?: StaticBundleImportDraft[];
-  dynamicImports: DynamicImportDraft[];
   diagnostics: Diagnostic[];
 };
 
@@ -173,12 +200,19 @@ export type AfterCombineContext = {
 export type BuildEndContext = {
   bundles: Array<{
     id: string;
+    scopeIds: string[];
     environmentIds: string[];
+    targetIds: string[];
     entrypoints: Array<{
       envId: string;
+      environmentId: string;
+      targetId: string;
       entryId: string;
       exportMode: "entry" | "dynamic";
     }>;
+    environmentId: string;
+    targetId: string;
+    platform: Platform;
     envId: string;
     entryId: string;
     fileName: string;
@@ -199,12 +233,19 @@ export type GenerateBundleResourcesContext = {
    */
   bundles: Array<{
     id: string;
+    scopeIds: string[];
     environmentIds: string[];
+    targetIds: string[];
     entrypoints: Array<{
       envId: string;
+      environmentId: string;
+      targetId: string;
       entryId: string;
       exportMode: "entry" | "dynamic";
     }>;
+    environmentId: string;
+    targetId: string;
+    platform: Platform;
     envId: string;
     entryId: string;
     modules: string[];
@@ -236,6 +277,40 @@ export type GenerateBundleResourcesHook = (
   context: GenerateBundleResourcesContext,
 ) => Promise<void> | void;
 
+export type RepresentationHandler = {
+  /**
+   * Inherit resolution and worker transformation behavior from another `as`
+   * type. Representation inheritance is independent from environments.
+   */
+  extends?: string;
+  /**
+   * Coordinator-side resolution for one `as` value. The represented file is
+   * still read and transformed only by its own worker task.
+   */
+  resolve?: (
+    context: ResolveImportContext,
+  ) =>
+    | Promise<ResolveImportResult | undefined>
+    | ResolveImportResult
+    | undefined;
+  /**
+   * Serializable, module-backed transform for this handler only. The module
+   * receives the represented file's own bytes and must return a JavaScript
+   * facade without inspecting dependencies.
+   */
+  workerTransform?: RepresentationWorkerTransformSpec;
+};
+
+export type NormalizedRepresentationHandler = Omit<
+  RepresentationHandler,
+  "workerTransform"
+> & {
+  identity: string;
+  owner: string;
+  resolveAs?: string;
+  workerTransform?: NormalizedBabelPluginSpec;
+};
+
 export type InlineBundlerPlugin = {
   name: string;
   buildStart?: BuildStartHook;
@@ -259,9 +334,12 @@ export type InlineBundlerPlugin = {
   afterCombine?: EnvValue<AfterCombineHook[]>;
   buildEnd?: BuildEndHook;
   generateBundleResources?: GenerateBundleResourcesHook;
+  representations?: Record<string, RepresentationHandler>;
   manualChunk?: ManualChunkHook;
   transform?: ScopedBabelPluginSpec[];
   transformPre?: ScopedBabelPluginSpec[];
+  /** Runs after every author/plugin source transform and before core extraction. */
+  transformFinalize?: ScopedBabelPluginSpec[];
   transformPost?: ScopedBabelPluginSpec[];
 };
 
@@ -281,6 +359,7 @@ export type NormalizedBabelPluginSpec = {
 export type NormalizedScopedBabelPluginSpec = {
   plugin: NormalizedBabelPluginSpec;
   environments?: "each" | string[];
+  targets?: "each" | string[];
 };
 
 export type ManualChunkModuleInfo = {
@@ -312,9 +391,11 @@ export type NormalizedPlugin = {
   afterCombine?: InlineBundlerPlugin["afterCombine"];
   buildEnd?: BuildEndHook;
   generateBundleResources?: GenerateBundleResourcesHook;
+  representations?: Record<string, NormalizedRepresentationHandler>;
   manualChunk?: ManualChunkHook;
   transform?: NormalizedScopedBabelPluginSpec[];
   transformPre?: NormalizedScopedBabelPluginSpec[];
+  transformFinalize?: NormalizedScopedBabelPluginSpec[];
   transformPost?: NormalizedScopedBabelPluginSpec[];
 };
 
@@ -322,19 +403,23 @@ export type WorkerTransformProfile = {
   fingerprint: string;
   transform: NormalizedScopedBabelPluginSpec[];
   transformPre: NormalizedScopedBabelPluginSpec[];
+  transformFinalize: NormalizedScopedBabelPluginSpec[];
   transformPost: NormalizedScopedBabelPluginSpec[];
+  representationTransforms: Record<string, NormalizedBabelPluginSpec>;
 };
 
 export type ModuleResolution = {
   id: string;
   moduleIdentity: string;
   filePath: string;
+  /** Concrete environment/target scope selected for this dependency. */
+  scopeId?: string;
   pkg: { name: string; version: string; root: string };
   target:
     | { kind: "file"; moduleId: string; canonicalPath: string }
     | { kind: "runtime"; specifier: string };
   type: ModuleType;
-  intent: ImportIntent;
+  representation?: string;
   meta?: Record<string, unknown>;
 };
 

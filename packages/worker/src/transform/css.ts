@@ -159,7 +159,7 @@ export function analyzeCss(input: CssTransformInput): CssAnalysis {
         key: `css-url:${dependency.request}`,
         kind: "css-url",
         request: dependency.request,
-        importAttributes: { type: "assetPath" },
+        importAttributes: { as: "url" },
       });
     }
 
@@ -266,17 +266,17 @@ export function finalizeCssTransform(
       );
       const reference: LinkReference = {
         id: `${input.moduleIdentity}::css-asset:${assetId}`,
-        kind: "asset-url",
+        kind: "output-url",
         symbol: cssVariable,
-        assetId,
+        outputId: assetId,
+        outputType: "asset",
         ownerId: input.moduleIdentity,
-        request: dependency.request,
         usage: "css-variable",
       };
       references.push(reference);
       allReferences.push(reference);
       pushFacadeImport(
-        `import ${JSON.stringify(dependency.request)} with { type: "assetPath" };`,
+        `import ${JSON.stringify(dependency.request)} with { as: "url" };`,
       );
     }
 
@@ -349,7 +349,7 @@ export function finalizeCssTransform(
       dev: input.dev,
     },
     {
-      importAttrAllow: ["assetPath"],
+      importAttrAllow: [],
       generateModuleOutput: false,
       sourceMap: input.sourceMap
         ? {
@@ -362,7 +362,10 @@ export function finalizeCssTransform(
     prepared,
   );
 
+  const cssOutputId = `${input.moduleIdentity}::css-dependency`;
   extraOutputs["bundler-css"] = {
+    outputId: cssOutputId,
+    type: "css-dependency",
     metadata: {
       module: analysis.isModule,
       classes: analysis.classes,
@@ -383,7 +386,7 @@ export function finalizeCssTransform(
             ...cell,
             resourceDeps:
               analysis.isModule && previousCellId
-                ? [previousCellId]
+                ? [cssOutputId, previousCellId]
                 : cell.resourceDeps,
           })),
         }
@@ -454,7 +457,7 @@ function mapFacadeResolutions(
   return Object.fromEntries(
     requests.map((request) => {
       const cssKey =
-        request.importAttributes?.type === "assetPath"
+        request.importAttributes?.as === "url"
           ? `css-url:${request.request}`
           : `css-import:${request.request}`;
       const value = resolved[cssKey];

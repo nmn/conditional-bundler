@@ -77,7 +77,6 @@ const ji19ybwd_local = 2;"
 {
   "conditionalImports": [],
   "discoveredEntrypoints": [],
-  "dynamicImports": [],
   "exportRanges": [],
   "exportStars": [],
   "exportsLocal": [
@@ -101,7 +100,6 @@ const ji19ybwd_local = 2;"
 {
   "conditionalImports": [],
   "discoveredEntrypoints": [],
-  "dynamicImports": [],
   "exportRanges": [],
   "exportStars": [],
   "exportsLocal": [

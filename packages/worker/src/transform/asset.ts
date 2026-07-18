@@ -5,9 +5,14 @@ import {
   contentHashShort,
   portableSourceName,
   type LinkReference,
+  type TransformResolvedImport,
   type TransformResult,
 } from "@bundler/shared";
-import { prepareCoreTransform, transformWithCore } from "./core.js";
+import {
+  prepareCoreTransform,
+  transformWithCore,
+  type PreparedCoreTransform,
+} from "./core.js";
 
 export type AssetTransformInput = {
   id: string;
@@ -15,12 +20,28 @@ export type AssetTransformInput = {
   canonicalPath: string;
   realPath: string;
   bytes: Uint8Array;
-  intent: "url" | "raw" | "base64" | "assetPath";
+  representation:
+    | "url"
+    | "url_and_deps_array"
+    | "raw"
+    | "base64"
+    | "image-reference-with-size";
   assetId: string;
+  normalModuleIdentity: string;
+  normalType: "javascript" | "css" | "asset";
+  primaryOutputType: string;
+  requestedEnvironment?: string;
+  requestedTarget?: string;
+  requestedUrlMode?: "module-relative" | "public";
   pkg: { name: string; version: string; root: string };
   envs: string[];
   envId: string;
   dev?: { hmr?: boolean };
+};
+
+export type PreparedAssetTransform = {
+  facade: string;
+  prepared: PreparedCoreTransform;
 };
 
 const imageExtensions = new Set([
@@ -35,76 +56,136 @@ const imageExtensions = new Set([
   ".webp",
 ]);
 
-export function transformAsset(input: AssetTransformInput): TransformResult {
-  const reference = createAssetReference(input.assetId);
+export function prepareAssetTransform(
+  input: AssetTransformInput,
+): PreparedAssetTransform {
   const extension = path.extname(input.realPath).toLowerCase();
   let facade: string;
-  if (input.intent === "raw") {
+  if (input.representation === "raw") {
     let value: string;
     try {
       value = new TextDecoder("utf-8", { fatal: true }).decode(input.bytes);
     } catch {
       throw new Error(
-        `Raw asset '${input.canonicalPath}' is not valid UTF-8. Use base64 intent for binary data.`,
+        `Raw representation '${input.canonicalPath}' is not valid UTF-8. Use as: 'base64' for binary data.`,
       );
     }
     facade = `export default ${JSON.stringify(value)};`;
-  } else if (input.intent === "base64") {
+  } else if (input.representation === "base64") {
     facade = `export default ${JSON.stringify(Buffer.from(input.bytes).toString("base64"))};`;
-  } else if (input.intent === "assetPath") {
-    facade = "void 0;";
+  } else if (input.representation === "image-reference-with-size") {
+    if (!imageExtensions.has(extension)) {
+      throw new Error(
+        `Representation 'image-reference-with-size' requires an image: '${input.canonicalPath}'.`,
+      );
+    }
+    const dimensions = readImageDimensions(input.bytes, input.canonicalPath);
+    const selfRequest = `./${path.basename(input.realPath)}`;
+    facade = `import __bundler_image_url from ${JSON.stringify(selfRequest)} with { as: "url" };
+export default { src: __bundler_image_url, width: ${dimensions.width}, height: ${dimensions.height} };`;
   } else {
-    const dimensions = imageExtensions.has(extension)
-      ? readImageDimensions(input.bytes, input.canonicalPath)
-      : undefined;
-    facade = `export default { src: ${reference.symbol}${
-      dimensions
-        ? `, width: ${dimensions.width}, height: ${dimensions.height}`
-        : ""
-    } };`;
+    const reference = createOutputReference(
+      input.normalType === "asset" ? input.assetId : input.normalModuleIdentity,
+      input.normalType === "asset" ? "asset" : input.primaryOutputType,
+      input.moduleIdentity,
+      input.representation === "url_and_deps_array",
+      input.requestedUrlMode ??
+        (input.requestedTarget ? "public" : "module-relative"),
+      input.requestedEnvironment,
+      input.requestedTarget,
+    );
+    facade = `export default ${reference.symbol};`;
   }
+  return {
+    facade,
+    prepared: prepareCoreTransform(
+      {
+        code: facade,
+        realPath: input.realPath,
+        syntax: { jsx: false, ts: false },
+      },
+      portableSourceName(input.canonicalPath),
+    ),
+  };
+}
 
-  const prepared = prepareCoreTransform(
-    {
-      code: facade,
-      realPath: input.realPath,
-      syntax: { jsx: false, ts: false },
-    },
-    portableSourceName(input.canonicalPath),
-  );
+export function transformAsset(
+  input: AssetTransformInput,
+  resolvedImports: Record<string, TransformResolvedImport> = {},
+  preparation = prepareAssetTransform(input),
+): TransformResult {
+  const copiedOutput =
+    input.normalType === "asset" && input.representation === "url";
+  const outputId = copiedOutput ? input.assetId : input.normalModuleIdentity;
+  const reference =
+    input.representation === "url" ||
+    input.representation === "url_and_deps_array"
+      ? createOutputReference(
+          outputId,
+          copiedOutput ? "asset" : input.primaryOutputType,
+          input.moduleIdentity,
+          input.representation === "url_and_deps_array",
+          input.requestedUrlMode ??
+            (input.requestedTarget ? "public" : "module-relative"),
+          input.requestedEnvironment,
+          input.requestedTarget,
+        )
+      : undefined;
+  const extension = path.extname(input.realPath).toLowerCase();
+  const { facade, prepared } = preparation;
   const result = transformWithCore(
     {
       id: input.id,
       moduleIdentity: input.moduleIdentity,
       canonicalPath: input.canonicalPath,
-      symbolIdentity: `${input.assetId}::intent=${input.intent}`,
+      symbolIdentity: input.moduleIdentity,
       code: facade,
       realPath: input.realPath,
       pkg: input.pkg,
       syntax: { jsx: false, ts: false },
       envs: input.envs,
       envId: input.envId,
-      resolvedImports: {},
+      resolvedImports,
       dev: input.dev,
     },
     {
       importAttrAllow: [],
       generateModuleOutput: false,
     },
-    prepared,
+    structuredClone(prepared),
   );
 
-  const shouldCopy = input.intent === "url" || input.intent === "assetPath";
-  const references: LinkReference[] = input.intent === "url" ? [reference] : [];
+  const references: LinkReference[] = reference ? [reference] : [];
+  const discoveredEntrypoints =
+    (input.representation === "url" ||
+      input.representation === "url_and_deps_array") &&
+    input.normalType !== "asset"
+      ? [
+          {
+            self: "normal" as const,
+            moduleIdentity: input.normalModuleIdentity,
+            moduleType: input.normalType,
+            exportMode: "entry" as const,
+            ...(input.requestedEnvironment
+              ? { environment: input.requestedEnvironment }
+              : {}),
+            ...(input.requestedTarget
+              ? { targets: [input.requestedTarget] }
+              : {}),
+          },
+        ]
+      : [];
   return {
     ...result,
     fileRecord: result.fileRecord
       ? {
           ...result.fileRecord,
+          discoveredEntrypoints,
           linkReferences: references,
-          extraOutputs: shouldCopy
+          extraOutputs: copiedOutput
             ? {
                 "bundler-asset": {
+                  outputId: input.assetId,
                   contents: input.bytes,
                   metadata: {
                     assetId: input.assetId,
@@ -120,7 +201,7 @@ export function transformAsset(input: AssetTransformInput): TransformResult {
           cells: result.fileRecord.cells.map((cell) => ({
             ...cell,
             linkReferences:
-              cell.code && cell.code.includes(reference.symbol)
+              reference && cell.code && cell.code.includes(reference.symbol)
                 ? references
                 : undefined,
           })),
@@ -129,15 +210,26 @@ export function transformAsset(input: AssetTransformInput): TransformResult {
   };
 }
 
-function createAssetReference(
-  assetId: string,
-): Extract<LinkReference, { kind: "asset-url" }> {
+function createOutputReference(
+  outputId: string,
+  outputType: string,
+  ownerId: string,
+  includeDependencies = false,
+  urlMode: "module-relative" | "public" = "module-relative",
+  environment?: string,
+  targetId?: string,
+): Extract<LinkReference, { kind: "output-url" }> & { symbol: string } {
   return {
-    id: `${assetId}::asset-url`,
-    kind: "asset-url",
-    symbol: `__bundler_${contentHashShort(`${assetId}\0asset-url`, 10)}_asset_url`,
-    assetId,
-    usage: "javascript",
+    id: `${ownerId}::output-url:${outputId}`,
+    kind: "output-url",
+    symbol: `__bundler_${contentHashShort(`${ownerId}\0${outputId}\0output-url`, 10)}_output_url`,
+    outputId,
+    outputType,
+    ownerId,
+    ...(includeDependencies ? { includeDependencies: true } : {}),
+    ...(urlMode !== "module-relative" ? { urlMode } : {}),
+    ...(environment ? { environment } : {}),
+    ...(targetId ? { targetId } : {}),
   };
 }
 

@@ -16,7 +16,9 @@ import type {
   ModuleBundlerPlugin,
   NormalizedBabelPluginSpec,
   NormalizedPlugin,
+  NormalizedRepresentationHandler,
   NormalizedScopedBabelPluginSpec,
+  RepresentationHandler,
   ScopedBabelPluginSpec,
   WorkerTransformProfile,
 } from "./types.js";
@@ -91,6 +93,8 @@ export async function normalizePlugins(plugins: BundlerPlugin[]): Promise<{
     });
   }
 
+  resolveRepresentationInheritance(normalized);
+
   return {
     plugins: normalized,
     workerProfile: buildWorkerTransformProfile(normalized),
@@ -113,9 +117,19 @@ function validateInlinePlugin(plugin: InlineBundlerPlugin): void {
       `Plugin '${plugin.name}' declares the removed 'load' hook. Resolver plugins may only return existing regular files or { preserve: true }.`,
     );
   }
-  if (plugin.transform || plugin.transformPre || plugin.transformPost) {
+  if (
+    plugin.transform ||
+    plugin.transformPre ||
+    plugin.transformFinalize ||
+    plugin.transformPost
+  ) {
     throw new Error(
       `Inline plugin '${plugin.name}' cannot declare worker-phase hooks. Use plugin(moduleSpecifier, options) instead.`,
+    );
+  }
+  if (plugin.representations) {
+    throw new Error(
+      `Inline plugin '${plugin.name}' cannot declare representation handlers. Use plugin(moduleSpecifier, options) so handler identity and worker code can be fingerprinted.`,
     );
   }
 }
@@ -152,6 +166,37 @@ async function loadModulePlugin(
     modulePath,
   };
 
+  if (plugin.representations) {
+    resolved.representations = Object.fromEntries(
+      Object.entries(
+        plugin.representations as Record<string, RepresentationHandler>,
+      ).map(([representation, handler]) => {
+        if (
+          !handler ||
+          (typeof handler.resolve !== "function" &&
+            typeof handler.extends !== "string")
+        ) {
+          throw new Error(
+            `Representation '${representation}' in plugin '${plugin.name}' must declare resolve() or extends.`,
+          );
+        }
+        const workerTransform = handler.workerTransform
+          ? resolveBabelSpec(handler.workerTransform, modulePath)
+          : undefined;
+        return [
+          representation,
+          {
+            resolve: handler.resolve,
+            extends: handler.extends,
+            workerTransform,
+            identity: `${plugin.name}::as=${representation}`,
+            owner: plugin.name,
+          },
+        ];
+      }),
+    );
+  }
+
   if (plugin.transformPre) {
     resolved.transformPre = resolveScopedBabelSpecs(
       plugin.transformPre,
@@ -160,6 +205,12 @@ async function loadModulePlugin(
   }
   if (plugin.transform) {
     resolved.transform = resolveScopedBabelSpecs(plugin.transform, modulePath);
+  }
+  if (plugin.transformFinalize) {
+    resolved.transformFinalize = resolveScopedBabelSpecs(
+      plugin.transformFinalize,
+      modulePath,
+    );
   }
   if (plugin.transformPost) {
     resolved.transformPost = resolveScopedBabelSpecs(
@@ -179,15 +230,85 @@ async function loadModulePlugin(
       options: portableFingerprintValue(pluginRef.options ?? null),
       transform: portableScopedSpecs(resolved.transform),
       transformPre: portableScopedSpecs(resolved.transformPre),
+      transformFinalize: portableScopedSpecs(resolved.transformFinalize),
       transformPost: portableScopedSpecs(resolved.transformPost),
       transformFiles: hashTransformFiles([
         resolved.transform,
         resolved.transformPre,
+        resolved.transformFinalize,
         resolved.transformPost,
       ]),
+      representations: Object.fromEntries(
+        Object.entries(resolved.representations ?? {}).map(
+          ([representation, handler]) => [
+            representation,
+            {
+              identity: handler.identity,
+              extends: handler.extends,
+              workerTransform: handler.workerTransform
+                ? {
+                    ...portableBabelSpec(handler.workerTransform),
+                    moduleHash: hashFileIfExists(
+                      handler.workerTransform.modulePath,
+                    ),
+                  }
+                : null,
+            },
+          ],
+        ),
+      ),
     }),
   );
   return resolved;
+}
+
+function resolveRepresentationInheritance(plugins: NormalizedPlugin[]): void {
+  const handlers = new Map<
+    string,
+    { plugin: NormalizedPlugin; handler: NormalizedRepresentationHandler }
+  >();
+  for (const plugin of plugins) {
+    for (const [name, handler] of Object.entries(
+      plugin.representations ?? {},
+    )) {
+      if (handlers.has(name)) {
+        throw new Error(`Representation '${name}' is declared more than once.`);
+      }
+      handlers.set(name, { plugin, handler });
+    }
+  }
+
+  const resolved = new Set<string>();
+  const active = new Set<string>();
+  const visit = (name: string): NormalizedRepresentationHandler => {
+    const entry = handlers.get(name);
+    if (!entry) {
+      throw new Error(`Unknown parent representation '${name}'.`);
+    }
+    if (resolved.has(name)) return entry.handler;
+    if (active.has(name)) {
+      throw new Error(`Cyclic representation inheritance at '${name}'.`);
+    }
+    active.add(name);
+    const parentName = entry.handler.extends;
+    if (parentName) {
+      const parent = visit(parentName);
+      if (!entry.handler.resolve) {
+        entry.handler.resolve = parent.resolve;
+        entry.handler.resolveAs = parent.resolveAs ?? parentName;
+      }
+      entry.handler.workerTransform ??= parent.workerTransform;
+    }
+    if (!entry.handler.resolve) {
+      throw new Error(
+        `Representation '${name}' does not inherit or declare resolve().`,
+      );
+    }
+    active.delete(name);
+    resolved.add(name);
+    return entry.handler;
+  };
+  for (const name of handlers.keys()) visit(name);
 }
 
 function hashTransformFiles(
@@ -232,6 +353,7 @@ function resolveScopedBabelSpecs(
         return {
           plugin: resolveBabelSpec(entry.plugin, fromModulePath),
           environments: entry.environments,
+          targets: entry.targets,
         };
       }
       return { plugin: resolveBabelSpec(entry, fromModulePath) };
@@ -299,12 +421,20 @@ function buildWorkerTransformProfile(
 ): WorkerTransformProfile {
   const transformPre: NormalizedScopedBabelPluginSpec[] = [];
   const transform: NormalizedScopedBabelPluginSpec[] = [];
+  const transformFinalize: NormalizedScopedBabelPluginSpec[] = [];
   const transformPost: NormalizedScopedBabelPluginSpec[] = [];
+  const representationTransforms: Record<string, NormalizedBabelPluginSpec> =
+    {};
 
   for (const plugin of plugins) {
     transform.push(...(plugin.transform ?? []));
     transformPre.push(...(plugin.transformPre ?? []));
+    transformFinalize.push(...(plugin.transformFinalize ?? []));
     transformPost.push(...(plugin.transformPost ?? []));
+    for (const handler of Object.values(plugin.representations ?? {})) {
+      if (!handler.workerTransform) continue;
+      representationTransforms[handler.identity] = handler.workerTransform;
+    }
   }
 
   const profile = {
@@ -312,7 +442,13 @@ function buildWorkerTransformProfile(
       JSON.stringify({
         transform: portableScopedSpecs(transform),
         transformPre: portableScopedSpecs(transformPre),
+        transformFinalize: portableScopedSpecs(transformFinalize),
         transformPost: portableScopedSpecs(transformPost),
+        representationTransforms: Object.fromEntries(
+          Object.entries(representationTransforms)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([identity, spec]) => [identity, portableBabelSpec(spec)]),
+        ),
         plugins: plugins
           .map((plugin) => plugin.workerFingerprint)
           .filter((value): value is string => Boolean(value)),
@@ -320,9 +456,21 @@ function buildWorkerTransformProfile(
     ),
     transform,
     transformPre,
+    transformFinalize,
     transformPost,
+    representationTransforms,
   };
   return profile;
+}
+
+function portableBabelSpec(value: NormalizedBabelPluginSpec): {
+  modulePath: string;
+  options: unknown;
+} {
+  return {
+    modulePath: portablePathIdentity(value.modulePath),
+    options: portableFingerprintValue(value.options),
+  };
 }
 
 function portableScopedSpecs(
@@ -333,6 +481,7 @@ function portableScopedSpecs(
         modulePath: portablePathIdentity(entry.plugin.modulePath),
         options: portableFingerprintValue(entry.plugin.options),
         environments: entry.environments,
+        targets: entry.targets,
       }))
     : null;
 }

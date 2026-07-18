@@ -17,21 +17,29 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
     recursive: true,
     force: true,
   });
-  await execFileAsync("corepack", ["pnpm", "run", "build"], {
-    cwd: exampleDir,
-    env: process.env,
-    timeout: 60_000,
-  });
+  const buildOutput = await execFileAsync(
+    "corepack",
+    ["pnpm", "run", "build"],
+    {
+      cwd: exampleDir,
+      env: process.env,
+      timeout: 60_000,
+    },
+  );
+  expect(
+    `${buildOutput.stdout}\n${buildOutput.stderr}`.match(
+      /react-dom-client\.production\.js/g,
+    ),
+  ).toHaveLength(1);
 
   const manifest = await readManifest();
   expectCjsNodeEnv(manifest, "production");
   const showcaseAssets = await expectShowcaseAssets(manifest);
-  const clientManifest = JSON.parse(
-    await fs.readFile(
-      path.join(exampleDir, "dist/rsc-client-manifest.json"),
-      "utf8",
-    ),
-  );
+  const clientReferences = manifest.metadata.rsc.clientReferenceBundles;
+  expect(manifest.metadata.rsc.inline).toBe(true);
+  await expect(
+    fs.access(path.join(exampleDir, "dist/rsc-client-manifest.json")),
+  ).rejects.toMatchObject({ code: "ENOENT" });
   const clientBundle = findBundle(manifest, "client");
   const serverBundle = findBundle(manifest, "rsc");
   const clientBundles = manifest.bundles.filter((bundle) =>
@@ -40,36 +48,35 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
   const clientBundleFiles = clientBundles
     .map((bundle) => bundle.fileName)
     .sort();
-  const commonBundle = clientBundles.find(
-    (bundle) =>
-      bundle.environmentIds.length === 1 &&
-      bundle.entryId.startsWith("bundler:shared:"),
+  const commonBundle = clientBundles.find((bundle) =>
+    bundle.entryId.startsWith("bundler:shared:"),
   );
   const counterBundle = manifest.bundles.find(
-    (bundle) =>
-      bundle.fileName === clientManifest["src/Counter.jsx#Counter"].fileName,
+    (bundle) => bundle.id === clientReferences["/src/Counter.jsx"].client,
   );
   const rawCounterCode = await fs.readFile(
     path.join(exampleDir, "dist", counterBundle.fileName),
     "utf8",
   );
 
-  expect(clientManifest["src/Counter.jsx#Counter"]).toMatchObject({
-    id: expect.stringMatching(/src\/Counter\.jsx$/),
-    fileName: expect.stringMatching(/^Counter\.client\.[a-z0-9]+\.js$/),
-    url: expect.stringMatching(/^\/Counter\.client\.[a-z0-9]+\.js$/),
-    chunks: expect.any(Array),
+  expect(clientReferences["/src/Counter.jsx"]).toEqual({
+    client: expect.any(String),
+    server: expect.any(String),
   });
   expect(clientBundleFiles).toHaveLength(5);
   expect(clientBundleFiles).toEqual(
     expect.arrayContaining([
-      expect.stringMatching(/^Counter\.client\.[a-z0-9]+\.js$/),
-      expect.stringMatching(/^DraftPad\.client\.[a-z0-9]+\.js$/),
-      expect.stringMatching(/^PreferenceSwitch\.client\.[a-z0-9]+\.js$/),
+      expect.stringMatching(/^Counter\.client\.react\.client\.[a-z0-9]+\.js$/),
+      expect.stringMatching(/^DraftPad\.client\.react\.client\.[a-z0-9]+\.js$/),
       expect.stringMatching(
-        /^bundler-shared-[a-z0-9]+\.client\.[a-z0-9]+\.js$/,
+        /^PreferenceSwitch\.client\.react\.client\.[a-z0-9]+\.js$/,
       ),
-      expect.stringMatching(/^runtime-client\.client\.[a-z0-9]+\.js$/),
+      expect.stringMatching(
+        /^bundler-shared-[a-z0-9]+\.client\.react\.client\.[a-z0-9]+\.js$/,
+      ),
+      expect.stringMatching(
+        /^runtime-client\.client\.react\.client\.[a-z0-9]+\.js$/,
+      ),
     ]),
   );
   expect(
@@ -85,30 +92,27 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
     "utf8",
   );
   expect(commonCode).toContain("ReactSharedInternals");
-  for (const reference of [
-    clientManifest["src/Counter.jsx#Counter"],
-    clientManifest["src/DraftPad.jsx#DraftPad"],
-    clientManifest["src/PreferenceSwitch.jsx#PreferenceSwitch"],
+  for (const logicalId of [
+    "/src/Counter.jsx",
+    "/src/DraftPad.jsx",
+    "/src/PreferenceSwitch.jsx",
   ]) {
+    const referenceBundle = manifest.bundles.find(
+      (bundle) => bundle.id === clientReferences[logicalId].client,
+    );
     const code = await fs.readFile(
-      path.join(exampleDir, "dist", reference.fileName),
+      path.join(exampleDir, "dist", referenceBundle.fileName),
       "utf8",
     );
     expect(code).toContain(`from "./${commonBundle.fileName}"`);
     expect(code).not.toContain("ReactSharedInternals");
   }
-  expect(clientManifest["src/DraftPad.jsx#DraftPad"]).toMatchObject({
-    id: expect.stringMatching(/src\/DraftPad\.jsx$/),
-    fileName: expect.stringMatching(/^DraftPad\.client\.[a-z0-9]+\.js$/),
-  });
-  expect(
-    clientManifest["src/PreferenceSwitch.jsx#PreferenceSwitch"],
-  ).toMatchObject({
-    id: expect.stringMatching(/src\/PreferenceSwitch\.jsx$/),
-    fileName: expect.stringMatching(
-      /^PreferenceSwitch\.client\.[a-z0-9]+\.js$/,
-    ),
-  });
+  expect(Object.keys(clientReferences).sort()).toEqual([
+    "/src/Counter.jsx",
+    "/src/DraftPad.jsx",
+    "/src/PreferenceSwitch.jsx",
+  ]);
+  expect(JSON.stringify(clientReferences)).not.toContain(rootDir);
   expect(counterBundle.conditionNames).toEqual(["DEV"]);
   for (const bundle of manifest.bundles) {
     expect(bundle.mapFileName).toBe(`${bundle.fileName}.map`);
@@ -133,7 +137,7 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
       "Server components with a conditional client branch.",
     );
     expect(html).toMatch(/<main class="shell [a-z][a-z0-9]{7}">/);
-    expect(html).toContain("__BUNDLER_RSC_CHUNKS__");
+    expect(html).not.toContain("__BUNDLER_RSC_CHUNKS__");
     expect(html).toContain("__BUNDLER_RSC_DATA__");
     expect(html).not.toContain("importmap");
     expect(html).not.toContain("esm.sh");
@@ -146,6 +150,7 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
 
     const clientAsset = await fetchAsset(`${baseUrl}/${clientBundle.fileName}`);
     expect(clientAsset.contentType).toContain("text/javascript");
+    expectNoWebpackRuntime(clientAsset.text);
     expect(clientAsset.text).toContain(
       `//# sourceMappingURL=${clientBundle.mapFileName}`,
     );
@@ -170,6 +175,9 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
     expect(flight).toContain("src/Counter.jsx");
     expect(flight).toContain("src/DraftPad.jsx");
     expect(flight).toContain("src/PreferenceSwitch.jsx");
+    expect(flight).toContain(
+      `["/src/Counter.jsx",["/${counterBundle.fileName}","/${commonBundle.fileName}"],"Counter"]`,
+    );
     expect(flight).not.toContain(":E");
 
     const counterAsset = await fetchAsset(
@@ -204,21 +212,22 @@ test("react-rsc-basic development serves HMR output and linked source maps", asy
         "Server components with a conditional client branch.",
       );
       expect(html).toContain("__BUNDLER_RSC_DATA__");
-      expect(html).toContain("Counter.client.");
-      expect(html).toContain("DraftPad.client.");
-      expect(html).toContain("PreferenceSwitch.client.");
+      expect(html).toContain("Counter.client.react.client.");
+      expect(html).toContain("DraftPad.client.react.client.");
+      expect(html).toContain("PreferenceSwitch.client.react.client.");
       const styleMatch = html.match(
-        /<link rel="stylesheet" href="\/(server\.rsc\.[a-z0-9]+\.css)"/,
+        /<link rel="stylesheet" href="\/(server\.server\.react\.server\.[a-z0-9]+\.css)"/,
       );
       expect(styleMatch).not.toBeNull();
       const scriptMatch = html.match(
-        /<script type="module" src="\/(runtime-client\.client\.[a-z0-9]+\.js)"><\/script>/,
+        /<script type="module" src="\/(runtime-client\.client\.react\.client\.[a-z0-9]+\.js)"><\/script>/,
       );
       expect(scriptMatch).not.toBeNull();
 
       const clientFileName = scriptMatch[1];
       const clientAsset = await fetchAsset(`${baseUrl}/${clientFileName}`);
       expect(clientAsset.contentType).toContain("text/javascript");
+      expectNoWebpackRuntime(clientAsset.text);
       expect(clientAsset.text).toContain("__BUNDLER_HMR__");
       expect(clientAsset.text).toContain(
         `//# sourceMappingURL=${clientFileName}.map`,
@@ -252,8 +261,8 @@ test("react-rsc-basic development serves HMR output and linked source maps", asy
       const clientBundles = manifest.bundles.filter((bundle) =>
         bundleAppliesTo(bundle, "client"),
       );
-      const runtimeBundle = clientBundles.find(
-        (bundle) => bundle.entryId === "bundler:hmr-runtime:client",
+      const runtimeBundle = clientBundles.find((bundle) =>
+        bundle.entryId.startsWith("bundler:hmr-runtime:"),
       );
       const commonBundle = clientBundles.find((bundle) =>
         bundle.entryId.startsWith("bundler:shared:"),
@@ -314,8 +323,6 @@ async function withExampleServer(script, extraEnv, run) {
       "@bundler/assets/register",
       "--require",
       sourceMapRegister,
-      "--conditions",
-      "react-server",
       script,
     ],
     {
@@ -379,8 +386,6 @@ async function expectMappedServerStack(fileName, query = "") {
       "@bundler/assets/register",
       "--require",
       sourceMapRegister,
-      "--conditions",
-      "react-server",
       "-e",
       script,
     ],
@@ -438,7 +443,7 @@ async function expectShowcaseAssets(manifest) {
   );
   expect(serverCode).toContain(`"/${mark.fileName}"`);
   expect(serverCode).toMatch(
-    /src: __bundler_[a-z0-9]+_asset_url,\s+width: 64,\s+height: 64/,
+    /src: [a-z0-9]+_default,\s+width: 64,\s+height: 64/,
   );
   return { mark, texture, style };
 }
@@ -448,7 +453,8 @@ function expectCjsNodeEnv(manifest, expected) {
     new Set(manifest.bundles.flatMap((bundle) => bundle.modules)),
   ).filter(
     (id) =>
-      id.includes("/cjs/") && /\.(?:production|development)\.js$/.test(id),
+      id.includes("cjs/") &&
+      /\.(?:production|development)\.js(?:::environment=|$)/.test(id),
   );
   const opposite = expected === "production" ? "development" : "production";
 
@@ -457,16 +463,33 @@ function expectCjsNodeEnv(manifest, expected) {
   expect(records.some((id) => id.includes(`.${opposite}.js`))).toBe(false);
 }
 
-function findBundle(manifest, envId) {
-  return manifest.bundles.find(
-    (bundle) =>
-      bundleAppliesTo(bundle, envId) &&
-      bundle.entryId.endsWith("runtime-client.js") === (envId === "client"),
-  );
+function expectNoWebpackRuntime(code) {
+  expect(code).not.toContain("__webpack_require__");
+  expect(code).not.toContain("__webpack_chunk_load__");
+  expect(code).not.toContain("__webpack_get_script_filename__");
+  expect(code).not.toContain("__bundler_rsc_legacy");
+  expect(code).not.toContain("webpackGetChunkFilename");
 }
 
-function bundleAppliesTo(bundle, envId) {
-  return (bundle.environmentIds ?? [bundle.envId]).includes(envId);
+function findBundle(manifest, kind) {
+  return manifest.bundles.find((bundle) => {
+    if (kind === "client") {
+      return (
+        bundleAppliesTo(bundle, "client") &&
+        bundle.environmentIds.includes("react.client") &&
+        bundle.entryId.endsWith("runtime-client.js")
+      );
+    }
+    return (
+      bundleAppliesTo(bundle, "server") &&
+      bundle.environmentIds.includes("react.server") &&
+      bundle.entryId.endsWith("server.jsx")
+    );
+  });
+}
+
+function bundleAppliesTo(bundle, targetId) {
+  return (bundle.targetIds ?? [bundle.targetId]).includes(targetId);
 }
 
 async function fetchText(url) {

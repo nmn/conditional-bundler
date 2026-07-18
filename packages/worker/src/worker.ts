@@ -38,18 +38,22 @@ type WorkerBabelPluginSpec = {
 type WorkerScopedBabelPluginSpec = {
   plugin: WorkerBabelPluginSpec;
   environments?: "each" | string[];
+  targets?: "each" | string[];
 };
 
 type WorkerPipelineBabelPluginSpec = {
   plugin: WorkerBabelPluginSpec;
-  scoped: boolean;
+  environmentScoped: boolean;
+  targetScoped: boolean;
 };
 
 type WorkerTransformProfile = {
   fingerprint: string;
   transform: WorkerScopedBabelPluginSpec[];
   transformPre: WorkerScopedBabelPluginSpec[];
+  transformFinalize: WorkerScopedBabelPluginSpec[];
   transformPost: WorkerScopedBabelPluginSpec[];
+  representationTransforms: Record<string, WorkerBabelPluginSpec>;
 };
 
 type WorkerRequest = {
@@ -59,16 +63,21 @@ type WorkerRequest = {
   code: string;
   sourceBytes?: Uint8Array;
   moduleType?: "javascript" | "css" | "asset";
-  importIntent?: "module" | "url" | "raw" | "base64" | "assetPath";
+  importRepresentation?: string;
   canonicalPath?: string;
   resolutionMeta?: Record<string, unknown>;
   buildMode?: string;
   transformConfig?: Record<string, unknown>;
   pkg: { name: string; version: string; root: string };
+  /** Concrete environment/target scope ids processed by this request. */
   envs: string[];
   allEnvIds?: string[];
+  environments: Record<string, string>;
+  targetIds: Record<string, string>;
   targets: Record<string, "node" | "browser">;
+  defines: Record<string, Record<string, string | number | boolean | null>>;
   cacheDir: string;
+  sharedCacheDir: string;
   cacheNamespace?: string;
   remoteCache?: RemoteCacheConfig;
   syntax: { jsx: boolean; ts: boolean };
@@ -120,7 +129,7 @@ type ResolvedImportsByEnv = Record<
         | { kind: "file"; moduleId: string; canonicalPath: string }
         | { kind: "runtime"; specifier: string };
       type: "javascript" | "css" | "asset";
-      intent: "module" | "url" | "raw" | "base64" | "assetPath";
+      representation?: string;
       meta?: Record<string, unknown>;
     }
   >
@@ -157,12 +166,21 @@ type FileCachePaths = {
 };
 
 const babelModuleCache = new Map<string, unknown>();
+const representationTransformCache = new Map<
+  string,
+  (
+    context: WorkerRepresentationTransformContext,
+    options: Record<string, unknown>,
+  ) =>
+    | Promise<WorkerRepresentationTransformResult>
+    | WorkerRepresentationTransformResult
+>();
 const pendingCoordinatorRequests = new Map<
   number,
   { resolve: (value: unknown) => void; reject: (error: Error) => void }
 >();
 let nextCoordinatorRequestId = 1;
-const CELL_ARTIFACT_FORMAT = 25;
+const CELL_ARTIFACT_FORMAT = 32;
 const remapping = ((
   remappingModule as unknown as {
     default?: typeof import("@ampproject/remapping").default;
@@ -240,6 +258,10 @@ async function handleTransform(
       );
     }
     const representativeEnv = environmentIds[0];
+    const environment = request.environments[representativeEnv];
+    const targetIds = Array.from(
+      new Set(environmentIds.map((scopeId) => request.targetIds[scopeId])),
+    ).sort();
     const record = finalizeFileRecord(
       {
         ...result.fileRecord,
@@ -250,6 +272,8 @@ async function handleTransform(
           request.codeByEnv?.[representativeEnv] ?? sourceContent,
         ),
         variantId,
+        environment,
+        targetIds,
         environmentIds,
         envs: environmentIds,
         codeByEnv: {},
@@ -260,7 +284,7 @@ async function handleTransform(
       cachePaths.artifactDir,
       variantId,
     );
-    return { variantId, environmentIds, record };
+    return { variantId, environment, targetIds, environmentIds, record };
   });
   const fileRecordsByEnv = Object.fromEntries(
     variants.flatMap((variant) =>
@@ -350,12 +374,22 @@ function collectVariants(
       continue;
     }
     const environmentIds = record.environmentIds ?? record.envs ?? [envId];
+    const targetIds =
+      record.targetIds ??
+      Array.from(
+        new Set(
+          environmentIds.map((scopeId) => scopeId.split("::", 1)[0] ?? scopeId),
+        ),
+      );
     variants.set(variantId, {
       variantId,
+      environment: record.environment,
+      targetIds,
       environmentIds: [...environmentIds],
       record: {
         ...record,
         variantId,
+        targetIds,
         environmentIds,
         envs: environmentIds,
       },
@@ -367,12 +401,22 @@ function collectVariants(
 async function transformFile(
   request: WorkerRequest,
 ): Promise<TransformFileOutput> {
+  const representationHandler =
+    typeof request.resolutionMeta?.representationHandler === "string"
+      ? request.resolutionMeta.representationHandler
+      : undefined;
+  const representationTransform = representationHandler
+    ? request.workerProfile.representationTransforms[representationHandler]
+    : undefined;
+  if (representationTransform) {
+    request = await applyRepresentationWorkerTransform(
+      request,
+      representationHandler!,
+      representationTransform,
+    );
+  }
   if (request.moduleType === "asset") {
-    return {
-      resultsByEnv: await transformAssetFile(request),
-      dependencyRequestsByEnv: {},
-      resolvedImportsByEnv: {},
-    };
+    return transformAssetFile(request);
   }
   if (request.moduleType === "css") {
     return transformCssFile(request);
@@ -396,6 +440,7 @@ async function transformFile(
   const orderedTransformStages = [
     ...request.workerProfile.transformPre,
     ...request.workerProfile.transform,
+    ...request.workerProfile.transformFinalize,
   ];
   const pipelineCache = new Map<
     string,
@@ -405,29 +450,59 @@ async function transformFile(
   for (const envId of request.envs) {
     const initialCode = request.codeByEnv?.[envId] ?? request.code;
     const initialMap = request.mapByEnv?.[envId];
-    const pipeline = selectTransformPipeline(orderedTransformStages, envId);
-    const transformEnvId = pipeline.scoped ? envId : undefined;
+    const pipeline = selectTransformPipeline(
+      orderedTransformStages,
+      request.environments[envId],
+      request.targetIds[envId],
+      "environment",
+    );
+    const transformEnvId = pipeline.environmentScoped ? envId : undefined;
     const pipelineKey = contentHash(
       JSON.stringify({
         codeHash: contentHash(initialCode),
         mapHash: initialMap ? contentHash(initialMap) : null,
         specs: pipeline.specs,
-        envId: transformEnvId,
-        target: transformEnvId ? request.targets[transformEnvId] : undefined,
+        environmentId: pipeline.environmentScoped
+          ? request.environments[envId]
+          : undefined,
       }),
     );
-    let preResult = pipelineCache.get(pipelineKey);
-    if (!preResult) {
-      preResult = await applyCachedBabelPipeline(
+    let environmentResult = pipelineCache.get(pipelineKey);
+    if (!environmentResult) {
+      environmentResult = await applyCachedBabelPipeline(
         initialCode,
         initialMap,
         request,
         transformEnvId,
         pipeline.specs,
       );
-      pipelineCache.set(pipelineKey, preResult);
+      pipelineCache.set(pipelineKey, environmentResult);
     }
-    preResults[envId] = preResult;
+    const definedResult = await applyTargetDefines(
+      environmentResult,
+      request,
+      envId,
+    );
+    const targetPipeline = selectTransformPipeline(
+      orderedTransformStages,
+      request.environments[envId],
+      request.targetIds[envId],
+      "target",
+    );
+    const targetResult = await applyCachedBabelPipeline(
+      definedResult.code,
+      definedResult.map,
+      request,
+      targetPipeline.targetScoped ? envId : undefined,
+      targetPipeline.specs,
+    );
+    preResults[envId] = {
+      ...targetResult,
+      metadata: {
+        ...(definedResult.metadata ?? {}),
+        ...(targetResult.metadata ?? {}),
+      },
+    };
   }
 
   for (const envId of request.envs) {
@@ -534,6 +609,7 @@ async function transformFile(
         (reference) =>
           cell.code != null &&
           "symbol" in reference &&
+          typeof reference.symbol === "string" &&
           cell.code.includes(reference.symbol),
       ),
     }));
@@ -576,61 +652,334 @@ async function transformFile(
   };
 }
 
+type WorkerRepresentationTransformContext = {
+  id: string;
+  moduleIdentity: string;
+  canonicalPath: string;
+  representation: string;
+  environmentId: string;
+  environmentIds: string[];
+  targetId: string;
+  targetIds: string[];
+  platform: "node" | "browser";
+  source: string;
+  bytes: Uint8Array;
+  metadata?: Record<string, unknown>;
+  pkg: { name: string; version: string };
+  buildMode: string;
+  dev: { hmr: boolean };
+};
+
+type WorkerRepresentationTransformResult = {
+  code: string;
+  map?: string;
+  extraOutputs?: Record<string, ExtraTransformOutput>;
+  discoveredEntrypoints?: DiscoveredEntrypoint[];
+  linkReferences?: LinkReference[];
+};
+
+async function applyRepresentationWorkerTransform(
+  request: WorkerRequest,
+  handlerIdentity: string,
+  spec: WorkerBabelPluginSpec,
+): Promise<WorkerRequest> {
+  const representationBase = request.resolutionMeta?.representationBase;
+  const representation =
+    typeof representationBase === "string"
+      ? representationBase
+      : request.importRepresentation;
+  if (!representation) {
+    throw new Error(
+      `Representation handler '${handlerIdentity}' was selected without an as value.`,
+    );
+  }
+  const transform = await loadRepresentationTransform(spec.modulePath);
+  const bytes = request.sourceBytes ?? new TextEncoder().encode(request.code);
+  const results = await Promise.all(
+    request.envs.map(async (envId) => {
+      const result = await transform(
+        {
+          id: request.id,
+          moduleIdentity: request.moduleIdentity,
+          canonicalPath: request.canonicalPath ?? request.moduleIdentity,
+          representation,
+          environmentId: request.environments[envId],
+          environmentIds: Array.from(
+            new Set(
+              (request.allEnvIds ?? request.envs).map(
+                (scopeId) => request.environments[scopeId],
+              ),
+            ),
+          ),
+          targetId: request.targetIds[envId],
+          targetIds: Array.from(
+            new Set(
+              (request.allEnvIds ?? request.envs).map(
+                (scopeId) => request.targetIds[scopeId],
+              ),
+            ),
+          ),
+          platform: request.targets[envId],
+          source: request.sourceBytes ? "" : request.code,
+          bytes: bytes.slice(),
+          metadata: request.resolutionMeta
+            ? structuredClone(request.resolutionMeta)
+            : undefined,
+          pkg: {
+            name: request.pkg.name,
+            version: request.pkg.version,
+          },
+          buildMode: request.buildMode ?? "development",
+          dev: {
+            hmr:
+              request.dev?.hmr === true && request.targets[envId] === "browser",
+          },
+        },
+        { ...(spec.options ?? {}) },
+      );
+      if (!result || typeof result !== "object") {
+        throw new Error(
+          `Representation worker transform '${handlerIdentity}' returned ${String(result)}.`,
+        );
+      }
+      if (typeof result.code !== "string") {
+        throw new Error(
+          `Representation worker transform '${handlerIdentity}' must return JavaScript code.`,
+        );
+      }
+      if (result.map !== undefined && typeof result.map !== "string") {
+        throw new Error(
+          `Representation worker transform '${handlerIdentity}' returned a non-string source map.`,
+        );
+      }
+      try {
+        return structuredClone(result);
+      } catch (error) {
+        throw new Error(
+          `Representation worker transform '${handlerIdentity}' returned non-serializable data.`,
+          { cause: error },
+        );
+      }
+    }),
+  );
+  const byEnv = Object.fromEntries(
+    request.envs.map((envId, index) => [envId, results[index]]),
+  );
+  return {
+    ...request,
+    code: results[0]?.code ?? "",
+    moduleType: "javascript",
+    syntax: { jsx: false, ts: false },
+    codeByEnv: Object.fromEntries(
+      request.envs.map((envId) => [envId, byEnv[envId].code]),
+    ),
+    mapByEnv: Object.fromEntries(
+      request.envs.flatMap((envId) =>
+        byEnv[envId].map ? [[envId, byEnv[envId].map!]] : [],
+      ),
+    ),
+    extraOutputsByEnv: Object.fromEntries(
+      request.envs.map((envId) => [
+        envId,
+        {
+          ...(request.extraOutputsByEnv?.[envId] ?? {}),
+          ...(byEnv[envId].extraOutputs ?? {}),
+        },
+      ]),
+    ),
+    discoveredEntrypointsByEnv: Object.fromEntries(
+      request.envs.map((envId) => [
+        envId,
+        [
+          ...(request.discoveredEntrypointsByEnv?.[envId] ?? []),
+          ...(byEnv[envId].discoveredEntrypoints ?? []),
+        ],
+      ]),
+    ),
+    linkReferencesByEnv: Object.fromEntries(
+      request.envs.map((envId) => [
+        envId,
+        [
+          ...(request.linkReferencesByEnv?.[envId] ?? []),
+          ...(byEnv[envId].linkReferences ?? []),
+        ],
+      ]),
+    ),
+  };
+}
+
 async function applyPostTransformPipelines(
   cellsByEnv: Record<string, CellRecord[]>,
   request: WorkerRequest,
   entries: WorkerScopedBabelPluginSpec[],
 ): Promise<void> {
-  const resultCache = new Map<string, CellRecord[]>();
-  for (const envId of request.envs) {
-    const pipeline = selectTransformPipeline(entries, envId);
-    const transformEnvId = pipeline.scoped ? envId : undefined;
-    const input = cellsByEnv[envId];
-    const cacheKey = contentHash(
+  const environmentCache = new Map<string, CellRecord[]>();
+  for (const scopeId of request.envs) {
+    const environmentPipeline = selectTransformPipeline(
+      entries,
+      request.environments[scopeId],
+      request.targetIds[scopeId],
+      "environment",
+    );
+    const environmentScopeId = environmentPipeline.environmentScoped
+      ? scopeId
+      : undefined;
+    const environmentKey = contentHash(
       JSON.stringify({
-        cells: input,
-        specs: pipeline.specs,
-        envId: transformEnvId,
+        cells: cellsByEnv[scopeId],
+        specs: environmentPipeline.specs,
+        environmentId: request.environments[scopeId],
       }),
     );
-    let transformed = resultCache.get(cacheKey);
+    let transformed = environmentCache.get(environmentKey);
     if (!transformed) {
       transformed = await applyCachedBabelPipelineToCells(
-        input,
+        cellsByEnv[scopeId],
         request,
-        transformEnvId,
-        pipeline.specs,
+        environmentScopeId,
+        environmentPipeline.specs,
       );
-      resultCache.set(cacheKey, transformed);
+      environmentCache.set(environmentKey, transformed);
     }
-    cellsByEnv[envId] = transformed;
+    const targetPipeline = selectTransformPipeline(
+      entries,
+      request.environments[scopeId],
+      request.targetIds[scopeId],
+      "target",
+    );
+    cellsByEnv[scopeId] = await applyCachedBabelPipelineToCells(
+      transformed,
+      request,
+      targetPipeline.targetScoped ? scopeId : undefined,
+      targetPipeline.specs,
+    );
   }
 }
 
 function transformEntryApplies(
   entry: WorkerScopedBabelPluginSpec,
-  envId: string,
+  environmentId: string,
+  targetId: string,
 ): boolean {
-  return (
+  const environmentApplies =
     entry.environments === undefined ||
     entry.environments === "each" ||
-    entry.environments.includes(envId)
-  );
+    entry.environments.includes(environmentId);
+  const targetApplies =
+    entry.targets === undefined ||
+    entry.targets === "each" ||
+    entry.targets.includes(targetId);
+  return environmentApplies && targetApplies;
+}
+
+function sharedTransformIdentity(identity: string): string {
+  return identity.replace(/::environment=[^:]+$/, "");
 }
 
 function selectTransformPipeline(
   entries: WorkerScopedBabelPluginSpec[],
-  envId: string,
-): { specs: WorkerPipelineBabelPluginSpec[]; scoped: boolean } {
-  const applicable = entries.filter((entry) =>
-    transformEntryApplies(entry, envId),
+  environmentId: string,
+  targetId: string,
+  phase: "environment" | "target",
+): {
+  specs: WorkerPipelineBabelPluginSpec[];
+  environmentScoped: boolean;
+  targetScoped: boolean;
+} {
+  const applicable = entries.filter(
+    (entry) =>
+      (phase === "target"
+        ? entry.targets !== undefined
+        : entry.targets === undefined) &&
+      transformEntryApplies(entry, environmentId, targetId),
   );
   return {
     specs: applicable.map((entry) => ({
       plugin: entry.plugin,
-      scoped: entry.environments !== undefined,
+      environmentScoped: entry.environments !== undefined,
+      targetScoped: entry.targets !== undefined,
     })),
-    scoped: applicable.some((entry) => entry.environments !== undefined),
+    environmentScoped: applicable.some(
+      (entry) => entry.environments !== undefined,
+    ),
+    targetScoped: applicable.some((entry) => entry.targets !== undefined),
+  };
+}
+
+async function applyTargetDefines(
+  input: { code: string; map?: string; metadata?: Record<string, unknown> },
+  request: WorkerRequest,
+  scopeId: string,
+): Promise<{ code: string; map?: string; metadata?: Record<string, unknown> }> {
+  const defines = request.defines[scopeId] ?? {};
+  if (Object.keys(defines).length === 0) return input;
+  const result = await transformAsync(input.code, {
+    filename: request.realPath,
+    sourceMaps: Boolean(request.sourceMap),
+    inputSourceMap:
+      request.sourceMap && input.map ? JSON.parse(input.map) : undefined,
+    parserOpts: {
+      plugins: [
+        ...(request.syntax.jsx ? ["jsx"] : []),
+        ...(request.syntax.ts
+          ? [
+              ["typescript", { isTSX: request.syntax.jsx }] as [
+                "typescript",
+                { isTSX: boolean },
+              ],
+            ]
+          : []),
+      ],
+    },
+    plugins: [
+      function targetDefinesBabelPlugin(api: {
+        types: typeof import("@babel/types");
+      }) {
+        const t = api.types;
+        return {
+          name: "bundler-target-defines",
+          visitor: {
+            Identifier(identifierPath: {
+              node: { name: string };
+              isReferencedIdentifier(): boolean;
+              scope: { hasBinding(name: string): boolean };
+              parentPath?: {
+                isObjectProperty(value?: Record<string, unknown>): boolean;
+                node: { shorthand?: boolean };
+              };
+              replaceWith(node: import("@babel/types").Expression): void;
+            }) {
+              const name = identifierPath.node.name;
+              if (
+                !Object.prototype.hasOwnProperty.call(defines, name) ||
+                !identifierPath.isReferencedIdentifier() ||
+                identifierPath.scope.hasBinding(name)
+              ) {
+                return;
+              }
+              if (
+                identifierPath.parentPath?.isObjectProperty({
+                  shorthand: true,
+                })
+              ) {
+                identifierPath.parentPath.node.shorthand = false;
+              }
+              identifierPath.replaceWith(t.valueToNode(defines[name]));
+            },
+          },
+        };
+      },
+    ],
+  });
+  if (!result?.code) {
+    throw new Error(
+      `Target define transform produced no code for '${request.id}'.`,
+    );
+  }
+  return {
+    code: result.code,
+    map: result.map ? JSON.stringify(result.map) : input.map,
+    metadata: input.metadata,
   };
 }
 
@@ -644,10 +993,16 @@ async function applyCachedBabelPipeline(
   if (specs.length === 0) {
     return { code, map };
   }
+  const environmentScoped = specs.some(
+    (entry) => entry.environmentScoped || entry.targetScoped,
+  );
+  const targetScoped = specs.some((entry) => entry.targetScoped);
   const key = contentHash(
     JSON.stringify({
-      format: 2,
-      moduleIdentity: request.moduleIdentity,
+      format: 6,
+      moduleIdentity: environmentScoped
+        ? request.moduleIdentity
+        : sharedTransformIdentity(request.moduleIdentity),
       codeHash: contentHash(code),
       mapHash: map ? contentHash(map) : null,
       specs,
@@ -660,8 +1015,10 @@ async function applyCachedBabelPipeline(
           }
         }),
       ),
-      envId,
-      target: envId ? request.targets[envId] : undefined,
+      environmentId:
+        environmentScoped && envId ? request.environments[envId] : undefined,
+      targetId: targetScoped && envId ? request.targetIds[envId] : undefined,
+      platform: targetScoped && envId ? request.targets[envId] : undefined,
       syntax: request.syntax,
       buildMode: request.buildMode,
       resolutionMeta: request.resolutionMeta,
@@ -674,7 +1031,7 @@ async function applyCachedBabelPipeline(
     }),
   );
   const cachePath = path.join(
-    request.cacheDir,
+    request.sharedCacheDir,
     "transform-pipelines",
     `${key}.json`,
   );
@@ -730,7 +1087,7 @@ async function applyCachedCoreTransform(
   };
   const key = contentHash(
     JSON.stringify({
-      format: 2,
+      format: 6,
       moduleIdentity: request.moduleIdentity,
       canonicalPath: request.canonicalPath ?? request.moduleIdentity,
       pkg: {
@@ -749,7 +1106,11 @@ async function applyCachedCoreTransform(
         : null,
     }),
   );
-  const cachePath = path.join(request.cacheDir, "core-variants", `${key}.json`);
+  const cachePath = path.join(
+    request.sharedCacheDir,
+    "core-variants",
+    `${key}.json`,
+  );
   const cached = await readJsonIfExists<TransformResult>(cachePath);
   if (cached) {
     return cached;
@@ -770,7 +1131,7 @@ async function applyCachedCoreTransform(
       dev,
     },
     {
-      importAttrAllow: ["json", "url", "raw", "base64", "assetPath"],
+      importAttrAllow: ["json"],
       generateModuleOutput: false,
       sourceMap: request.sourceMap
         ? {
@@ -788,8 +1149,9 @@ async function applyCachedCoreTransform(
 
 async function transformAssetFile(
   request: WorkerRequest,
-): Promise<Record<string, TransformResult>> {
-  const { transformAsset } = await import("./transform/asset.js");
+): Promise<TransformFileOutput> {
+  const { prepareAssetTransform, transformAsset } =
+    await import("./transform/asset.js");
   const bytes = request.sourceBytes;
   if (!bytes) {
     throw new Error(
@@ -802,41 +1164,99 @@ async function transformAssetFile(
       `Asset '${request.canonicalPath ?? request.realPath}' has no portable asset identity.`,
     );
   }
-  const intent =
-    request.importIntent === "module" ? "url" : request.importIntent;
+  const representationBase = request.resolutionMeta?.representationBase;
+  const representation =
+    typeof representationBase === "string"
+      ? representationBase
+      : request.importRepresentation;
   if (
-    intent !== "url" &&
-    intent !== "raw" &&
-    intent !== "base64" &&
-    intent !== "assetPath"
+    representation !== "url" &&
+    representation !== "url_and_deps_array" &&
+    representation !== "raw" &&
+    representation !== "base64" &&
+    representation !== "image-reference-with-size"
   ) {
-    throw new Error(`Unsupported asset intent '${String(intent)}'.`);
+    throw new Error(
+      `Unsupported built-in representation '${String(representation)}'.`,
+    );
   }
-  const resultsByHmrMode = new Map<boolean, TransformResult>();
-  return Object.fromEntries(
+  const normalModuleIdentity = request.resolutionMeta?.normalModuleIdentity;
+  const normalType = request.resolutionMeta?.normalType;
+  const primaryOutputType = request.resolutionMeta?.primaryOutputType;
+  const createInput = (
+    envId: string,
+  ): import("./transform/asset.js").AssetTransformInput => ({
+    id: request.id,
+    moduleIdentity: request.moduleIdentity,
+    canonicalPath: request.canonicalPath ?? request.moduleIdentity,
+    realPath: request.realPath,
+    bytes,
+    representation,
+    assetId,
+    normalModuleIdentity:
+      typeof normalModuleIdentity === "string" ? normalModuleIdentity : assetId,
+    normalType:
+      normalType === "javascript" ||
+      normalType === "css" ||
+      normalType === "asset"
+        ? normalType
+        : ("asset" as const),
+    primaryOutputType:
+      typeof primaryOutputType === "string" ? primaryOutputType : "asset",
+    requestedEnvironment:
+      typeof request.resolutionMeta?.requestedEnvironment === "string"
+        ? request.resolutionMeta.requestedEnvironment
+        : undefined,
+    requestedTarget:
+      typeof request.resolutionMeta?.requestedTarget === "string"
+        ? request.resolutionMeta.requestedTarget
+        : undefined,
+    requestedUrlMode:
+      request.resolutionMeta?.requestedUrlMode === "public" ||
+      request.resolutionMeta?.requestedUrlMode === "module-relative"
+        ? request.resolutionMeta.requestedUrlMode
+        : undefined,
+    pkg: request.pkg,
+    envs: request.allEnvIds ?? request.envs,
+    envId,
+    dev: {
+      hmr: request.dev?.hmr === true && request.targets[envId] === "browser",
+    },
+  });
+  const preparation = prepareAssetTransform(createInput(request.envs[0]));
+  const requests = preparation.prepared.importRequests;
+  const requestsByEnv = Object.fromEntries(
+    request.envs.map((envId) => [envId, requests]),
+  );
+  const resolvedImportsByEnv =
+    requests.length > 0
+      ? await requestCoordinator<ResolvedImportsByEnv>({
+          type: "resolve-imports",
+          requestsByEnv,
+        })
+      : {};
+  const resultCache = new Map<string, TransformResult>();
+  const resultsByEnv = Object.fromEntries(
     request.envs.map((envId) => {
-      const hmr =
-        request.dev?.hmr === true && request.targets[envId] === "browser";
-      let result = resultsByHmrMode.get(hmr);
+      const input = createInput(envId);
+      const resolved = resolvedImportsByEnv[envId] ?? {};
+      const cacheKey = JSON.stringify({
+        hmr: input.dev?.hmr,
+        resolved,
+      });
+      let result = resultCache.get(cacheKey);
       if (!result) {
-        result = transformAsset({
-          id: request.id,
-          moduleIdentity: request.moduleIdentity,
-          canonicalPath: request.canonicalPath ?? request.moduleIdentity,
-          realPath: request.realPath,
-          bytes,
-          intent,
-          assetId,
-          pkg: request.pkg,
-          envs: request.allEnvIds ?? request.envs,
-          envId,
-          dev: { hmr },
-        });
-        resultsByHmrMode.set(hmr, result);
+        result = transformAsset(input, resolved, preparation);
+        resultCache.set(cacheKey, result);
       }
       return [envId, result];
     }),
   );
+  return {
+    resultsByEnv,
+    dependencyRequestsByEnv: requestsByEnv,
+    resolvedImportsByEnv,
+  };
 }
 
 async function transformCssFile(
@@ -1022,28 +1442,58 @@ async function applyBabelStage(
   const plugins = await Promise.all(
     applicableSpecs.map(async (entry, index) => {
       const spec = entry.plugin;
-      const pluginEnvId = entry.scoped ? envId : undefined;
+      const pluginEnvId =
+        entry.environmentScoped || entry.targetScoped ? envId : undefined;
       const loaded = await loadBabelPlugin(spec.modulePath);
       const pluginOptions = { ...(spec.options ?? {}) };
       delete pluginOptions.__bundlerExcludeNodeModules;
+      const environmentId = pluginEnvId
+        ? request.environments[pluginEnvId]
+        : undefined;
       return [
         loaded,
         {
           ...pluginOptions,
-          envs: request.envs,
+          environments: Array.from(
+            new Set(
+              request.envs.map((scopeId) => request.environments[scopeId]),
+            ),
+          ),
+          targets: Array.from(
+            new Set(request.envs.map((scopeId) => request.targetIds[scopeId])),
+          ),
           ...(pluginEnvId
-            ? { envId: pluginEnvId, target: request.targets[pluginEnvId] }
+            ? {
+                environmentId,
+                ...(entry.targetScoped
+                  ? {
+                      targetId: request.targetIds[pluginEnvId],
+                      platform: request.targets[pluginEnvId],
+                    }
+                  : {}),
+              }
             : {}),
           filePath: request.realPath,
-          id: request.id,
-          moduleIdentity: request.moduleIdentity,
+          id:
+            entry.environmentScoped || entry.targetScoped
+              ? request.id
+              : sharedTransformIdentity(request.id),
+          moduleIdentity:
+            entry.environmentScoped || entry.targetScoped
+              ? request.moduleIdentity
+              : sharedTransformIdentity(request.moduleIdentity),
           buildMode: request.buildMode ?? "development",
           pkg: request.pkg,
           syntax: request.syntax,
+          representation: request.importRepresentation,
           format: request.resolutionMeta?.format,
           reactCjsEnv: request.resolutionMeta?.reactCjsEnv,
         },
-        `${pluginEnvId ?? "shared"}:${index}:${spec.modulePath}`,
+        `${environmentId ?? "shared"}:${
+          entry.targetScoped
+            ? (request.targetIds[pluginEnvId ?? ""] ?? "shared")
+            : "all-targets"
+        }:${index}:${spec.modulePath}`,
       ] as const;
     }),
   );
@@ -1245,6 +1695,30 @@ async function loadBabelPlugin(modulePath: string): Promise<unknown> {
   return plugin;
 }
 
+async function loadRepresentationTransform(
+  modulePath: string,
+): Promise<
+  (
+    context: WorkerRepresentationTransformContext,
+    options: Record<string, unknown>,
+  ) =>
+    | Promise<WorkerRepresentationTransformResult>
+    | WorkerRepresentationTransformResult
+> {
+  const cached = representationTransformCache.get(modulePath);
+  if (cached) return cached;
+  const imported = await import(pathToFileURL(modulePath).href);
+  const transform =
+    imported.transformRepresentation ?? imported.default ?? imported;
+  if (typeof transform !== "function") {
+    throw new Error(
+      `Representation worker module '${modulePath}' must export a transform function.`,
+    );
+  }
+  representationTransformCache.set(modulePath, transform);
+  return transform;
+}
+
 function buildBaseModuleKey(request: WorkerRequest): string {
   const envHashes = Object.fromEntries(
     Object.entries(request.codeByEnv ?? {}).map(([envId, code]) => [
@@ -1287,16 +1761,20 @@ function buildBaseModuleKey(request: WorkerRequest): string {
       name: request.pkg.name,
       version: request.pkg.version,
     },
-    envs: [...request.envs].sort(),
-    targets: Object.fromEntries(
-      Object.entries(request.targets).sort(([left], [right]) =>
-        left.localeCompare(right),
-      ),
-    ),
+    environment: Array.from(
+      new Set(request.envs.map((scopeId) => request.environments[scopeId])),
+    ).sort(),
+    targetVariants: request.envs
+      .map((scopeId) => ({
+        targetId: request.targetIds[scopeId],
+        platform: request.targets[scopeId],
+        defines: request.defines[scopeId],
+      }))
+      .sort((left, right) => left.targetId.localeCompare(right.targetId)),
     syntax: request.syntax,
     codeHash: contentHash(request.sourceBytes ?? request.code),
     moduleType: request.moduleType ?? "javascript",
-    importIntent: request.importIntent ?? "module",
+    importRepresentation: request.importRepresentation,
     canonicalPath: request.canonicalPath ?? request.moduleIdentity,
     buildMode: request.buildMode ?? "development",
     dev: {
@@ -1335,7 +1813,7 @@ function buildModuleKey(
               {
                 target: value.target,
                 type: value.type,
-                intent: value.intent,
+                representation: value.representation,
                 meta: value.meta,
               },
             ]),

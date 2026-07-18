@@ -3,14 +3,15 @@ import crypto from "node:crypto";
 export function createAssetReference(assetId) {
   const digest = crypto
     .createHash("sha1")
-    .update(`${assetId}\0asset-url`)
+    .update(`${assetId}\0output-url`)
     .digest("hex");
   const short = BigInt(`0x${digest}`).toString(36).slice(0, 10);
   return {
-    id: `${assetId}::asset-url`,
-    kind: "asset-url",
+    id: `${assetId}::output-url`,
+    kind: "output-url",
     symbol: `__bundler_${short}_asset_url`,
-    assetId,
+    outputId: assetId,
+    outputType: "asset",
   };
 }
 

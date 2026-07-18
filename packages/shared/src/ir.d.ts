@@ -28,11 +28,6 @@ export type ReexportNamed = {
 export type ExportStar = {
   source: string;
 };
-export type DynamicImport = {
-  source: string;
-  hashKey: string;
-  moduleId?: string;
-};
 export type ConditionalImport = {
   source: string;
   condition: ConditionExpr;
@@ -61,7 +56,6 @@ export type FileIR = {
   reexportsNamed: ReexportNamed[];
   exportStars: ExportStar[];
   exportsLocal: ExportLocal[];
-  dynamicImports: DynamicImport[];
   conditionalImports: ConditionalImport[];
   discoveredEntrypoints: string[];
   importRanges: Array<[number, number]>;
@@ -83,7 +77,6 @@ export type IRHeader = Pick<
   | "exportStars"
   | "exportsLocal"
   | "flags"
-  | "dynamicImports"
   | "conditionalImports"
   | "discoveredEntrypoints"
   | "importRanges"

@@ -19,11 +19,17 @@ test("StyleX commerce works in production without browser code in RSC bundles", 
     timeout: 60_000,
   });
   const manifest = await readManifest();
-  const clientManifest = await readClientManifest();
-  expectClientComponentParity(clientManifest);
+  const clientReferences = manifest.metadata.rsc.clientReferenceBundles;
+  expect(manifest.metadata.rsc.inline).toBe(true);
+  expectClientComponentParity(clientReferences);
+  await expect(
+    fs.access(path.join(exampleDir, "dist/rsc-client-manifest.json")),
+  ).rejects.toMatchObject({ code: "ENOENT" });
   const serverBundle = manifest.bundles.find(
     (bundle) =>
-      bundle.envId === "rsc" && bundle.entryId.endsWith("src/server.jsx"),
+      bundle.targetIds.includes("server") &&
+      bundle.environmentIds.includes("react.server") &&
+      bundle.entryId.endsWith("src/server.jsx"),
   );
   const serverCode = await fs.readFile(
     path.join(exampleDir, "dist", serverBundle.fileName),
@@ -60,7 +66,7 @@ test("StyleX commerce works in production without browser code in RSC bundles", 
 
   await withServer("start", async (baseUrl) => {
     await expectHealthyRoutes(baseUrl);
-    await expectClientChunks(baseUrl, clientManifest);
+    await expectClientChunks(baseUrl, manifest, clientReferences);
   });
 });
 
@@ -95,7 +101,7 @@ test("StyleX commerce hot reloads global CSS with RSC refreshes", async () => {
         const message = await nextMessage;
         expect(message.type).toBe("rsc-refresh");
         expect(message.styles).toHaveLength(1);
-        expect(message.styles[0]).toContain("/assets/stylex.all.");
+        expect(message.styles[0]).toContain("/assets/stylex.all.all.");
         expect(
           new URL(message.styles[0], baseUrl).searchParams.get("key"),
         ).toBe(style.bundleKey);
@@ -140,9 +146,7 @@ test("StyleX commerce hot reloads client component styles", async () => {
         expect(message.changedBundles).toEqual([
           expect.stringMatching(/client:.*\/src\/client\/HomeCounter\.jsx$/),
         ]);
-        expect(Object.keys(message.rscChunks ?? {})).toEqual([
-          expect.stringMatching(/\/src\/client\/HomeCounter\.jsx$/),
-        ]);
+        expect(message.rscModules).toEqual(["/src/client/HomeCounter.jsx"]);
 
         const clientChunk = await fetch(new URL(message.imports[0], baseUrl));
         expect(clientChunk.status).toBe(200);
@@ -206,8 +210,8 @@ async function expectColocatedStyleX() {
   }
 }
 
-function expectClientComponentParity(clientManifest) {
-  const ids = Object.values(clientManifest).map((record) => record.id);
+function expectClientComponentParity(clientReferences) {
+  const ids = Object.keys(clientReferences);
   for (const fileName of [
     "CartContext.jsx",
     "CartTable.jsx",
@@ -217,7 +221,7 @@ function expectClientComponentParity(clientManifest) {
     "HomeCounter.jsx",
     "ProductActions.jsx",
   ]) {
-    expect(ids.some((id) => id.endsWith(`/src/client/${fileName}`))).toBe(true);
+    expect(ids).toContain(`/src/client/${fileName}`);
   }
 }
 
@@ -271,10 +275,8 @@ function waitForWebSocketMessage(socket) {
   });
 }
 
-async function expectClientChunks(baseUrl, clientManifest) {
-  const urls = Array.from(
-    new Set(Object.values(clientManifest).map((record) => record.url)),
-  );
+async function expectClientChunks(baseUrl, manifest, clientReferences) {
+  const urls = clientReferenceChunkUrls(manifest, clientReferences);
   expect(urls.length).toBeGreaterThanOrEqual(7);
   for (const url of urls) {
     expect(url).toMatch(/^\/[^/].*\.js$/);
@@ -291,11 +293,16 @@ async function readManifest() {
   );
 }
 
-async function readClientManifest() {
-  return JSON.parse(
-    await fs.readFile(
-      path.join(exampleDir, "dist/rsc-client-manifest.json"),
-      "utf8",
+function clientReferenceChunkUrls(manifest, clientReferences) {
+  const entrypoints = Object.values(manifest.entrypoints ?? {});
+  return Array.from(
+    new Set(
+      Object.values(clientReferences).flatMap((reference) => {
+        const entrypoint = entrypoints.find(
+          (candidate) => candidate.bundleId === reference.client,
+        );
+        return (entrypoint?.bundles ?? []).map((fileName) => `/${fileName}`);
+      }),
     ),
   );
 }
@@ -309,8 +316,6 @@ async function withServer(script, run) {
       "@bundler/assets/register",
       "--require",
       "@bundler/react-rsc-plugin/register-source-maps",
-      "--conditions",
-      "react-server",
       `scripts/${script}.mjs`,
     ],
     {

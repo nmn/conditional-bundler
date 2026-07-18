@@ -6,19 +6,21 @@
   "scripts": {
     "clean": "node scripts/clean.mjs",
     "build": "node scripts/clean.mjs && NODE_ENV=production BUNDLER_MODE=production bundler build --config bundler.config.mjs",
-    "start": "NODE_ENV=production node --import @bundler/assets/register --require @bundler/react-rsc-plugin/register-source-maps --conditions react-server scripts/start.mjs",
-    "prod": "node scripts/clean.mjs && NODE_ENV=production BUNDLER_MODE=production bundler build --config bundler.config.mjs && NODE_ENV=production node --import @bundler/assets/register --require @bundler/react-rsc-plugin/register-source-maps --conditions react-server scripts/start.mjs",
-    "dev": "NODE_ENV=development BUNDLER_MODE=development node --import @bundler/assets/register --require @bundler/react-rsc-plugin/register-source-maps --conditions react-server scripts/dev.mjs"
+    "start": "NODE_ENV=production node --import @bundler/assets/register --require @bundler/react-rsc-plugin/register-source-maps scripts/start.mjs",
+    "prod": "node scripts/clean.mjs && NODE_ENV=production BUNDLER_MODE=production bundler build --config bundler.config.mjs && NODE_ENV=production node --import @bundler/assets/register --require @bundler/react-rsc-plugin/register-source-maps scripts/start.mjs",
+    "dev": "NODE_ENV=development BUNDLER_MODE=development node --import @bundler/assets/register --require @bundler/react-rsc-plugin/register-source-maps scripts/dev.mjs"
   },
   "dependencies": {
     "@bundler/assets": "workspace:*",
+    "@bundler/browser-package-resolver": "workspace:*",
     "@bundler/bundler": "workspace:*",
     "@bundler/cjs-to-esm": "workspace:*",
+    "@bundler/node-package-resolver": "workspace:*",
     "@bundler/react-rsc-plugin": "workspace:*",
+    "@bundler/react-server-dom": "workspace:*",
     "@bundler/rsc-example-server": "workspace:*",
     "@bundler/tailwind-plugin": "workspace:*",
     "react": "19.2.5",
-    "react-dom": "19.2.5",
-    "react-server-dom-webpack": "19.2.5"
+    "react-dom": "19.2.5"
   }
 }

@@ -4,7 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Socket } from "node:net";
 import { buildProject, type BuildResult } from "../builder.js";
-import type { BundlerConfig } from "../config.js";
+import { parseBuildScopeId, type BundlerConfig } from "../config.js";
 import { resolveDevOptions } from "./options.js";
 import { readDevAsset } from "./conditional-assets.js";
 import {
@@ -20,6 +20,7 @@ import {
 } from "./server.js";
 
 export type RscDevBundle = {
+  id: string;
   envId: string;
   entryId: string;
   fileName: string;
@@ -165,8 +166,7 @@ export async function startRscDevServer(
         const hasClientCode =
           (patchWithImports?.updates.length ?? 0) > 0 ||
           (patchWithImports?.imports?.length ?? 0) > 0;
-        const refreshesRsc =
-          Object.keys(patchWithImports?.rscChunks ?? {}).length > 0;
+        const refreshesRsc = (patchWithImports?.rscModules?.length ?? 0) > 0;
         if (patchWithImports && hasClientCode) {
           broadcast(clients, await hmrUpdates.publish(patchWithImports));
         }
@@ -277,6 +277,7 @@ export function classifyRscDevChange({
   next,
   patch,
   clientEntryId,
+  serverEntryId,
 }: {
   previous: BuildResult;
   next: BuildResult;
@@ -291,18 +292,25 @@ export function classifyRscDevChange({
   if (!clientBundle) {
     return { type: "reload", reason: "missing-client-bundle" };
   }
+  const serverBundle = findBundle(next, serverEntryId);
+  if (
+    serverBundle &&
+    hasChangedServerJavaScriptMetadata(previous, next, serverBundle)
+  ) {
+    return { type: "reload", reason: "server-transform-metadata-changed" };
+  }
   const clientEnv = clientBundle.envId;
   const patchedBundleKeys = new Set(patch.changedBundles);
   const outputChangedKeys = collectChangedOutputKeys(previous, next);
   if (patch.changedBundles.length === 0) {
+    if ((patch.styles?.length ?? 0) > 0) {
+      return { type: "patch", patch };
+    }
     if (outputChangedKeys.length > 0) {
       return {
         type: "reload",
         reason: "bundle-output-changed-without-patch",
       };
-    }
-    if ((patch.styles?.length ?? 0) > 0) {
-      return { type: "patch", patch };
     }
     return { type: "noop" };
   }
@@ -320,6 +328,33 @@ export function classifyRscDevChange({
   return { type: "patch", patch };
 }
 
+function hasChangedServerJavaScriptMetadata(
+  previous: BuildResult,
+  next: BuildResult,
+  serverBundle: BuildResult["bundles"][number],
+): boolean {
+  const before = previous.hmr?.moduleMetadata ?? {};
+  const after = next.hmr?.moduleMetadata ?? {};
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  for (const key of keys) {
+    const prior = before[key];
+    const current = after[key];
+    const record = current ?? prior;
+    if (
+      !record ||
+      record.environmentId !== serverBundle.environmentId ||
+      record.targetId !== serverBundle.targetId ||
+      !/\.(?:[cm]?js|jsx|tsx?|mts|cts)$/.test(record.filePath)
+    ) {
+      continue;
+    }
+    if (!prior || !current || prior.hash !== current.hash) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function addClientPatchImports(
   patch: HmrPatchPlan,
   build: BuildResult,
@@ -327,11 +362,16 @@ export function addClientPatchImports(
   version?: number,
   rootURL = "/",
 ): HmrPatchPlan {
+  const clientBundle = findBundle(build, clientEntryId);
   const importedBundles = patch.changedBundles
     .map((key) => {
       const bundle = findBundleForLogicalKey(build, key);
-      const separator = key.indexOf(":");
-      const entryId = separator === -1 ? key : key.slice(separator + 1);
+      const entryId =
+        bundle?.entrypoints?.find(
+          (entrypoint) => `${entrypoint.envId}:${entrypoint.entryId}` === key,
+        )?.entryId ??
+        bundle?.entryId ??
+        key;
       return bundle ? { bundle, entryId, key } : undefined;
     })
     .filter((item): item is NonNullable<typeof item> => {
@@ -339,21 +379,31 @@ export function addClientPatchImports(
         return false;
       }
       return (
+        item.bundle.id !== clientBundle?.id &&
         item.entryId !== clientEntryId &&
         !item.entryId.endsWith(clientEntryId) &&
         !entryBasenameMatches(item.entryId, clientEntryId)
       );
     });
-  const imports = importedBundles.map(
-    ({ bundle, entryId }) =>
-      `${joinRootURL(rootURL, bundle.fileName)}?hmr=${encodeURIComponent(bundle.fileName)}&rsc-id=${encodeURIComponent(entryId)}${version == null ? "" : `&v=${encodeURIComponent(String(version))}`}`,
-  );
+  const imports = importedBundles.map(({ bundle, entryId }) => {
+    const rscIds = findRscClientReferenceIds(build, bundle);
+    const cacheIds = rscIds.length > 0 ? rscIds : [entryId];
+    const rscIdQuery = cacheIds
+      .map((rscId) => `&rsc-id=${encodeURIComponent(rscId)}`)
+      .join("");
+    return `${joinRootURL(rootURL, bundle.fileName)}?hmr=${encodeURIComponent(bundle.fileName)}${rscIdQuery}${version == null ? "" : `&v=${encodeURIComponent(String(version))}`}`;
+  });
   const importedBundleKeys = new Set(importedBundles.map(({ key }) => key));
   const updates = patch.updates.filter(
     (update) => !importedBundleKeys.has(update.bundleKey),
   );
-  const chunkUpdates = Object.fromEntries(
-    importedBundles.map(({ bundle, entryId }) => [entryId, bundle.fileName]),
+  const rscModules = Array.from(
+    new Set(
+      importedBundles.flatMap(({ bundle, entryId }) => {
+        const rscIds = findRscClientReferenceIds(build, bundle);
+        return rscIds.length > 0 ? rscIds : [entryId];
+      }),
+    ),
   );
   if (imports.length === 0) {
     return patch;
@@ -362,7 +412,7 @@ export function addClientPatchImports(
     ...patch,
     updates,
     imports,
-    rscChunks: chunkUpdates,
+    rscModules,
   };
 }
 
@@ -444,8 +494,14 @@ export async function syncChangedRscNodeModules(
   version = Date.now(),
 ): Promise<void> {
   const runtime = globalThis as {
-    __BUNDLER_RSC_NODE_MODULE_CACHE__?: Map<unknown, unknown>;
-    __BUNDLER_RSC_CHUNKS__?: Record<string, string>;
+    __BUNDLER_RSC_IMPLEMENTATIONS__?: Map<
+      string,
+      {
+        status: string;
+        promise?: Promise<unknown>;
+        value?: unknown;
+      }
+    >;
   };
   const previousOutputs = collectLogicalOutputs(previous);
   const changes = next.bundles.flatMap((bundle) =>
@@ -461,7 +517,9 @@ export async function syncChangedRscNodeModules(
       .filter(
         (entrypoint) =>
           entrypoint.exportMode === "dynamic" &&
-          config.envs[entrypoint.envId]?.target === "browser",
+          config.targets[
+            entrypoint.targetId ?? parseBuildScopeId(entrypoint.envId).targetId
+          ]?.platform === "node",
       )
       .filter((entrypoint) => {
         const previousOutput = previousOutputs.get(
@@ -477,17 +535,16 @@ export async function syncChangedRscNodeModules(
       .map((entrypoint) => ({
         entryId: entrypoint.entryId,
         fileName: bundle.fileName,
-      })),
+        rscIds: findRscClientReferenceIds(next, bundle),
+      }))
+      .filter((change) => change.rscIds.length > 0),
   );
   if (changes.length === 0) {
     return;
   }
 
-  const cache = (runtime.__BUNDLER_RSC_NODE_MODULE_CACHE__ ??= new Map<
-    unknown,
-    unknown
-  >());
-  const chunks = (runtime.__BUNDLER_RSC_CHUNKS__ ??= {});
+  const implementations = (runtime.__BUNDLER_RSC_IMPLEMENTATIONS__ ??=
+    new Map());
   for (const [index, change] of changes.entries()) {
     const href = pathToFileURL(
       path.join(config.outputs.outDir, change.fileName),
@@ -495,10 +552,60 @@ export async function syncChangedRscNodeModules(
     const module = await import(
       `${href}?bundler-rsc-hmr=${encodeURIComponent(`${version}-${index}`)}`
     );
-    chunks[change.entryId] = change.fileName;
-    cache.set(change.entryId, module);
-    cache.set(change.fileName, module);
+    for (const id of change.rscIds) {
+      for (const [key, entry] of implementations) {
+        if (!key.startsWith(`${id}#`)) continue;
+        const exportName = key.slice(id.length + 1);
+        entry.status = "fulfilled";
+        entry.promise = undefined;
+        entry.value =
+          exportName === "*"
+            ? module
+            : exportName === ""
+              ? module.default
+              : module[exportName];
+      }
+    }
   }
+}
+
+function findRscClientReferenceIds(
+  build: BuildResult,
+  bundle: BuildResult["bundles"][number],
+): string[] {
+  const rscMetadata = build.manifest.metadata?.rsc;
+  if (
+    !rscMetadata ||
+    typeof rscMetadata !== "object" ||
+    Array.isArray(rscMetadata)
+  ) {
+    return [];
+  }
+  const clientReferenceBundles = (
+    rscMetadata as {
+      clientReferenceBundles?: unknown;
+    }
+  ).clientReferenceBundles;
+  if (
+    !clientReferenceBundles ||
+    typeof clientReferenceBundles !== "object" ||
+    Array.isArray(clientReferenceBundles)
+  ) {
+    return [];
+  }
+  return Object.entries(clientReferenceBundles)
+    .filter(([, bundleIds]) => {
+      if (
+        !bundleIds ||
+        typeof bundleIds !== "object" ||
+        Array.isArray(bundleIds)
+      ) {
+        return false;
+      }
+      return Object.values(bundleIds).includes(bundle.id);
+    })
+    .map(([clientReferenceId]) => clientReferenceId)
+    .sort();
 }
 
 function findBundleForLogicalKey(
@@ -615,7 +722,7 @@ function matchAssetRequests(pathname: string): string[] {
 function findBundle(
   build: BuildResult,
   entryId: string,
-): RscDevBundle | undefined {
+): BuildResult["bundles"][number] | undefined {
   const direct = build.bundles.find(
     (bundle) =>
       bundle.entryId === entryId ||
@@ -627,7 +734,8 @@ function findBundle(
   }
   return build.bundles.find(
     (bundle) =>
-      bundle.envId === entryId &&
+      ((bundle.targetIds ?? []).includes(entryId) ||
+        bundle.envId === entryId) &&
       path.basename(bundle.entryId) === "runtime-client.js",
   );
 }

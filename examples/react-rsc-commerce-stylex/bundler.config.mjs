@@ -1,31 +1,35 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { plugin } from "@bundler/bundler";
+import { plugin, resolver } from "@bundler/bundler";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.BUNDLER_MODE === "development";
 
 export default {
-  envs: {
-    rsc: {
-      target: "node",
-      conditions: ["react-server", "node"],
+  targets: {
+    server: {
+      platform: "node",
+      packageResolver: resolver("@bundler/node-package-resolver"),
     },
     client: {
-      target: "browser",
-      conditions: ["browser"],
+      platform: "browser",
+      packageResolver: resolver("@bundler/browser-package-resolver"),
     },
+  },
+  environments: {
+    "react.server": {},
+    "react.client": {},
   },
   entries: [
     {
-      id: "server",
       path: path.join(root, "src/server.jsx"),
-      envs: ["rsc"],
+      environment: "react.server",
+      targets: ["server"],
     },
   ],
   outputs: {
     outDir: path.join(root, "dist"),
-    fileName: "[entry].[env].[hash].js",
+    fileName: "[entry].[target].[environment].[hash].js",
     manifestFile: "manifest.json",
     sourceMap: "external",
   },

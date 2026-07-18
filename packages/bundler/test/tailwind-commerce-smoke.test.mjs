@@ -18,11 +18,15 @@ test("Tailwind commerce emits one linked stylesheet and works in production", as
     timeout: 60_000,
   });
   const manifest = await readManifest();
-  const clientManifest = await readClientManifest();
-  expectClientComponentParity(clientManifest);
+  const clientReferences = manifest.metadata.rsc.clientReferenceBundles;
+  expect(manifest.metadata.rsc.inline).toBe(true);
+  expectClientComponentParity(clientReferences);
+  await expect(
+    fs.access(path.join(exampleDir, "dist/rsc-client-manifest.json")),
+  ).rejects.toMatchObject({ code: "ENOENT" });
   const styles = manifest.assets.filter((asset) => asset.type === "style");
   expect(styles).toHaveLength(1);
-  expect(styles[0].fileName).toMatch(/^tailwind\.all\.[a-z0-9]+\.css$/);
+  expect(styles[0].fileName).toMatch(/^tailwind\.all\.all\.[a-z0-9]+\.css$/);
   const css = await fs.readFile(
     path.join(exampleDir, "dist", styles[0].fileName),
     "utf8",
@@ -36,7 +40,9 @@ test("Tailwind commerce emits one linked stylesheet and works in production", as
 
   const serverBundle = manifest.bundles.find(
     (bundle) =>
-      bundle.envId === "rsc" && bundle.entryId.endsWith("src/server.jsx"),
+      bundle.targetIds.includes("server") &&
+      bundle.environmentIds.includes("react.server") &&
+      bundle.entryId.endsWith("src/server.jsx"),
   );
   const serverCode = await fs.readFile(
     path.join(exampleDir, "dist", serverBundle.fileName),
@@ -47,7 +53,7 @@ test("Tailwind commerce emits one linked stylesheet and works in production", as
 
   await withServer("start", async (baseUrl) => {
     await expectHealthyRoutes(baseUrl);
-    await expectClientChunks(baseUrl, clientManifest);
+    await expectClientChunks(baseUrl, manifest, clientReferences);
   });
 });
 
@@ -84,7 +90,7 @@ test("Tailwind commerce replaces the initial stylesheet during HMR", async () =>
         expect(message.styles).toHaveLength(1);
         const updateUrl = new URL(message.styles[0], baseUrl);
         expect(updateUrl.pathname).toMatch(
-          /^\/assets\/tailwind\.all\.[a-z0-9]+\.css$/,
+          /^\/assets\/tailwind\.all\.all\.[a-z0-9]+\.css$/,
         );
         expect(updateUrl.searchParams.get("key")).toBe(style.bundleKey);
       } finally {
@@ -121,8 +127,8 @@ async function expectHealthyRoutes(baseUrl) {
   expect((await rsc.text()).length).toBeGreaterThan(500);
 }
 
-function expectClientComponentParity(clientManifest) {
-  const ids = Object.values(clientManifest).map((record) => record.id);
+function expectClientComponentParity(clientReferences) {
+  const ids = Object.keys(clientReferences);
   for (const fileName of [
     "CartContext.jsx",
     "CartTable.jsx",
@@ -132,14 +138,12 @@ function expectClientComponentParity(clientManifest) {
     "HomeCounter.jsx",
     "ProductActions.jsx",
   ]) {
-    expect(ids.some((id) => id.endsWith(`/src/client/${fileName}`))).toBe(true);
+    expect(ids).toContain(`/src/client/${fileName}`);
   }
 }
 
-async function expectClientChunks(baseUrl, clientManifest) {
-  const urls = Array.from(
-    new Set(Object.values(clientManifest).map((record) => record.url)),
-  );
+async function expectClientChunks(baseUrl, manifest, clientReferences) {
+  const urls = clientReferenceChunkUrls(manifest, clientReferences);
   expect(urls.length).toBeGreaterThanOrEqual(7);
   for (const url of urls) {
     expect(url).toMatch(/^\/[^/].*\.js$/);
@@ -156,11 +160,16 @@ async function readManifest() {
   );
 }
 
-async function readClientManifest() {
-  return JSON.parse(
-    await fs.readFile(
-      path.join(exampleDir, "dist/rsc-client-manifest.json"),
-      "utf8",
+function clientReferenceChunkUrls(manifest, clientReferences) {
+  const entrypoints = Object.values(manifest.entrypoints ?? {});
+  return Array.from(
+    new Set(
+      Object.values(clientReferences).flatMap((reference) => {
+        const entrypoint = entrypoints.find(
+          (candidate) => candidate.bundleId === reference.client,
+        );
+        return (entrypoint?.bundles ?? []).map((fileName) => `/${fileName}`);
+      }),
     ),
   );
 }
@@ -174,8 +183,6 @@ async function withServer(script, run) {
       "@bundler/assets/register",
       "--require",
       "@bundler/react-rsc-plugin/register-source-maps",
-      "--conditions",
-      "react-server",
       `scripts/${script}.mjs`,
     ],
     {

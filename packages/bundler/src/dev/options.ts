@@ -1,6 +1,12 @@
 import path from "node:path";
 import { findPkgRoot, readJsonIfExists } from "@bundler/shared";
-import type { BundlerConfig, EntrySpec } from "../config.js";
+import {
+  buildScopeId,
+  type BundlerConfig,
+  type EntrySpec,
+  type InternalBundlerConfig,
+  type InternalEntrySpec,
+} from "../config.js";
 
 export type ResolvedDevOptions = {
   hmr: boolean;
@@ -18,8 +24,8 @@ type PackageJson = {
 };
 
 export async function resolveDevOptions(
-  config: BundlerConfig,
-  entries: EntrySpec[],
+  config: BundlerConfig | InternalBundlerConfig,
+  entries: Array<EntrySpec | InternalEntrySpec>,
 ): Promise<ResolvedDevOptions> {
   const hmr = config.dev?.hmr === true;
   const fullReloadOnFailure = config.dev?.fullReloadOnFailure ?? true;
@@ -30,14 +36,25 @@ export async function resolveDevOptions(
   const reactRefreshEnvs = new Set<string>();
 
   if (hmr && reactDetected && reactRefreshConfig !== false) {
-    const explicitEnvs =
-      typeof reactRefreshConfig === "object" ? reactRefreshConfig.envs : null;
-    for (const [envId, envConfig] of Object.entries(config.envs)) {
-      if (explicitEnvs && !explicitEnvs.includes(envId)) {
-        continue;
-      }
-      if (envConfig.target === "browser") {
-        reactRefreshEnvs.add(envId);
+    const explicitEnvironments =
+      typeof reactRefreshConfig === "object"
+        ? reactRefreshConfig.environments
+        : undefined;
+    const explicitTargets =
+      typeof reactRefreshConfig === "object"
+        ? reactRefreshConfig.targets
+        : undefined;
+    for (const [targetId, target] of Object.entries(config.targets)) {
+      if (target.platform !== "browser") continue;
+      if (explicitTargets && !explicitTargets.includes(targetId)) continue;
+      for (const environmentId of Object.keys(config.environments)) {
+        if (
+          explicitEnvironments &&
+          !explicitEnvironments.includes(environmentId)
+        ) {
+          continue;
+        }
+        reactRefreshEnvs.add(buildScopeId(environmentId, targetId));
       }
     }
   }

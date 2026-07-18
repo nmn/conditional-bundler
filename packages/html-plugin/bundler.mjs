@@ -23,12 +23,12 @@ const parse5Package = readPkgSafe(
 export default function htmlBundlerPlugin(options = {}) {
   return {
     name: options.name ?? "html-plugin",
-    resourceFingerprint: `html-plugin-v2:parse5@${parse5Package.version}`,
+    resourceFingerprint: `html-plugin-v3:parse5@${parse5Package.version}`,
     transformDocument(context) {
       if (!context.filePath.toLowerCase().endsWith(".html")) {
         return undefined;
       }
-      if (context.target !== "browser") {
+      if (context.platform !== "browser") {
         throw new Error(
           `HTML entry '${context.filePath}' requires a browser target.`,
         );
@@ -331,9 +331,9 @@ function replaceAssetAttribute(
 ) {
   const reference = {
     id: `${ownerId}::html-asset:${index}:${request}`,
-    kind: "asset-url",
-    symbol: `__bundler_html_${shortHash(`${ownerId}\0${request}`)}_asset_url`,
-    assetId: "",
+    kind: "output-url",
+    outputId: normalizeDocumentRequest(request),
+    outputType: "asset",
     ownerId,
     request: normalizeDocumentRequest(request),
   };
@@ -391,9 +391,9 @@ function replaceSrcsetAttribute(
     const index = nextIndex();
     const reference = {
       id: `${ownerId}::html-asset:${index}:${request}`,
-      kind: "asset-url",
-      symbol: `__bundler_html_${shortHash(`${ownerId}\0${request}`)}_asset_url`,
-      assetId: "",
+      kind: "output-url",
+      outputId: request,
+      outputType: "asset",
       ownerId,
       request,
     };
