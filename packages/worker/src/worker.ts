@@ -199,7 +199,7 @@ const pendingCoordinatorRequests = new Map<
   { resolve: (value: unknown) => void; reject: (error: Error) => void }
 >();
 let nextCoordinatorRequestId = 1;
-const CELL_ARTIFACT_FORMAT = 34;
+const CELL_ARTIFACT_FORMAT = 35;
 const remapping = ((
   remappingModule as unknown as {
     default?: typeof import("@ampproject/remapping").default;

@@ -408,40 +408,37 @@ export { qxx4j03t_value as value, qxx4j03t_bValue as bValue };",
 
 test("normalizes dynamic imports to dependency URL arrays plus parallel native imports", async () => {
   const snapshot = await snapshotFixture("dynamic-import");
-  expect(snapshot).toMatchInlineSnapshot(`
-{
-  "name": "dynamic-import",
-  "output": "const __bundler_ba1ymwhokq_output_url = [new URL("./dynamic-import.browser.cuwbdnum.js", import.meta.url).href];
-
-const ldcpm8z5_default = __bundler_ba1ymwhokq_output_url;
-const a3maoz05l__bundler_dynamic_import = () => Promise.all(ldcpm8z5_default.map(_bundler_dynamic_dependency_url => import(_bundler_dynamic_dependency_url))).then(_bundler_dynamic_modules => _bundler_dynamic_modules[0]);
-async function a3maoz05l_loadFoo() {
-  const mod = await a3maoz05l__bundler_dynamic_import();
-  return mod.foo;
-}
-export { a3maoz05l_loadFoo as loadFoo };",
-}
-`);
+  expect(snapshot.name).toBe("dynamic-import");
+  expect(snapshot.output).toContain(
+    'Object.defineProperty(__bundler_ba1ymwhokq_output_url, "__bundlerModulePrefix"',
+  );
+  expect(snapshot.output).not.toContain(
+    "function a3maoz05l__bundler_dynamic_namespace(",
+  );
+  expect(snapshot.output).toContain(
+    '_bundler_dynamic_modules[0]["__NS__" + ldcpm8z5_default.__bundlerModulePrefix]',
+  );
+  expect(snapshot.output).toContain("return mod.foo;");
+  expect(snapshot.output).toContain("export { a3maoz05l_loadFoo as loadFoo };");
 });
 
 test("dedupes generated dynamic dependency URL imports and loaders", async () => {
   const snapshot = await snapshotFixture("dynamic-import-shared");
-  expect(snapshot).toMatchInlineSnapshot(`
-{
-  "name": "dynamic-import-shared",
-  "output": "const __bundler_50249w60y7_output_url = [new URL("./dynamic-import-shared.browser.sy8ptlff.js", import.meta.url).href];
-
-const csrplpjq_default = __bundler_50249w60y7_output_url;
-const imofsh4g__bundler_dynamic_import = () => Promise.all(csrplpjq_default.map(_bundler_dynamic_dependency_url => import(_bundler_dynamic_dependency_url))).then(_bundler_dynamic_modules => _bundler_dynamic_modules[0]);
-async function imofsh4g_loadA() {
-  return imofsh4g__bundler_dynamic_import();
-}
-async function imofsh4g_loadB() {
-  return imofsh4g__bundler_dynamic_import();
-}
-export { imofsh4g_loadA as loadA, imofsh4g_loadB as loadB };",
-}
-`);
+  expect(snapshot.name).toBe("dynamic-import-shared");
+  expect(
+    snapshot.output.match(
+      /\["__NS__" \+ csrplpjq_default\.__bundlerModulePrefix\]/g,
+    ),
+  ).toHaveLength(1);
+  expect(
+    snapshot.output.match(/const imofsh4g__bundler_dynamic_import =/g),
+  ).toHaveLength(1);
+  expect(
+    snapshot.output.match(/imofsh4g__bundler_dynamic_import\(\)/g),
+  ).toHaveLength(2);
+  expect(snapshot.output).toContain(
+    "export { imofsh4g_loadA as loadA, imofsh4g_loadB as loadB };",
+  );
 });
 
 test("url_and_deps_array links the target-first transitive script closure", async () => {
@@ -4537,6 +4534,35 @@ test("executes dynamically imported bundles with the expected exports", async ()
       `${dynamicBundle.envId}:${dynamicBundle.entryId}`
     ],
   ).toBe(dynamicBundle.fileName);
+  const dynamicCode = await fs.readFile(
+    path.join(bundleDir, dynamicBundle.fileName),
+    "utf8",
+  );
+  const dynamicExports = dynamicCode.match(
+    /const ([a-z0-9]+_foo) = 42;[\s\S]*export \{ \1, (__NS__[a-z0-9]+) \};/,
+  );
+  const uniqueExport = dynamicExports?.[1];
+  const namespaceExport = dynamicExports?.[2];
+  expect(uniqueExport).toBeDefined();
+  expect(namespaceExport).toBeDefined();
+  expect(dynamicCode).not.toMatch(/\bas foo\b/);
+  const dynamicBundleUrl = pathToFileURL(
+    path.join(bundleDir, dynamicBundle.fileName),
+  ).href;
+  const { stdout: dynamicStdout } = await execFileAsync(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    `const namespace = await import(${JSON.stringify(`${dynamicBundleUrl}?unique-exports`)});
+console.log(JSON.stringify({
+  keys: Object.keys(namespace),
+  original: namespace.foo,
+  unique: namespace[${JSON.stringify(uniqueExport)}],
+}));`,
+  ]);
+  expect(JSON.parse(dynamicStdout)).toEqual({
+    keys: [namespaceExport, uniqueExport],
+    unique: 42,
+  });
 
   const bundleUrl = pathToFileURL(
     path.join(bundleDir, entryBundle.fileName),
@@ -4548,4 +4574,276 @@ test("executes dynamically imported bundles with the expected exports", async ()
   ]);
 
   expect(stdout.trim()).toBe("42");
+});
+
+test("emits an empty namespace for dynamic modules without exports", async () => {
+  const projectDir = path.join(outRoot, "dynamic-empty-namespace");
+  const sourceDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(sourceDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({ name: "dynamic-empty-namespace", type: "module" }),
+  );
+  await fs.writeFile(
+    path.join(sourceDir, "index.js"),
+    `export async function inspect() {
+  const namespace = await import("./lazy.js");
+  return {
+    keys: Object.keys(namespace),
+    tag: namespace[Symbol.toStringTag],
+    sideEffect: globalThis.__DYNAMIC_EMPTY_NAMESPACE_SIDE_EFFECT__,
+  };
+}`,
+  );
+  await fs.writeFile(path.join(sourceDir, "lazy.js"), 'import "./effect.js";');
+  await fs.writeFile(
+    path.join(sourceDir, "effect.js"),
+    "globalThis.__DYNAMIC_EMPTY_NAMESPACE_SIDE_EFFECT__ = 42;",
+  );
+
+  const { buildProject: rawBuildProject } = await import("../dist/builder.js");
+  const buildProject = withTestConfig(rawBuildProject);
+  const result = await buildProject(
+    {
+      targets: { browser: { platform: "browser" } },
+      environments: { app: {} },
+      entries: [
+        {
+          path: path.join(sourceDir, "index.js"),
+          environment: "app",
+          targets: ["browser"],
+        },
+      ],
+      outputs: { outDir, fileName: "[entry].[hash].js" },
+      cacheDir: path.join(projectDir, ".cache"),
+      css: false,
+      maxWorkers: 2,
+      diagnostics: "human",
+    },
+    [],
+  );
+  const entryBundle = result.bundles.find(
+    (bundle) => bundle.entryKind === "explicit",
+  );
+  const dynamicBundle = result.bundles.find(
+    (bundle) => bundle.entryKind === "dynamic",
+  );
+  const dynamicCode = await fs.readFile(
+    path.join(outDir, dynamicBundle.fileName),
+    "utf8",
+  );
+  const namespaceExport = dynamicCode.match(
+    /const (__NS__[a-z0-9]+) = Object\.create\(null\);[\s\S]*export \{ \1 \};/,
+  )?.[1];
+  expect(namespaceExport).toBeDefined();
+
+  const entryUrl = pathToFileURL(path.join(outDir, entryBundle.fileName)).href;
+  const { stdout } = await execFileAsync(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    `const namespace = await import(${JSON.stringify(entryUrl)});
+console.log(JSON.stringify(await namespace.inspect()));`,
+  ]);
+  expect(JSON.parse(stdout)).toEqual({
+    keys: [],
+    tag: "Module",
+    sideEffect: 42,
+  });
+});
+
+test("selects a logical dynamic namespace from globally unique exports", async () => {
+  const projectDir = path.join(outRoot, "dynamic-namespace-projection");
+  const sourceDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(sourceDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({ name: "dynamic-namespace-projection", type: "module" }),
+  );
+  await fs.writeFile(
+    path.join(sourceDir, "index.js"),
+    `export async function inspect() {
+  const namespace = await import("./lazy.js");
+  const before = namespace.count;
+  namespace.increment();
+  return {
+    tag: namespace[Symbol.toStringTag],
+    keys: Object.keys(namespace),
+    defaultValue: namespace.default,
+    alias: namespace.renamed,
+    computed: namespace["original"],
+    dependency: namespace.fromDependency,
+    star: namespace.fromStar,
+    before,
+    after: namespace.count,
+  };
+}`,
+  );
+  await fs.writeFile(
+    path.join(sourceDir, "lazy.js"),
+    `export default "default-value";
+export let count = 1;
+export function increment() {
+  count += 1;
+}
+const original = 7;
+export { original, original as renamed };
+export {
+  dependencyValue as fromDependency,
+  dependencyCount,
+  bumpDependency,
+} from "./dependency.js";
+export * from "./star.js";`,
+  );
+  await fs.writeFile(
+    path.join(sourceDir, "dependency.js"),
+    `export const dependencyValue = 11;
+export let dependencyCount = 3;
+export function bumpDependency() {
+  dependencyCount += 1;
+}`,
+  );
+  await fs.writeFile(
+    path.join(sourceDir, "star.js"),
+    "export const fromStar = 13;",
+  );
+
+  const { buildProject: rawBuildProject } = await import("../dist/builder.js");
+  const buildProject = withTestConfig(rawBuildProject);
+  const result = await buildProject(
+    {
+      targets: { browser: { platform: "browser" } },
+      environments: { app: {} },
+      entries: [
+        {
+          path: path.join(sourceDir, "index.js"),
+          environment: "app",
+          targets: ["browser"],
+        },
+      ],
+      outputs: { outDir, fileName: "[entry].[hash].js" },
+      cacheDir: path.join(projectDir, ".cache"),
+      css: false,
+      maxWorkers: 2,
+      diagnostics: "human",
+    },
+    [],
+  );
+  const entryBundle = result.bundles.find(
+    (bundle) => bundle.entryKind === "explicit",
+  );
+  const dynamicBundle = result.bundles.find(
+    (bundle) => bundle.entryKind === "dynamic",
+  );
+  const dynamicCode = await fs.readFile(
+    path.join(outDir, dynamicBundle.fileName),
+    "utf8",
+  );
+  expect(dynamicCode).not.toMatch(
+    /\bas (?:bumpDependency|count|default|dependencyCount|fromDependency|fromStar|increment|original|renamed)\b/,
+  );
+  const entryCode = await fs.readFile(
+    path.join(outDir, entryBundle.fileName),
+    "utf8",
+  );
+  expect(entryCode).not.toContain("__bundlerExportMap");
+  expect(entryCode).toContain(
+    '["__NS__" + ns7ltdpn_default.__bundlerModulePrefix]',
+  );
+  expect(dynamicCode).toContain(
+    'Object.defineProperty(__NS__eh5t2wq3, "fromDependency"',
+  );
+
+  const namespace = await import(
+    `${pathToFileURL(path.join(outDir, entryBundle.fileName)).href}?namespace-projection`
+  );
+  await expect(namespace.inspect()).resolves.toEqual({
+    tag: "Module",
+    keys: [
+      "bumpDependency",
+      "count",
+      "default",
+      "dependencyCount",
+      "fromDependency",
+      "fromStar",
+      "increment",
+      "original",
+      "renamed",
+    ],
+    defaultValue: "default-value",
+    alias: 7,
+    computed: 7,
+    dependency: 11,
+    star: 13,
+    before: 1,
+    after: 2,
+  });
+});
+
+test("preserves configured entry exports when an entry is dynamically imported", async () => {
+  const projectDir = path.join(outRoot, "dynamic-configured-entry");
+  const sourceDir = path.join(projectDir, "src");
+  const outDir = path.join(projectDir, "dist");
+  const indexPath = path.join(sourceDir, "index.js");
+  const lazyPath = path.join(sourceDir, "lazy.js");
+  await fs.rm(projectDir, { recursive: true, force: true });
+  await fs.mkdir(sourceDir, { recursive: true });
+  await fs.writeFile(
+    path.join(projectDir, "package.json"),
+    JSON.stringify({ name: "dynamic-configured-entry", type: "module" }),
+  );
+  await fs.writeFile(
+    indexPath,
+    `export async function load() {
+  return (await import("./lazy.js")).foo;
+}`,
+  );
+  await fs.writeFile(lazyPath, "export const foo = 42;");
+
+  const { buildProject: rawBuildProject } = await import("../dist/builder.js");
+  const buildProject = withTestConfig(rawBuildProject);
+  const result = await buildProject(
+    {
+      targets: { browser: { platform: "browser" } },
+      environments: { app: {} },
+      entries: [
+        { path: indexPath, environment: "app", targets: ["browser"] },
+        { path: lazyPath, environment: "app", targets: ["browser"] },
+      ],
+      outputs: { outDir, fileName: "[entry].[hash].js" },
+      cacheDir: path.join(projectDir, ".cache"),
+      css: false,
+      maxWorkers: 2,
+      diagnostics: "human",
+    },
+    [],
+  );
+  const indexBundle = result.bundles.find(
+    (bundle) => bundle.entryId === indexPath,
+  );
+  const lazyBundle = result.bundles.find(
+    (bundle) => bundle.entryId === lazyPath,
+  );
+  expect(indexBundle.entryKind).toBe("explicit");
+  expect(lazyBundle.entryKind).toBe("explicit");
+  expect(result.bundles).toHaveLength(2);
+
+  const indexCode = await fs.readFile(
+    path.join(outDir, indexBundle.fileName),
+    "utf8",
+  );
+  const lazyCode = await fs.readFile(
+    path.join(outDir, lazyBundle.fileName),
+    "utf8",
+  );
+  expect(indexCode).toContain('"__bundlerEntryExports"');
+  expect(lazyCode).toMatch(/export \{ [a-z0-9]+_foo as foo \};/);
+
+  const namespace = await import(
+    `${pathToFileURL(path.join(outDir, indexBundle.fileName)).href}?configured-entry`
+  );
+  await expect(namespace.load()).resolves.toBe(42);
 });

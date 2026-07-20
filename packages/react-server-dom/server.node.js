@@ -2,6 +2,7 @@ import * as upstream from "react-server-dom-webpack/server.node";
 import {
   createClientImplementation as createImplementationDescriptor,
   registerClientImplementation,
+  resolveModuleExportName,
 } from "./implementation-registry.js";
 
 export function createClientImplementation(chunks, exportName) {
@@ -35,7 +36,7 @@ export function registerClientReference(
   registerClientImplementation(id, exportName, implementation);
   clientMetadata.set(`${id}#${exportName}`, {
     id,
-    name: exportName,
+    name: resolveModuleExportName(chunks, exportName),
     chunks: [...chunks],
     async: false,
   });

@@ -18,6 +18,11 @@ test("deduplicates literal local dynamic imports through one dependency URL arra
     result.code.match(/Promise\.all\(_bundler_dynamic_urls\.map/g),
   ).toHaveLength(1);
   expect(result.code.match(/_bundler_dynamic_import\(\)/g)).toHaveLength(2);
+  expect(result.code).not.toContain("function _bundler_dynamic_namespace(");
+  expect(result.code).toContain("_bundler_dynamic_urls.__bundlerModulePrefix");
+  expect(result.code).toContain(
+    '_bundler_dynamic_modules[0]["__NS__" + _bundler_dynamic_urls.__bundlerModulePrefix]',
+  );
 });
 
 test("preserves nonliteral and runtime dynamic imports", async () => {

@@ -153,6 +153,12 @@ type BundlePlan = {
   entryId: string;
   entryKind: BundleEntryKind;
   exportMode: "entry" | "dynamic";
+  entrypoints: Array<{
+    envId: string;
+    entryId: string;
+    entryKind: BundleEntryKind;
+    exportMode: "entry" | "dynamic";
+  }>;
   parts: BundlePart[];
   staticImports: StaticBundleImport[];
   diagnostics: Diagnostic[];
@@ -573,8 +579,11 @@ export async function buildProject(
             entry.entryNodeId ??
             resolvedMapByEnv.get(graph.envId)?.get(entry.path)?.id ??
             entry.path,
-          exportMode: entry.exportMode ?? "dynamic",
-          entryKind: entry.entryKind ?? "dynamic",
+          exportMode: "dynamic",
+          entryKind:
+            entry.entryKind === "shared" || entry.entryKind === "manual"
+              ? entry.entryKind
+              : "dynamic",
         });
       }
       bundleEntriesByEnv.set(graph.envId, bundleEntries);
@@ -586,7 +595,7 @@ export async function buildProject(
       config,
     );
 
-    const bundlePlans: BundlePlan[] = [];
+    let bundlePlans: BundlePlan[] = [];
     for (const graph of graphs) {
       const partitions = createBundlePartitions(
         graph,
@@ -696,24 +705,28 @@ export async function buildProject(
         },
       ];
     }
+    if (!devOptions.hmr) {
+      bundlePlans = groupCrossScopeDynamicBundlePlans(
+        bundlePlans,
+        resolvedMapByEnv,
+        config,
+      );
+    }
     const resourcePlanFingerprints = await runPlanBundleResources(
       normalizedPlugins,
       {
         bundles: bundlePlans.map((plan) => {
-          const scope = config.envs[plan.envId];
           return {
             ...describeBuildScopes([plan.envId], plan.envId, config),
             id: logicalBundlePlanKey(plan),
-            entrypoints: [
-              {
-                envId: plan.envId,
-                environmentId: scope.environmentId,
-                targetId: scope.targetId,
-                entryId: plan.entryId,
-                entryKind: plan.entryKind,
-                exportMode: plan.exportMode,
-              },
-            ],
+            entrypoints: plan.entrypoints.map((entrypoint) => {
+              const entrypointScope = config.envs[entrypoint.envId];
+              return {
+                ...entrypoint,
+                environmentId: entrypointScope.environmentId,
+                targetId: entrypointScope.targetId,
+              };
+            }),
             envId: plan.envId,
             entryId: plan.entryId,
             modules: plan.modules,
@@ -3090,7 +3103,11 @@ async function createBundlePlan(
     ),
   ).sort();
   const parts: BundlePart[] = [];
-  const namespaceDemanded = partition.namespaceDemanded;
+  const namespaceDemanded = new Set(partition.namespaceDemanded);
+  if (entryKind === "dynamic" && entryNode) {
+    namespaceDemanded.add(entryNode.id);
+  }
+  const emittedNamespaces = new Set<string>();
   const hmrCells: HmrCellRecord[] = [];
   const hmrSymbols = new Set<string>();
   const useHmr = devOptions.hmr && hmrTarget;
@@ -3189,8 +3206,9 @@ async function createBundlePlan(
         );
     parts.push(...cellParts.filter((part) => part.code.length > 0));
 
-    if (namespaceDemanded.has(node.id) && node.exportTable) {
+    if (namespaceDemanded.has(node.id)) {
       parts.push({ code: emitNamespaceObject(node) });
+      emittedNamespaces.add(node.id);
     }
     if (useHmr && useReactRefresh) {
       const registrations = emitReactRefreshRegistrations(node, selectedCells);
@@ -3217,9 +3235,16 @@ async function createBundlePlan(
       parts.push({ code: emitConditionalEnd() });
     }
   }
+  if (
+    entryKind === "dynamic" &&
+    entryNode &&
+    !emittedNamespaces.has(entryNode.id)
+  ) {
+    parts.push({ code: emitNamespaceObject(entryNode) });
+  }
   const exportFooter = emitBundleExports(
     entryNode,
-    exportMode,
+    entryKind,
     useHmr,
     partition.internalExports,
     conditionalExportAliases,
@@ -3374,6 +3399,222 @@ function portableLinkReference(
   }
 }
 
+function groupCrossScopeDynamicBundlePlans(
+  plans: BundlePlan[],
+  resolvedMapByEnv: Map<string, Map<string, ModuleResolution>>,
+  config: InternalBundlerConfig,
+): BundlePlan[] {
+  const planByEntrypoint = new Map<string, BundlePlan>();
+  const registerEntrypoint = (
+    plan: BundlePlan,
+    envId: string,
+    entryId: string,
+  ) => {
+    planByEntrypoint.set(`${envId}:${entryId}`, plan);
+    const moduleIdentity = resolvedMapByEnv
+      .get(envId)
+      ?.get(entryId)?.moduleIdentity;
+    if (moduleIdentity) {
+      planByEntrypoint.set(`${envId}:${moduleIdentity}`, plan);
+    }
+  };
+  for (const plan of plans) {
+    for (const entrypoint of plan.entrypoints) {
+      registerEntrypoint(plan, entrypoint.envId, entrypoint.entryId);
+    }
+  }
+
+  const consumersByPlan = new Map<BundlePlan, Set<string>>();
+  const portableEntrypoint = (plan: BundlePlan): string => {
+    const entrypoint = plan.entrypoints[0];
+    const moduleIdentity = resolvedMapByEnv
+      .get(entrypoint.envId)
+      ?.get(entrypoint.entryId)?.moduleIdentity;
+    return moduleIdentity ?? portableHashIdentity(entrypoint.entryId);
+  };
+  for (const consumer of plans) {
+    for (const reference of dedupeBundleReferences(consumer.parts)) {
+      if (
+        reference.kind !== "output-url" ||
+        reference.outputType !== "script"
+      ) {
+        continue;
+      }
+      const targetScopeId = resolveReferenceScopeId(
+        reference,
+        consumer.envId,
+        config,
+      );
+      if (targetScopeId === consumer.envId) {
+        continue;
+      }
+      const target = planByEntrypoint.get(
+        `${targetScopeId}:${reference.outputId}`,
+      );
+      if (!target || target.entryKind !== "dynamic") {
+        continue;
+      }
+      const consumers = consumersByPlan.get(target) ?? new Set<string>();
+      consumers.add(portableEntrypoint(consumer));
+      consumersByPlan.set(target, consumers);
+    }
+  }
+
+  const groups = new Map<string, BundlePlan[]>();
+  for (const plan of plans) {
+    const consumers = consumersByPlan.get(plan);
+    if (!consumers || consumers.size === 0) {
+      continue;
+    }
+    const key = `${plan.envId}\0${Array.from(consumers).sort().join("\0")}`;
+    const group = groups.get(key) ?? [];
+    group.push(plan);
+    groups.set(key, group);
+  }
+
+  const groupedPlans = new Set<BundlePlan>();
+  const mergedPlans: BundlePlan[] = [];
+  for (const candidates of groups.values()) {
+    if (candidates.length < 2) {
+      continue;
+    }
+    const ordered = orderMergedBundlePlans(candidates, resolvedMapByEnv);
+    const candidateSet = new Set(candidates);
+    const hasIntraGroupDynamicEdge = candidates.some((plan) =>
+      dedupeBundleReferences(plan.parts).some((reference) => {
+        if (
+          reference.kind !== "output-url" ||
+          reference.outputType !== "script"
+        ) {
+          return false;
+        }
+        const target = planByEntrypoint.get(
+          `${resolveReferenceScopeId(reference, plan.envId, config)}:${reference.outputId}`,
+        );
+        return target !== undefined && candidateSet.has(target);
+      }),
+    );
+    if (hasIntraGroupDynamicEdge) {
+      continue;
+    }
+    const staticImports = new Map<string, Set<string>>();
+    for (const plan of ordered) {
+      groupedPlans.add(plan);
+      for (const item of plan.staticImports) {
+        const dependency = planByEntrypoint.get(
+          `${plan.envId}:${item.entryId}`,
+        );
+        if (dependency && candidateSet.has(dependency)) {
+          continue;
+        }
+        const symbols = staticImports.get(item.entryId) ?? new Set<string>();
+        for (const symbol of item.symbols) {
+          symbols.add(symbol);
+        }
+        staticImports.set(item.entryId, symbols);
+      }
+    }
+    const entrypoints = ordered
+      .flatMap((plan) => plan.entrypoints)
+      .sort((left, right) =>
+        `${left.envId}:${left.entryId}`.localeCompare(
+          `${right.envId}:${right.entryId}`,
+        ),
+      );
+    const entryIdentity = entrypoints
+      .map((entrypoint) => {
+        const moduleIdentity = resolvedMapByEnv
+          .get(entrypoint.envId)
+          ?.get(entrypoint.entryId)?.moduleIdentity;
+        return moduleIdentity ?? portableHashIdentity(entrypoint.entryId);
+      })
+      .join("\0");
+    const consumerIdentity = Array.from(consumersByPlan.get(ordered[0]) ?? [])
+      .sort()
+      .join("\0");
+    mergedPlans.push({
+      envId: ordered[0].envId,
+      entryId: `bundler:dynamic-group:${contentHashShort(
+        `${consumerIdentity}\0${entryIdentity}`,
+        12,
+      )}`,
+      entryKind: "dynamic",
+      exportMode: "dynamic",
+      entrypoints,
+      parts: ordered.flatMap((plan) => plan.parts),
+      staticImports: Array.from(staticImports, ([entryId, symbols]) => ({
+        entryId,
+        symbols: Array.from(symbols).sort(),
+      })).sort((left, right) => left.entryId.localeCompare(right.entryId)),
+      diagnostics: ordered.flatMap((plan) => plan.diagnostics),
+      modules: Array.from(new Set(ordered.flatMap((plan) => plan.modules))),
+      conditions: Array.from(
+        new Map(
+          ordered
+            .flatMap((plan) => plan.conditions)
+            .map(
+              (condition) => [JSON.stringify(condition), condition] as const,
+            ),
+        ).values(),
+      ),
+      conditionNames: Array.from(
+        new Set(ordered.flatMap((plan) => plan.conditionNames)),
+      ).sort(),
+    });
+  }
+
+  if (mergedPlans.length === 0) {
+    return plans;
+  }
+  return [...plans.filter((plan) => !groupedPlans.has(plan)), ...mergedPlans];
+}
+
+function orderMergedBundlePlans(
+  plans: BundlePlan[],
+  resolvedMapByEnv: Map<string, Map<string, ModuleResolution>>,
+): BundlePlan[] {
+  const byEntrypoint = new Map<string, BundlePlan>();
+  for (const plan of plans) {
+    for (const entrypoint of plan.entrypoints) {
+      byEntrypoint.set(`${entrypoint.envId}:${entrypoint.entryId}`, plan);
+      const moduleIdentity = resolvedMapByEnv
+        .get(entrypoint.envId)
+        ?.get(entrypoint.entryId)?.moduleIdentity;
+      if (moduleIdentity) {
+        byEntrypoint.set(`${entrypoint.envId}:${moduleIdentity}`, plan);
+      }
+    }
+  }
+  const planSet = new Set(plans);
+  const active = new Set<BundlePlan>();
+  const visited = new Set<BundlePlan>();
+  const ordered: BundlePlan[] = [];
+  const visit = (plan: BundlePlan) => {
+    if (visited.has(plan)) return;
+    if (active.has(plan)) {
+      throw new Error(
+        `Cyclic dynamic bundle group through '${plan.entryId}' in '${plan.envId}'.`,
+      );
+    }
+    active.add(plan);
+    for (const dependency of plan.staticImports) {
+      const target = byEntrypoint.get(`${plan.envId}:${dependency.entryId}`);
+      if (target && planSet.has(target)) {
+        visit(target);
+      }
+    }
+    active.delete(plan);
+    visited.add(plan);
+    ordered.push(plan);
+  };
+  for (const plan of [...plans].sort((left, right) =>
+    left.entryId.localeCompare(right.entryId),
+  )) {
+    visit(plan);
+  }
+  return ordered;
+}
+
 function coalescePhysicalBundlePlans(
   plans: BundlePlan[],
   hmr: boolean,
@@ -3396,12 +3637,14 @@ function coalescePhysicalBundlePlans(
     portableIdentities.get(id) ?? portableHashIdentity(id);
   const plansByEntrypoint = new Map<string, BundlePlan>();
   for (const plan of plans) {
-    plansByEntrypoint.set(`${plan.envId}:${plan.entryId}`, plan);
-    const moduleIdentity = resolvedMapByEnv
-      .get(plan.envId)
-      ?.get(plan.entryId)?.moduleIdentity;
-    if (moduleIdentity) {
-      plansByEntrypoint.set(`${plan.envId}:${moduleIdentity}`, plan);
+    for (const entrypoint of plan.entrypoints) {
+      plansByEntrypoint.set(`${entrypoint.envId}:${entrypoint.entryId}`, plan);
+      const moduleIdentity = resolvedMapByEnv
+        .get(entrypoint.envId)
+        ?.get(entrypoint.entryId)?.moduleIdentity;
+      if (moduleIdentity) {
+        plansByEntrypoint.set(`${entrypoint.envId}:${moduleIdentity}`, plan);
+      }
     }
   }
   const localFingerprints = new Map(
@@ -3416,6 +3659,15 @@ function coalescePhysicalBundlePlans(
           entryId: portableIdentity(plan.entryId),
           entryKind: plan.entryKind,
           exportMode: plan.exportMode,
+          entrypoints: plan.entrypoints
+            .map((entrypoint) => ({
+              entryId: portableIdentity(entrypoint.entryId),
+              entryKind: entrypoint.entryKind,
+              exportMode: entrypoint.exportMode,
+            }))
+            .sort((left, right) =>
+              JSON.stringify(left).localeCompare(JSON.stringify(right)),
+            ),
           parts: portableBundleParts(plan.parts, portableIdentity),
           staticImports: plan.staticImports.map((item) => ({
             entryId: portableIdentity(item.entryId),
@@ -3511,12 +3763,16 @@ function coalescePhysicalBundlePlans(
         ? `${plan.entryId}:${fingerprint}`
         : `bundle:${fingerprint}`,
       environmentIds,
-      entrypoints: group.map((item) => ({
-        envId: item.envId,
-        entryId: item.entryId,
-        entryKind: item.entryKind,
-        exportMode: item.exportMode,
-      })),
+      entrypoints: Array.from(
+        new Map(
+          group
+            .flatMap((item) => item.entrypoints)
+            .map((entrypoint) => [
+              `${entrypoint.envId}:${entrypoint.entryId}`,
+              entrypoint,
+            ]),
+        ).values(),
+      ),
       plan,
     };
   });
@@ -3698,11 +3954,21 @@ function finalizePhysicalBundleOutputs(
       )
       .map((reference) => {
         let fileNames: string[] | null | undefined;
+        let entryExports = false;
         if (reference.outputType === "script") {
+          const referenceScopeId = resolveReferenceScopeId(
+            reference,
+            plan.envId,
+            config,
+          );
+          const dependency = byEntrypoint.get(
+            `${referenceScopeId}:${reference.outputId}`,
+          );
+          entryExports = dependency?.plan.exportMode === "entry";
           fileNames = dependencyFileNames(
             reference.outputId,
             reference.includeDependencies === true,
-            resolveReferenceScopeId(reference, plan.envId, config),
+            referenceScopeId,
           );
           if (fileNames?.some((fileName) => fileName.startsWith("cycle:"))) {
             throw new Error(
@@ -3741,6 +4007,8 @@ function finalizePhysicalBundleOutputs(
           symbol: reference.symbol,
           usage: reference.usage ?? "javascript",
           includeDependencies: reference.includeDependencies === true,
+          entryExports:
+            reference.includeDependencies === true && entryExports === true,
           urlMode:
             reference.outputType === "script"
               ? (reference.urlMode ?? "module-relative")
@@ -4413,8 +4681,12 @@ async function discoverModulesFromHeader(
             envId: targetEnv,
             entryId: owner.filePath,
             entryEnvs: [targetEnv],
-            exportMode: normalized.exportMode ?? "entry",
-            entryKind: normalized.entryKind ?? "dynamic",
+            exportMode: "dynamic",
+            entryKind:
+              normalized.entryKind === "shared" ||
+              normalized.entryKind === "manual"
+                ? normalized.entryKind
+                : "dynamic",
           }),
         );
       }
@@ -4451,8 +4723,12 @@ async function discoverModulesFromHeader(
           envId: targetEnv,
           entryId: resolved.filePath,
           entryEnvs: [targetEnv],
-          exportMode: normalized.exportMode,
-          entryKind: normalized.entryKind ?? "dynamic",
+          exportMode: "dynamic",
+          entryKind:
+            normalized.entryKind === "shared" ||
+            normalized.entryKind === "manual"
+              ? normalized.entryKind
+              : "dynamic",
         })),
       );
     }
@@ -5372,6 +5648,7 @@ function emitOutputReferencePrelude(
     .map((reference) => {
       let fileNames: string[] | undefined;
       let relative = false;
+      let entryExports = false;
       if (reference.outputType === "script") {
         const referenceScopeId = config
           ? resolveReferenceScopeId(reference, envId, config)
@@ -5379,6 +5656,7 @@ function emitOutputReferencePrelude(
         const bundleTarget = bundleMap.get(
           `${referenceScopeId}:${reference.outputId}`,
         );
+        entryExports = bundleTarget?.exportMode === "entry";
         fileNames = bundleTarget
           ? [
               bundleTarget.fileName,
@@ -5438,7 +5716,14 @@ function emitOutputReferencePrelude(
       const value = reference.includeDependencies
         ? `[${values.join(", ")}]`
         : values[0];
-      return `const ${reference.symbol} = ${value};`;
+      return [
+        `const ${reference.symbol} = ${value};`,
+        reference.includeDependencies && entryExports
+          ? `Object.defineProperty(${reference.symbol}, "__bundlerEntryExports", { value: true });`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
     })
     .join("\n");
 }
@@ -5782,7 +6067,7 @@ function findCellProvidingSymbol(
 
 function emitBundleExports(
   node: ModuleNode | undefined,
-  exportMode: "entry" | "dynamic",
+  entryKind: BundleEntryKind,
   hmr: boolean,
   internalSymbols: Set<string>,
   internalAliases: Map<string, string> = new Map(),
@@ -5798,12 +6083,15 @@ function emitBundleExports(
   };
 
   for (const [exported, provider] of node?.exportTable ?? []) {
-    if (hmr || exportMode === "dynamic") {
+    if (hmr || entryKind !== "explicit") {
       addExport(provider.symbol, provider.symbol);
     }
-    if (hmr || exportMode === "entry") {
+    if (entryKind === "explicit") {
       addExport(provider.symbol, exported);
     }
+  }
+  if (entryKind === "dynamic" && node) {
+    addExport(`__NS__${node.prefix}`, `__NS__${node.prefix}`);
   }
   for (const symbol of Array.from(internalSymbols).sort()) {
     addExport(internalAliases.get(symbol) ?? symbol, symbol);
@@ -5813,19 +6101,28 @@ function emitBundleExports(
 }
 
 function fromBundleDraft(draft: BundlePlanDraftWithHmr): BundlePlan {
+  const entryKind =
+    draft.entryKind ??
+    (draft.entryId.startsWith("bundler:manual:")
+      ? "manual"
+      : draft.entryId.startsWith("bundler:")
+        ? "shared"
+        : draft.exportMode === "dynamic"
+          ? "dynamic"
+          : "explicit");
   return {
     envId: draft.envId,
     entryId: draft.entryId,
-    entryKind:
-      draft.entryKind ??
-      (draft.entryId.startsWith("bundler:manual:")
-        ? "manual"
-        : draft.entryId.startsWith("bundler:")
-          ? "shared"
-          : draft.exportMode === "dynamic"
-            ? "dynamic"
-            : "explicit"),
-    exportMode: draft.exportMode,
+    entryKind,
+    exportMode: entryKind === "explicit" ? "entry" : "dynamic",
+    entrypoints: [
+      {
+        envId: draft.envId,
+        entryId: draft.entryId,
+        entryKind,
+        exportMode: entryKind === "explicit" ? "entry" : "dynamic",
+      },
+    ],
     parts: draft.orderedParts,
     staticImports: draft.staticImports ?? [],
     diagnostics: draft.diagnostics,

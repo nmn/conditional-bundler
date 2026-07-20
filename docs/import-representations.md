@@ -64,8 +64,12 @@ export default {
 - `url_and_deps_array` is JavaScript-only. It returns a target-first array
   containing the normal module bundle URL followed by every direct and
   indirect static script dependency bundle URL, with duplicates removed.
-  Dynamic-import loaders import every URL concurrently and resolve to the
-  namespace at array index zero.
+  Dynamic-import loaders import every URL concurrently. For a non-configured
+  entry, the target URL array also carries the source module's deterministic
+  prefix, and the loader selects that module's `__NS__<prefix>` export from
+  the first native namespace. Configured entries keep their public export
+  names and return the first native namespace directly. This remains valid
+  when multiple logical dynamic roots share one physical target bundle.
 - `raw` exports the represented file's own bytes decoded as strict UTF-8.
 - `base64` exports the base64 encoding of the represented file's own bytes.
 - `image-reference-with-size` exports `{ src, width, height }`. Its generated

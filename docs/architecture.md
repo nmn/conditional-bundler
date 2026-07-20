@@ -39,8 +39,10 @@
 - Import use-sites are rewritten to provider symbols.
 - Author syntax is normalized to attributed imports before core extraction.
   Local literal dynamic imports become `url_and_deps_array` imports followed
-  by parallel native imports; the target namespace remains array index zero.
-  The core does not generate dynamic-import loader constants.
+  by parallel native imports. The loader selects the source module's
+  deterministic `__NS__<prefix>` export from the target bundle at array index
+  zero; configured entries instead expose their native entry namespace. The
+  core does not generate dynamic-import loader constants.
 - A represented module identity includes its normalized `as` value in
   addition to its environment variant.
 - Representation inheritance belongs only to `as`. Environments have no
@@ -72,7 +74,11 @@
   are known.
 - Script URL-array references resolve to the target-first transitive static
   bundle closure after chunk ownership and filenames are finalized.
-- Namespace objects emitted only when needed.
+- Configured entries export their provider symbols under the authored names.
+  Other logical roots export only globally unique provider symbols. Dynamic
+  roots additionally expose one deterministic `__NS__<prefix>` object so a
+  loader can select the right logical module from a merged physical chunk.
+- Namespace objects are otherwise emitted only when needed.
 - Conditional modules are wrapped in JSON markers.
 
 ## Bundle
@@ -84,8 +90,12 @@
   local roots enter the default shared family. This prevents a source-shared
   module from creating a chunk cycle when its linked dependencies differ by
   target. Plugins can coarsen compatible groups with `manualChunk`.
-- Logical chunks are linked per target first. Production chunks are then
-  coalesced into one physical bundle only when their transformed modules,
+- Logical chunks are linked per target first. In production, cross-scope
+  dynamic roots with the same exact set of logical consumers are combined,
+  allowing route-exclusive RSC client implementations to share one chunk and
+  implementations used by several routes to form a shared chunk. The result
+  records every original logical entrypoint. Chunks are then coalesced across
+  targets into one physical bundle only when their transformed modules,
   selected cells, bindings, references, resources, plugin output, and
   dependency chunk variants match.
 - Development retains target-specific physical bundles when HMR or React
@@ -105,14 +115,16 @@
   server-compatible React implementation; it is not a package export
   condition. `react.client` implementations retain ordinary React in both
   targets.
-- The facade registers the logical project path, export name, and a URL-only
-  browser chunk array after linking. The first URL owns the namespace and the
-  remaining URLs are its static dependency bundles. An independent
-  module-relative array registers the SSR implementation.
-- The browser imports all chunk URLs concurrently and selects the export from
-  the first namespace. The server serializer reads inline reference metadata;
-  SSR resolves the logical path and export through the implementation
-  registry. No Webpack chunk IDs, globals, or runtime shims are emitted.
+- The facade registers the logical project path, deterministic globally
+  unique export name, and a URL-only browser chunk array after linking. The
+  first URL owns the implementation while the remaining URLs are its static
+  dependency bundles. An independent module-relative array registers the SSR
+  implementation.
+- The browser imports all chunk URLs concurrently and selects the globally
+  unique export from the first namespace. The server serializer reads inline
+  reference metadata; SSR resolves the same deterministic export through the
+  implementation registry. No Webpack chunk IDs, globals, or runtime shims
+  are emitted.
 - Production JavaScript never injects DOM-based stylesheet loading. CSS stays
   a static output relationship in the manifest. Development HMR may update
   already-rendered stylesheet links without changing production link behavior.

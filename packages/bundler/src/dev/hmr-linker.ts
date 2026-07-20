@@ -278,14 +278,17 @@ export function emitHmrSymbolDeclarations(symbols: Iterable<string>): string {
   return `let ${unique.join(", ")};`;
 }
 
-export function emitHmrExportFooter(node: ModuleNode | undefined): string {
+export function emitHmrExportFooter(
+  node: ModuleNode | undefined,
+  entry = false,
+): string {
   if (!node?.exportTable || node.exportTable.size === 0) {
     return "";
   }
   const parts: string[] = [];
   for (const [exported, provider] of node.exportTable.entries()) {
     parts.push(provider.symbol);
-    if (provider.symbol !== exported) {
+    if (entry && provider.symbol !== exported) {
       parts.push(`${provider.symbol} as ${exported}`);
     }
   }

@@ -107,20 +107,16 @@ export { rhc85okp_run as run };",
 
 test("bundles complex dynamic imports", async () => {
   const snapshot = await snapshotFixture("complex-dynamic");
-  expect(snapshot).toMatchInlineSnapshot(`
-{
-  "name": "complex-dynamic",
-  "output": "const __bundler_d9pkv5gb60_output_url = [new URL("./complex-dynamic.browser.6co61pqn.js", import.meta.url).href];
-
-const hadi3ogo_default = __bundler_d9pkv5gb60_output_url;
-const a5wq2vqaf__bundler_dynamic_import = () => Promise.all(hadi3ogo_default.map(_bundler_dynamic_dependency_url => import(_bundler_dynamic_dependency_url))).then(_bundler_dynamic_modules => _bundler_dynamic_modules[0]);
-async function a5wq2vqaf_load() {
-  const mod = await a5wq2vqaf__bundler_dynamic_import();
-  return mod.value;
-}
-export { a5wq2vqaf_load as load };",
-}
-`);
+  expect(snapshot.name).toBe("complex-dynamic");
+  expect(snapshot.output).toContain('"__bundlerModulePrefix"');
+  expect(snapshot.output).not.toContain(
+    "function a5wq2vqaf__bundler_dynamic_namespace(",
+  );
+  expect(snapshot.output).toContain(
+    '_bundler_dynamic_modules[0]["__NS__" + hadi3ogo_default.__bundlerModulePrefix]',
+  );
+  expect(snapshot.output).toContain("return mod.value;");
+  expect(snapshot.output).toContain("export { a5wq2vqaf_load as load };");
 });
 
 test("bundles complex namespace usage", async () => {
@@ -173,47 +169,28 @@ export { ltuletut_value as value };",
 
 test("bundles a hybrid graph with conditionals, barrels, and dynamic namespace usage", async () => {
   const snapshot = await snapshotAllBundles("hybrid");
-  expect(snapshot).toMatchInlineSnapshot(`
-{
-  "name": "hybrid",
-  "outputs": {
-    "hybrid.browser.gvgobzvg.js": "const __bundler_d7xkyvhykn_output_url = [new URL("./hybrid.browser.pk46wpan.id-x.js", import.meta.url).href];
-
-const a2w8rxzb5_default = __bundler_d7xkyvhykn_output_url;
-const oueauf3s_label = "base";
-const a1zfnyfv5_label = oueauf3s_label;
-/////##CONDITION_START##"FLAG_A"
-const mydb1tex_feature = "alpha";
-/////##CONDITION_END##
-/////##CONDITION_START##{"NOT":"FLAG_A"}
-const j1cn3xqj_feature = "beta";
-/////##CONDITION_END##
-let cl2aeuiz_feature;
-/////##CONDITION_START##"FLAG_A"
-cl2aeuiz_feature = mydb1tex_feature;
-/////##CONDITION_END##
-/////##CONDITION_START##{"NOT":"FLAG_A"}
-cl2aeuiz_feature = j1cn3xqj_feature;
-/////##CONDITION_END##
-const cl2aeuiz__bundler_dynamic_import = () => Promise.all(a2w8rxzb5_default.map(_bundler_dynamic_dependency_url => import(_bundler_dynamic_dependency_url))).then(_bundler_dynamic_modules => _bundler_dynamic_modules[0]);
-async function cl2aeuiz_run(key) {
-  const mod = await cl2aeuiz__bundler_dynamic_import();
-  return mod.default(\`\${a1zfnyfv5_label}:\${cl2aeuiz_feature}:\${key}\`);
-}
-export { cl2aeuiz_run as run };",
-    "hybrid.browser.pk46wpan.js": "
-const f29lxr59_suffix = "tail";
-const __NS__f29lxr59 = Object.create(null);
-Object.defineProperty(__NS__f29lxr59, Symbol.toStringTag, { value: "Module" });
-Object.defineProperty(__NS__f29lxr59, "suffix", { enumerable: true, get: () => f29lxr59_suffix });
-Object.preventExtensions(__NS__f29lxr59);
-const a3twm4c4q_default = function a3twm4c4q_finish(input) {
-  return \`\${input}:\${__NS__f29lxr59.suffix}:\${__NS__f29lxr59["suffix"]}\`;
-};
-export { a3twm4c4q_default as default };",
-  },
-}
-`);
+  expect(snapshot.name).toBe("hybrid");
+  expect(Object.keys(snapshot.outputs)).toHaveLength(2);
+  const entryOutput = Object.values(snapshot.outputs).find((output) =>
+    output.includes("async function cl2aeuiz_run"),
+  );
+  const dynamicOutput = Object.values(snapshot.outputs).find((output) =>
+    output.includes("function a3twm4c4q_finish"),
+  );
+  expect(entryOutput).toContain('/////##CONDITION_START##"FLAG_A"');
+  expect(entryOutput).toContain('/////##CONDITION_START##{"NOT":"FLAG_A"}');
+  expect(entryOutput).toContain(
+    '["__NS__" + a2w8rxzb5_default.__bundlerModulePrefix]',
+  );
+  expect(entryOutput).toContain("return mod.default(");
+  expect(entryOutput).toContain("export { cl2aeuiz_run as run };");
+  expect(dynamicOutput).toContain(
+    'Object.defineProperty(__NS__f29lxr59, "suffix"',
+  );
+  expect(dynamicOutput).toContain(
+    "export { a3twm4c4q_default, __NS__a3twm4c4q };",
+  );
+  expect(dynamicOutput).not.toContain("as default");
 });
 
 test("reports when a conditional module also becomes unconditional", async () => {

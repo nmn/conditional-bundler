@@ -2,7 +2,9 @@ import type { ModuleNode } from "@bundler/shared";
 
 export function emitNamespaceObject(node: ModuleNode): string {
   const entries = node.exportTable
-    ? Array.from(node.exportTable.entries())
+    ? Array.from(node.exportTable.entries()).sort(([left], [right]) =>
+        left.localeCompare(right),
+      )
     : [];
   const lines: string[] = [];
   const nsVar = `__NS__${node.prefix}`;

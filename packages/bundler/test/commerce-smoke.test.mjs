@@ -61,40 +61,28 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
   const commonBundle = clientBundles.find((bundle) =>
     bundle.entryId.startsWith("bundler:shared:"),
   );
-  expect(clientBundleFiles).toHaveLength(11);
+  expect(clientBundleFiles).toHaveLength(5);
   expect(clientBundleFiles).toEqual(
     expect.arrayContaining([
       expect.stringMatching(
-        /^CartContext\.client\.react\.client\.[a-z0-9]+\.js$/,
-      ),
-      expect.stringMatching(
         /^CartTable\.client\.react\.client\.[a-z0-9]+\.js$/,
-      ),
-      expect.stringMatching(
-        /^CategoryPicker\.client\.react\.client\.[a-z0-9]+\.js$/,
-      ),
-      expect.stringMatching(
-        /^CommerceChrome\.client\.react\.client\.[a-z0-9]+\.js$/,
-      ),
-      expect.stringMatching(
-        /^DeliveryEstimator\.client\.react\.client\.[a-z0-9]+\.js$/,
-      ),
-      expect.stringMatching(
-        /^HomeCounter\.client\.react\.client\.[a-z0-9]+\.js$/,
       ),
       expect.stringMatching(
         /^ProductActions\.client\.react\.client\.[a-z0-9]+\.js$/,
       ),
       expect.stringMatching(
-        /^BrowserString\.client\.react\.client\.[a-z0-9]+\.js$/,
+        /^bundler-dynamic-group-[a-z0-9]+\.client\.react\.client\.[a-z0-9]+\.js$/,
       ),
-      expect.stringMatching(/^Router\.client\.react\.client\.[a-z0-9]+\.js$/),
       expect.stringMatching(
         /^bundler-shared-[a-z0-9]+\.client\.react\.client\.[a-z0-9]+\.js$/,
       ),
-      expect.stringMatching(/^client\.client\.react\.client\.[a-z0-9]+\.js$/),
     ]),
   );
+  expect(
+    clientBundleFiles.filter((fileName) =>
+      fileName.startsWith("bundler-dynamic-group-"),
+    ),
+  ).toHaveLength(2);
   expect(
     clientBundleFiles.filter((fileName) =>
       fileName.startsWith("bundler-shared-"),
@@ -113,27 +101,37 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     "utf8",
   );
   expect(commonCode).toContain("ReactSharedInternals");
-  const islandCodes = await Promise.all(
-    Object.values(clientReferences).map((reference) => {
+  const islandOutputs = await Promise.all(
+    Object.values(clientReferences).map(async (reference) => {
       const bundle = buildManifest.bundles.find(
         (candidate) => candidate.id === reference.client,
       );
-      return fs.readFile(
-        path.join(exampleDir, "dist", bundle.fileName),
-        "utf8",
-      );
+      return {
+        bundle,
+        code: await fs.readFile(
+          path.join(exampleDir, "dist", bundle.fileName),
+          "utf8",
+        ),
+      };
     }),
   );
-  for (const code of islandCodes) {
+  for (const { bundle, code } of islandOutputs) {
     expect(code).toContain(
       `from "./${conditionFileName(commonBundle.fileName, "x")}"`,
     );
-    expect(code).not.toContain("ReactSharedInternals");
+    if (!bundleHasEntrypoint(bundle, "src/client.jsx")) {
+      expect(code).not.toContain("ReactSharedInternals");
+    }
   }
   const cartContextBundle = clientBundles.find((bundle) =>
-    bundle.entryId.endsWith("src/client/CartContext.jsx"),
+    bundleHasEntrypoint(bundle, "src/client/CartContext.jsx"),
   );
-  for (const component of ["CommerceChrome", "CartTable", "ProductActions"]) {
+  const commerceChromeBundle = buildManifest.bundles.find(
+    (bundle) =>
+      bundle.id === clientReferences["/src/client/CommerceChrome.jsx"].client,
+  );
+  expect(commerceChromeBundle.id).toBe(cartContextBundle.id);
+  for (const component of ["CartTable", "ProductActions"]) {
     const reference = clientReferences[`/src/client/${component}.jsx`];
     const referenceBundle = buildManifest.bundles.find(
       (bundle) => bundle.id === reference.client,
@@ -186,9 +184,18 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
   const homeCounterBundle = buildManifest.bundles.find(
     (bundle) => bundle.id === homeCounterRef.client,
   );
-  expect(homeCounterBundle.fileName).toMatch(
-    /^HomeCounter\.client\.react\.client\.[a-z0-9]+\.js$/,
+  const homeCounterCode = await fs.readFile(
+    path.join(exampleDir, "dist", homeCounterBundle.fileName),
+    "utf8",
   );
+  const homeCounterExportName = homeCounterCode.match(
+    /export \{ ([a-z0-9]+_HomeCounter)(?:, [^}]*)? \};/,
+  )?.[1];
+  expect(homeCounterBundle.fileName).toMatch(
+    /^bundler-dynamic-group-[a-z0-9]+\.client\.react\.client\.[a-z0-9]+\.js$/,
+  );
+  expect(homeCounterExportName).toBeDefined();
+  expect(homeCounterCode).not.toMatch(/\bas HomeCounter\b/);
   expect(Object.keys(clientReferences).sort()).toEqual([
     "/src/BrowserString.jsx",
     "/src/client/CartContext.jsx",
@@ -200,6 +207,30 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     "/src/client/ProductActions.jsx",
     "/src/client/Router.jsx",
   ]);
+  const homeRouteClientIds = [
+    "CategoryPicker",
+    "DeliveryEstimator",
+    "HomeCounter",
+  ].map((component) => clientReferences[`/src/client/${component}.jsx`].client);
+  expect(new Set(homeRouteClientIds)).toEqual(new Set([homeCounterRef.client]));
+  const homeRouteServerIds = [
+    "CategoryPicker",
+    "DeliveryEstimator",
+    "HomeCounter",
+  ].map((component) => clientReferences[`/src/client/${component}.jsx`].server);
+  expect(new Set(homeRouteServerIds).size).toBe(1);
+  const homeCounterServerBundle = buildManifest.bundles.find(
+    (bundle) => bundle.id === homeCounterRef.server,
+  );
+  expect(homeCounterServerBundle.entryId).toBe(homeCounterBundle.entryId);
+  const appShellClientIds = [
+    "/src/BrowserString.jsx",
+    "/src/client/CartContext.jsx",
+    "/src/client/CommerceChrome.jsx",
+    "/src/client/Router.jsx",
+  ].map((id) => clientReferences[id].client);
+  expect(new Set(appShellClientIds).size).toBe(1);
+  expect(homeCounterBundle.entrypoints).toHaveLength(3);
   expect(JSON.stringify(clientReferences)).not.toContain(rootDir);
 
   const port = await getFreePort();
@@ -259,16 +290,17 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     expect(html).toContain("__BUNDLER_RSC_DATA__");
     expect(html).not.toContain("importmap");
     expect(html).not.toContain("esm.sh");
-    expect(html).toMatch(
-      /<script type="module" src="\/client\.client\.react\.client\.[a-z0-9]+\.id-0\.js"><\/script>/,
+    const clientBundle = buildManifest.bundles.find((bundle) =>
+      bundleHasEntrypoint(bundle, "src/client.jsx"),
+    );
+    expect(html).toContain(
+      `<script type="module" src="/${conditionFileName(
+        clientBundle.fileName,
+        "0",
+      )}"></script>`,
     );
     expect(html).toContain(
       `<link rel="stylesheet" href="/${showcaseAssets.style.fileName}"`,
-    );
-    const clientBundle = buildManifest.bundles.find(
-      (bundle) =>
-        bundleAppliesTo(bundle, "client") &&
-        bundle.entryId.endsWith("client.jsx"),
     );
     const clientAsset = await fetchAsset(
       `${baseUrl}/${conditionFileName(clientBundle.fileName, "0")}`,
@@ -304,7 +336,7 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
       `["/src/client/HomeCounter.jsx",["/${conditionFileName(
         homeCounterBundle.fileName,
         "0",
-      )}","/${conditionFileName(commonBundle.fileName, "0")}"],"HomeCounter"]`,
+      )}","/${conditionFileName(commonBundle.fileName, "0")}"],"${homeCounterExportName}"]`,
     );
     expect(home).not.toContain(":E");
 
@@ -756,6 +788,12 @@ function bundleAppliesTo(bundle, kind) {
     );
   }
   return (bundle.targetIds ?? [bundle.targetId]).includes(kind);
+}
+
+function bundleHasEntrypoint(bundle, suffix) {
+  return (bundle.entrypoints ?? []).some((entrypoint) =>
+    entrypoint.entryId.endsWith(suffix),
+  );
 }
 
 function findRscBundle(manifest) {

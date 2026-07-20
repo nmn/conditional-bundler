@@ -120,10 +120,32 @@ function createLoaderDeclaration(loader, urls, programPath, t) {
           [
             t.arrowFunctionExpression(
               [t.cloneNode(modules)],
-              t.memberExpression(
-                t.cloneNode(modules),
-                t.numericLiteral(0),
-                true,
+              t.conditionalExpression(
+                t.memberExpression(
+                  t.cloneNode(urls),
+                  t.identifier("__bundlerEntryExports"),
+                ),
+                t.memberExpression(
+                  t.cloneNode(modules),
+                  t.numericLiteral(0),
+                  true,
+                ),
+                t.memberExpression(
+                  t.memberExpression(
+                    t.cloneNode(modules),
+                    t.numericLiteral(0),
+                    true,
+                  ),
+                  t.binaryExpression(
+                    "+",
+                    t.stringLiteral("__NS__"),
+                    t.memberExpression(
+                      t.cloneNode(urls),
+                      t.identifier("__bundlerModulePrefix"),
+                    ),
+                  ),
+                  true,
+                ),
               ),
             ),
           ],

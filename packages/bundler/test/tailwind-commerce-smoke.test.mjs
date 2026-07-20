@@ -150,11 +150,18 @@ function expectClientComponentParity(clientReferences) {
         : `/src/client/${fileName}`,
     );
   }
+  expect(
+    new Set(
+      ["CategoryPicker", "DeliveryEstimator", "HomeCounter"].map(
+        (name) => clientReferences[`/src/client/${name}.jsx`].client,
+      ),
+    ).size,
+  ).toBe(1);
 }
 
 async function expectClientChunks(baseUrl, manifest, clientReferences) {
   const urls = clientReferenceChunkUrls(manifest, clientReferences);
-  expect(urls.length).toBeGreaterThanOrEqual(7);
+  expect(urls.length).toBeGreaterThanOrEqual(5);
   for (const url of urls) {
     expect(url).toMatch(/^\/[^/].*\.js$/);
     const response = await fetch(new URL(url, baseUrl));

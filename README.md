@@ -214,8 +214,10 @@ retransformation or relinking.
   fingerprinted package resolver.
 - RSC `"use client"` boundaries produce a side-effect-free `react.server`
   Client Reference facade and a separate `react.client` implementation. Inline
-  references contain the logical path, export name, and URL-only chunk array;
-  no RSC client manifest or Webpack runtime is emitted.
+  references contain the logical path, deterministic globally unique export
+  name, and URL-only chunk array; no RSC client manifest or Webpack runtime is
+  emitted. Production linking groups client implementations with identical
+  route-consumer sets into one physical bundle.
 - Static namespace access is reduced to named symbol dependencies. Namespace
   objects are generated only when dynamic namespace behavior is required.
 - The linker may inject a small prelude for generated asset URLs, dynamic

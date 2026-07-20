@@ -93,7 +93,9 @@ function loadContext({ dist, clientBundle }) {
       (bundle) =>
         bundle.targetIds.includes("client") &&
         bundle.environmentIds.includes("react.client") &&
-        bundle.entryId.endsWith("client.jsx"),
+        (bundle.entrypoints ?? []).some((entrypoint) =>
+          entrypoint.entryId.endsWith("client.jsx"),
+        ),
     );
   if (!resolvedClientBundle) {
     throw new Error("Missing client runtime bundle.");

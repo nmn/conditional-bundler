@@ -83,26 +83,23 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
     path.join(exampleDir, "dist", counterBundle.fileName),
     "utf8",
   );
+  const counterExportName = rawCounterCode.match(
+    /export \{ ([a-z0-9]+_Counter)(?:, [^}]*)? \};/,
+  )?.[1];
 
   expect(clientReferences["/src/Counter.jsx"]).toEqual({
     client: expect.any(String),
     server: expect.any(String),
   });
-  expect(clientBundleFiles).toHaveLength(6);
+  expect(clientBundleFiles).toHaveLength(2);
   expect(clientBundleFiles).toEqual(
     expect.arrayContaining([
-      expect.stringMatching(/^Counter\.client\.react\.client\.[a-z0-9]+\.js$/),
-      expect.stringMatching(/^DraftPad\.client\.react\.client\.[a-z0-9]+\.js$/),
       expect.stringMatching(
-        /^PreferenceSwitch\.client\.react\.client\.[a-z0-9]+\.js$/,
-      ),
-      expect.stringMatching(
-        /^BrowserString\.client\.react\.client\.[a-z0-9]+\.js$/,
+        /^bundler-dynamic-group-[a-z0-9]+\.client\.react\.client\.[a-z0-9]+\.js$/,
       ),
       expect.stringMatching(
         /^bundler-shared-[a-z0-9]+\.client\.react\.client\.[a-z0-9]+\.js$/,
       ),
-      expect.stringMatching(/^client\.client\.react\.client\.[a-z0-9]+\.js$/),
     ]),
   );
   expect(
@@ -134,7 +131,9 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
     expect(code).toContain(
       `from "./${conditionFileName(commonBundle.fileName, "x")}"`,
     );
-    expect(code).not.toContain("ReactSharedInternals");
+    if (!bundleHasEntrypoint(referenceBundle, "client.jsx")) {
+      expect(code).not.toContain("ReactSharedInternals");
+    }
   }
   expect(Object.keys(clientReferences).sort()).toEqual([
     "/src/BrowserString.jsx",
@@ -142,8 +141,20 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
     "/src/DraftPad.jsx",
     "/src/PreferenceSwitch.jsx",
   ]);
+  expect(
+    new Set(
+      Object.values(clientReferences).map((reference) => reference.client),
+    ).size,
+  ).toBe(1);
+  expect(counterBundle.entrypoints).toHaveLength(5);
   expect(JSON.stringify(clientReferences)).not.toContain(rootDir);
-  expect(counterBundle.conditionNames).toEqual([]);
+  expect(counterBundle.conditionNames).toEqual([
+    "isChrome",
+    "isFirefox",
+    "isSafari",
+  ]);
+  expect(counterExportName).toBeDefined();
+  expect(rawCounterCode).not.toMatch(/\bas Counter\b/);
   expect(browserStringBundle.conditionNames).toEqual([
     "isChrome",
     "isFirefox",
@@ -236,7 +247,7 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
       `["/src/Counter.jsx",["/${conditionFileName(
         counterBundle.fileName,
         "0",
-      )}","/${conditionFileName(commonBundle.fileName, "0")}"],"Counter"]`,
+      )}","/${conditionFileName(commonBundle.fileName, "0")}"],"${counterExportName}"]`,
     );
     expect(flight).not.toContain(":E");
 
@@ -574,7 +585,7 @@ function findBundle(manifest, kind) {
       return (
         bundleAppliesTo(bundle, "client") &&
         bundle.environmentIds.includes("react.client") &&
-        bundle.entryId.endsWith("client.jsx")
+        bundleHasEntrypoint(bundle, "client.jsx")
       );
     }
     return (
@@ -583,6 +594,12 @@ function findBundle(manifest, kind) {
       bundle.entryId.endsWith("server.jsx")
     );
   });
+}
+
+function bundleHasEntrypoint(bundle, suffix) {
+  return (bundle.entrypoints ?? []).some((entrypoint) =>
+    entrypoint.entryId.endsWith(suffix),
+  );
 }
 
 function bundleAppliesTo(bundle, targetId) {

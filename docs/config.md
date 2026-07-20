@@ -154,8 +154,9 @@ built-in behavior, and the plugin handler contract.
 When `outputs.manifestFile` is set, the generated JSON `entrypoints` records
 include the primary `bundleId` and `fileName`, the complete static script
 closure in `bundles`, and the CSS files the server should load in `styles`.
-Dynamic entrypoints have their own records, so a server can choose route CSS
-without JavaScript injecting stylesheet loaders.
+Dynamic entrypoints retain their own logical records even when linker
+coalescing puts several of them in one physical bundle, so a server can choose
+route CSS without JavaScript injecting stylesheet loaders.
 
 Entries and dynamically discovered entry points named `*.client.*` or
 `*.browser.*` are emitted only for browser targets. Files named `*.server.*`

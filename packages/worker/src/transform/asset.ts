@@ -3,6 +3,7 @@ import { imageSize } from "image-size";
 import {
   contentHash,
   contentHashShort,
+  filePrefix,
   portableSourceName,
   type LinkReference,
   type TransformResolvedImport,
@@ -95,7 +96,12 @@ export default { src: __bundler_image_url, width: ${dimensions.width}, height: $
       input.requestedEnvironment,
       input.requestedTarget,
     );
-    facade = `export default ${reference.symbol};`;
+    facade =
+      input.representation === "url_and_deps_array" &&
+      input.normalType === "javascript"
+        ? `Object.defineProperty(${reference.symbol}, "__bundlerModulePrefix", { value: ${JSON.stringify(normalModulePrefix(input))} });
+export default ${reference.symbol};`
+        : `export default ${reference.symbol};`;
   }
   return {
     facade,
@@ -167,7 +173,7 @@ export function transformAsset(
             self: "normal" as const,
             moduleIdentity: input.normalModuleIdentity,
             moduleType: input.normalType,
-            exportMode: "entry" as const,
+            exportMode: "dynamic" as const,
             ...(input.requestedEnvironment
               ? { environment: input.requestedEnvironment }
               : {}),
@@ -211,6 +217,15 @@ export function transformAsset(
         }
       : undefined,
   };
+}
+
+function normalModulePrefix(input: AssetTransformInput): string {
+  const separator = input.normalModuleIdentity.indexOf("::");
+  const relativeIdentity =
+    separator >= 0
+      ? input.normalModuleIdentity.slice(separator + 2)
+      : input.normalModuleIdentity;
+  return filePrefix(input.pkg.name, input.pkg.version, relativeIdentity);
 }
 
 function portableAssetGraphIdentity(input: AssetTransformInput): string {

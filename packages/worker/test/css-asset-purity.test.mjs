@@ -211,8 +211,12 @@ test("asset transforms are deterministic, portable, and representation-specific"
     expect.objectContaining({
       self: "normal",
       moduleIdentity: "portable-fixture@1.0.0::src/feature.js",
+      exportMode: "dynamic",
     }),
   ]);
+  expect(
+    dependencyUrls.fileRecord.cells.map((cell) => cell.code ?? "").join("\n"),
+  ).toContain('"__bundlerModulePrefix"');
 
   const raw = transform(makeInput("/checkout/one", "raw"));
   const base64 = transform(makeInput("/checkout/one", "base64"));
