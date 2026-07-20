@@ -3,7 +3,7 @@ import { ProductActionBoundary } from "../components/ProductActionBoundary.jsx";
 import { findProduct, products } from "../data/catalog.js";
 import { formatCurrency, shippingWindow } from "../lib/pricing.js";
 import { merchandisingNote } from "../lib/merchandising.dev.js" with {
-  condition: "DEV",
+  NODE_ENV: "development",
   else: "../lib/merchandising.prod.js",
 };
 

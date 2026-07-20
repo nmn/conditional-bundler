@@ -4,7 +4,12 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { transformAsync } from "@babel/core";
 import remappingModule from "@ampproject/remapping";
-import { contentHash, normalizePosixPath } from "@bundler/shared";
+import {
+  contentHash,
+  findPackagePathIdentity,
+  normalizePosixPath,
+  portableSourceName,
+} from "@bundler/shared";
 import type {
   CellRecord,
   DiscoveredEntrypoint,
@@ -68,6 +73,7 @@ type WorkerRequest = {
   resolutionMeta?: Record<string, unknown>;
   buildMode?: string;
   transformConfig?: Record<string, unknown>;
+  environmentVariables?: Record<string, string>;
   pkg: { name: string; version: string; root: string };
   /** Concrete environment/target scope ids processed by this request. */
   envs: string[];
@@ -145,8 +151,19 @@ type CoordinatorResponseMessage = {
 type ModuleCacheRecord = {
   baseKey: string;
   moduleKey: string;
+  scopeVariants: Record<
+    string,
+    {
+      inputFingerprint: string;
+      resolutionFingerprint: string;
+      dependencyRequests: WorkerImportRequest[];
+      fileRecord: FileRecord;
+    }
+  >;
+};
+
+type ValidatedModuleCacheRecord = {
   dependencyRequestsByEnv: Record<string, WorkerImportRequest[]>;
-  variants?: ModuleVariantRecord[];
   fileRecordsByEnv: Record<string, FileRecord>;
 };
 
@@ -161,6 +178,8 @@ type FileCachePaths = {
   fileDir: string;
   artifactDir: string;
   modulePath: string;
+  inputDir: string;
+  scopeVariantDir: string;
   remoteBaseKey: string;
   remoteArtifactBaseKey: string;
 };
@@ -180,7 +199,7 @@ const pendingCoordinatorRequests = new Map<
   { resolve: (value: unknown) => void; reject: (error: Error) => void }
 >();
 let nextCoordinatorRequestId = 1;
-const CELL_ARTIFACT_FORMAT = 32;
+const CELL_ARTIFACT_FORMAT = 34;
 const remapping = ((
   remappingModule as unknown as {
     default?: typeof import("@ampproject/remapping").default;
@@ -203,19 +222,25 @@ async function handleTransform(
     request.remoteCache,
     request.cacheNamespace,
   );
-  const cached = await readModuleCache(cachePaths.modulePath);
-  const hydratedCached = cached
+  const aggregateCached = await readModuleCache(cachePaths.modulePath);
+  const validatedAggregate = aggregateCached
+    ? await validateCacheCandidate(aggregateCached, request, baseKey)
+    : null;
+  const validatedCachedRecord =
+    validatedAggregate ??
+    (await readShardedModuleCache(cachePaths, baseKey, request));
+  const validatedCached = validatedCachedRecord
     ? {
-        ...cached,
-        fileRecordsByEnv: hydrateCachedFileRecords(
-          cached.fileRecordsByEnv,
-          cachePaths.fileDir,
+        ...validatedCachedRecord,
+        fileRecordsByEnv: applyRequestLinkUsage(
+          hydrateCachedFileRecords(
+            validatedCachedRecord.fileRecordsByEnv,
+            cachePaths.fileDir,
+            request,
+          ),
           request,
         ),
       }
-    : null;
-  const validatedCached = hydratedCached
-    ? await validateCacheCandidate(hydratedCached, request, baseKey)
     : null;
   if (
     validatedCached &&
@@ -248,7 +273,11 @@ async function handleTransform(
 
   const transformed = await transformFile(request);
   const resultsByEnv = transformed.resultsByEnv;
-  const moduleKey = buildModuleKey(baseKey, transformed.resolvedImportsByEnv);
+  const moduleKey = buildModuleKey(
+    baseKey,
+    transformed.resolvedImportsByEnv,
+    request,
+  );
   const variants: ModuleVariantRecord[] = groupTransformResults(
     resultsByEnv,
   ).map(({ variantId, environmentIds, result }) => {
@@ -299,8 +328,10 @@ async function handleTransform(
     moduleKey,
     baseKey,
     transformed.dependencyRequestsByEnv,
+    transformed.resolvedImportsByEnv,
     request.moduleIdentity,
     variants,
+    request,
   );
   if (remote) {
     await writeRemoteFileCache(
@@ -310,8 +341,10 @@ async function handleTransform(
       moduleKey,
       baseKey,
       transformed.dependencyRequestsByEnv,
+      transformed.resolvedImportsByEnv,
       request.moduleIdentity,
       variants,
+      request,
     );
   }
 
@@ -511,6 +544,7 @@ async function transformFile(
       codeHash: contentHash(preResult.code),
       sourceFileName: request.sourceMap?.sourceFileName,
       syntax: request.syntax,
+      environmentVariables: request.environmentVariables ?? {},
     });
     let prepared = preparedCache.get(preparedKey);
     if (!prepared) {
@@ -519,6 +553,7 @@ async function transformFile(
           code: preResult.code,
           realPath: request.realPath,
           syntax: request.syntax,
+          environmentVariables: request.environmentVariables,
         },
         request.sourceMap?.sourceFileName,
       );
@@ -658,10 +693,6 @@ type WorkerRepresentationTransformContext = {
   canonicalPath: string;
   representation: string;
   environmentId: string;
-  environmentIds: string[];
-  targetId: string;
-  targetIds: string[];
-  platform: "node" | "browser";
   source: string;
   bytes: Uint8Array;
   metadata?: Record<string, unknown>;
@@ -695,48 +726,48 @@ async function applyRepresentationWorkerTransform(
   }
   const transform = await loadRepresentationTransform(spec.modulePath);
   const bytes = request.sourceBytes ?? new TextEncoder().encode(request.code);
+  const resultByEnvironment = new Map<
+    string,
+    Promise<WorkerRepresentationTransformResult>
+  >();
   const results = await Promise.all(
     request.envs.map(async (envId) => {
-      const result = await transform(
-        {
-          id: request.id,
-          moduleIdentity: request.moduleIdentity,
-          canonicalPath: request.canonicalPath ?? request.moduleIdentity,
-          representation,
-          environmentId: request.environments[envId],
-          environmentIds: Array.from(
-            new Set(
-              (request.allEnvIds ?? request.envs).map(
-                (scopeId) => request.environments[scopeId],
-              ),
-            ),
+      const hmr =
+        request.dev?.hmr === true && request.targets[envId] === "browser";
+      const environmentKey = JSON.stringify({
+        environmentId: request.environments[envId],
+        hmr,
+      });
+      let pending = resultByEnvironment.get(environmentKey);
+      if (!pending) {
+        pending = Promise.resolve(
+          transform(
+            {
+              id: request.id,
+              moduleIdentity: request.moduleIdentity,
+              canonicalPath: request.canonicalPath ?? request.moduleIdentity,
+              representation,
+              environmentId: request.environments[envId],
+              source: request.sourceBytes ? "" : request.code,
+              bytes: bytes.slice(),
+              metadata: request.resolutionMeta
+                ? structuredClone(
+                    semanticResolutionMeta(request.resolutionMeta),
+                  )
+                : undefined,
+              pkg: {
+                name: request.pkg.name,
+                version: request.pkg.version,
+              },
+              buildMode: request.buildMode ?? "development",
+              dev: { hmr },
+            },
+            { ...(spec.options ?? {}) },
           ),
-          targetId: request.targetIds[envId],
-          targetIds: Array.from(
-            new Set(
-              (request.allEnvIds ?? request.envs).map(
-                (scopeId) => request.targetIds[scopeId],
-              ),
-            ),
-          ),
-          platform: request.targets[envId],
-          source: request.sourceBytes ? "" : request.code,
-          bytes: bytes.slice(),
-          metadata: request.resolutionMeta
-            ? structuredClone(request.resolutionMeta)
-            : undefined,
-          pkg: {
-            name: request.pkg.name,
-            version: request.pkg.version,
-          },
-          buildMode: request.buildMode ?? "development",
-          dev: {
-            hmr:
-              request.dev?.hmr === true && request.targets[envId] === "browser",
-          },
-        },
-        { ...(spec.options ?? {}) },
-      );
+        );
+        resultByEnvironment.set(environmentKey, pending);
+      }
+      const result = await pending;
       if (!result || typeof result !== "object") {
         throw new Error(
           `Representation worker transform '${handlerIdentity}' returned ${String(result)}.`,
@@ -1021,7 +1052,7 @@ async function applyCachedBabelPipeline(
       platform: targetScoped && envId ? request.targets[envId] : undefined,
       syntax: request.syntax,
       buildMode: request.buildMode,
-      resolutionMeta: request.resolutionMeta,
+      resolutionMeta: semanticResolutionMeta(request.resolutionMeta),
       sourceMap: request.sourceMap
         ? {
             sourceFileName: request.sourceMap.sourceFileName,
@@ -1097,6 +1128,7 @@ async function applyCachedCoreTransform(
       syntax: request.syntax,
       codeHash: contentHash(code),
       resolvedImports: resolvedImports ?? {},
+      environmentVariables: request.environmentVariables ?? {},
       dev,
       sourceMap: request.sourceMap
         ? {
@@ -1132,6 +1164,7 @@ async function applyCachedCoreTransform(
     },
     {
       importAttrAllow: ["json"],
+      environmentVariables: request.environmentVariables,
       generateModuleOutput: false,
       sourceMap: request.sourceMap
         ? {
@@ -1454,14 +1487,6 @@ async function applyBabelStage(
         loaded,
         {
           ...pluginOptions,
-          environments: Array.from(
-            new Set(
-              request.envs.map((scopeId) => request.environments[scopeId]),
-            ),
-          ),
-          targets: Array.from(
-            new Set(request.envs.map((scopeId) => request.targetIds[scopeId])),
-          ),
           ...(pluginEnvId
             ? {
                 environmentId,
@@ -1675,10 +1700,11 @@ function normalizeSourceName(
   if (path.resolve(absoluteSource) === path.resolve(request.realPath)) {
     return request.sourceMap?.sourceFileName ?? source;
   }
-  const relative = normalizePosixPath(
-    path.relative(request.sourceMap!.outputDir, absoluteSource),
+  const identity = findPackagePathIdentity(absoluteSource);
+  return portableSourceName(
+    identity ??
+      `external-source::${normalizePosixPath(path.basename(absoluteSource))}`,
   );
-  return relative || path.basename(absoluteSource);
 }
 
 function isUrlLike(value: string): boolean {
@@ -1720,121 +1746,366 @@ async function loadRepresentationTransform(
 }
 
 function buildBaseModuleKey(request: WorkerRequest): string {
-  const envHashes = Object.fromEntries(
-    Object.entries(request.codeByEnv ?? {}).map(([envId, code]) => [
-      envId,
-      contentHash(code),
-    ]),
-  );
-  const mapHashes = Object.fromEntries(
-    Object.entries(request.mapByEnv ?? {}).map(([envId, map]) => [
-      envId,
-      contentHash(map),
-    ]),
-  );
-  const extraOutputHashes = Object.fromEntries(
-    Object.entries(request.extraOutputsByEnv ?? {}).map(([envId, outputs]) => [
-      envId,
-      Object.fromEntries(
-        Object.entries(outputs).map(([name, output]) => [
-          name,
-          contentHash(
-            JSON.stringify({
-              contentsHash:
-                output.contents != null
-                  ? contentHash(output.contents)
-                  : undefined,
-              template: output.template,
-              map: output.map,
-              metadata: output.metadata,
-            }),
-          ),
-        ]),
-      ),
-    ]),
-  );
-
   return JSON.stringify({
     artifactFormat: CELL_ARTIFACT_FORMAT,
     moduleIdentity: request.moduleIdentity,
+    linkVariantId:
+      request.id === request.moduleIdentity ? undefined : request.id,
     pkg: {
       name: request.pkg.name,
       version: request.pkg.version,
     },
-    environment: Array.from(
-      new Set(request.envs.map((scopeId) => request.environments[scopeId])),
-    ).sort(),
-    targetVariants: request.envs
-      .map((scopeId) => ({
-        targetId: request.targetIds[scopeId],
-        platform: request.targets[scopeId],
-        defines: request.defines[scopeId],
-      }))
-      .sort((left, right) => left.targetId.localeCompare(right.targetId)),
     syntax: request.syntax,
     codeHash: contentHash(request.sourceBytes ?? request.code),
     moduleType: request.moduleType ?? "javascript",
     importRepresentation: request.importRepresentation,
     canonicalPath: request.canonicalPath ?? request.moduleIdentity,
     buildMode: request.buildMode ?? "development",
-    dev: {
-      hmr: request.dev?.hmr === true,
-    },
     transformConfig: request.transformConfig,
-    resolutionMeta: request.resolutionMeta,
-    envHashes,
-    mapHashes,
+    environmentVariables: request.environmentVariables ?? {},
+    resolutionMeta: semanticResolutionMeta(request.resolutionMeta),
     sourceMap: request.sourceMap
       ? {
           sourceFileName: request.sourceMap.sourceFileName,
           sourcesContent: request.sourceMap.sourcesContent,
         }
       : undefined,
-    extraOutputHashes,
-    linkReferencesByEnv: request.linkReferencesByEnv,
     workerProfile: request.workerProfile.fingerprint,
   });
+}
+
+function semanticResolutionMeta(
+  metadata: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!metadata) return undefined;
+  const semantic = { ...metadata };
+  delete semantic.requestedEnvironment;
+  delete semantic.requestedTarget;
+  delete semantic.requestedUrlMode;
+  return semantic;
+}
+
+function scopeInputFingerprint(
+  request: WorkerRequest,
+  scopeId: string,
+): string {
+  const outputs = request.extraOutputsByEnv?.[scopeId];
+  const extraOutputHashes = outputs
+    ? Object.fromEntries(
+        Object.entries(outputs)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([name, output]) => [
+            name,
+            contentHash(
+              JSON.stringify({
+                contentsHash:
+                  output.contents != null
+                    ? contentHash(output.contents)
+                    : undefined,
+                template: output.template,
+                map: output.map,
+                metadata: output.metadata,
+              }),
+            ),
+          ]),
+      )
+    : undefined;
+  return contentHash(
+    JSON.stringify({
+      behavior: scopeBehaviorKey(request, scopeId),
+      codeHash: request.codeByEnv?.[scopeId]
+        ? contentHash(request.codeByEnv[scopeId])
+        : undefined,
+      mapHash: request.mapByEnv?.[scopeId]
+        ? contentHash(request.mapByEnv[scopeId])
+        : undefined,
+      extraOutputHashes,
+      linkReferences: request.linkReferencesByEnv?.[scopeId],
+    }),
+  );
+}
+
+function canonicalScopedValues<T, U>(
+  request: WorkerRequest,
+  values: Record<string, T> | undefined,
+  normalize: (value: T) => U,
+): Array<{ behavior: string; value: U }> {
+  if (!values) return [];
+  const entries = request.envs.flatMap((scopeId) =>
+    values[scopeId] === undefined
+      ? []
+      : [
+          {
+            behavior: scopeBehaviorKey(request, scopeId),
+            value: normalize(values[scopeId]),
+          },
+        ],
+  );
+  return Array.from(
+    new Map(
+      entries.map((entry) => [JSON.stringify(entry), entry] as const),
+    ).values(),
+  ).sort((left, right) =>
+    JSON.stringify(left).localeCompare(JSON.stringify(right)),
+  );
+}
+
+function scopeBehaviorKey(request: WorkerRequest, scopeId: string): string {
+  const targetScopedTransforms = [
+    request.workerProfile.transformPre,
+    request.workerProfile.transform,
+    request.workerProfile.transformFinalize,
+    request.workerProfile.transformPost,
+  ].flatMap((stage, stageIndex) =>
+    stage.flatMap((entry, entryIndex) =>
+      entry.targets !== undefined &&
+      transformEntryApplies(
+        entry,
+        request.environments[scopeId],
+        request.targetIds[scopeId],
+      )
+        ? [
+            {
+              stageIndex,
+              entryIndex,
+              environments: entry.environments,
+              targets: entry.targets,
+            },
+          ]
+        : [],
+    ),
+  );
+  return contentHash(
+    JSON.stringify({
+      environmentId: request.environments[scopeId],
+      defines: request.defines[scopeId] ?? {},
+      hmr: request.dev?.hmr === true && request.targets[scopeId] === "browser",
+      targetScopedTransforms,
+      targetContext:
+        targetScopedTransforms.length > 0
+          ? {
+              targetId: request.targetIds[scopeId],
+              platform: request.targets[scopeId],
+            }
+          : undefined,
+    }),
+  );
 }
 
 function buildModuleKey(
   baseKey: string,
   resolvedImportsByEnv: ResolvedImportsByEnv,
+  request: WorkerRequest,
 ): string {
-  const resolved = Object.fromEntries(
-    Object.entries(resolvedImportsByEnv)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([envId, entries]) => [
-        envId,
-        Object.fromEntries(
-          Object.entries(entries)
-            .sort(([left], [right]) => left.localeCompare(right))
-            .map(([key, value]) => [
-              key,
-              {
-                target: value.target,
-                type: value.type,
-                representation: value.representation,
-                meta: value.meta,
-              },
-            ]),
-        ),
-      ]),
+  const resolved = canonicalScopedValues(
+    request,
+    resolvedImportsByEnv,
+    (entries) =>
+      Object.fromEntries(
+        Object.entries(entries)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, value]) => [
+            key,
+            {
+              target: value.target,
+              type: value.type,
+              representation: value.representation,
+              meta: value.meta,
+            },
+          ]),
+      ),
   );
   return JSON.stringify({ baseKey, resolved });
+}
+
+async function readShardedModuleCache(
+  cachePaths: FileCachePaths,
+  baseKey: string,
+  request: WorkerRequest,
+): Promise<ValidatedModuleCacheRecord | null> {
+  const dependencyRequestsByEnv: Record<string, WorkerImportRequest[]> = {};
+  for (const scopeId of request.envs) {
+    const inputFingerprint = scopeInputFingerprint(request, scopeId);
+    const input = await readJsonIfExists<{
+      inputFingerprint?: string;
+      dependencyRequests?: WorkerImportRequest[];
+    }>(path.join(cachePaths.inputDir, `${inputFingerprint}.json`));
+    if (
+      input?.inputFingerprint !== inputFingerprint ||
+      !Array.isArray(input.dependencyRequests)
+    ) {
+      return null;
+    }
+    dependencyRequestsByEnv[scopeId] = input.dependencyRequests;
+  }
+
+  const resolvedImportsByEnv = await resolveDependencyRequests(
+    dependencyRequestsByEnv,
+  );
+  const matchedByEnv = new Map<
+    string,
+    ModuleCacheRecord["scopeVariants"][string]
+  >();
+  for (const scopeId of request.envs) {
+    const inputFingerprint = scopeInputFingerprint(request, scopeId);
+    const resolutionFingerprint = resolvedImportsFingerprint(
+      resolvedImportsByEnv[scopeId],
+    );
+    const variant = await readJsonIfExists<
+      ModuleCacheRecord["scopeVariants"][string]
+    >(
+      path.join(
+        cachePaths.scopeVariantDir,
+        `${scopeCacheVariantKey(inputFingerprint, resolutionFingerprint)}.json`,
+      ),
+    );
+    if (
+      variant?.inputFingerprint !== inputFingerprint ||
+      variant.resolutionFingerprint !== resolutionFingerprint ||
+      !Array.isArray(variant.dependencyRequests) ||
+      !variant.fileRecord
+    ) {
+      return null;
+    }
+    matchedByEnv.set(scopeId, variant);
+  }
+
+  return createValidatedCacheRecord(
+    matchedByEnv,
+    dependencyRequestsByEnv,
+    request,
+  );
 }
 
 async function validateCacheCandidate(
   candidate: ModuleCacheRecord,
   request: WorkerRequest,
   baseKey: string,
-): Promise<ModuleCacheRecord | null> {
-  if (candidate.baseKey !== baseKey) return null;
+): Promise<ValidatedModuleCacheRecord | null> {
+  if (candidate.baseKey !== baseKey || !candidate.scopeVariants) return null;
+  const variants = Object.values(candidate.scopeVariants);
+  const dependencyRequestsByEnv: Record<string, WorkerImportRequest[]> = {};
+  for (const scopeId of request.envs) {
+    const inputFingerprint = scopeInputFingerprint(request, scopeId);
+    const matching = variants.filter(
+      (variant) => variant.inputFingerprint === inputFingerprint,
+    );
+    if (matching.length === 0) return null;
+    const serializedRequests = new Set(
+      matching.map((variant) => JSON.stringify(variant.dependencyRequests)),
+    );
+    if (serializedRequests.size !== 1) return null;
+    dependencyRequestsByEnv[scopeId] = matching[0].dependencyRequests;
+  }
+
   const resolvedImportsByEnv = await resolveDependencyRequests(
-    candidate.dependencyRequestsByEnv,
+    dependencyRequestsByEnv,
   );
-  return candidate.moduleKey === buildModuleKey(baseKey, resolvedImportsByEnv)
-    ? candidate
-    : null;
+  const matchedByEnv = new Map<
+    string,
+    ModuleCacheRecord["scopeVariants"][string]
+  >();
+  for (const scopeId of request.envs) {
+    const inputFingerprint = scopeInputFingerprint(request, scopeId);
+    const resolutionFingerprint = resolvedImportsFingerprint(
+      resolvedImportsByEnv[scopeId],
+    );
+    const variant =
+      candidate.scopeVariants[
+        scopeCacheVariantKey(inputFingerprint, resolutionFingerprint)
+      ];
+    if (!variant) return null;
+    matchedByEnv.set(scopeId, variant);
+  }
+
+  return createValidatedCacheRecord(
+    matchedByEnv,
+    dependencyRequestsByEnv,
+    request,
+  );
+}
+
+function createValidatedCacheRecord(
+  matchedByEnv: Map<string, ModuleCacheRecord["scopeVariants"][string]>,
+  dependencyRequestsByEnv: Record<string, WorkerImportRequest[]>,
+  request: WorkerRequest,
+): ValidatedModuleCacheRecord {
+  const groups = new Map<
+    string,
+    {
+      record: FileRecord;
+      scopes: string[];
+    }
+  >();
+  for (const [scopeId, variant] of matchedByEnv) {
+    const variantId =
+      variant.fileRecord.variantId ??
+      contentHash(
+        JSON.stringify(variant.fileRecord, (key, value) =>
+          key === "envs" ||
+          key === "environmentIds" ||
+          key === "targetIds" ||
+          key === "environment"
+            ? undefined
+            : value,
+        ),
+      );
+    const group = groups.get(variantId) ?? {
+      record: variant.fileRecord,
+      scopes: [],
+    };
+    group.scopes.push(scopeId);
+    groups.set(variantId, group);
+  }
+
+  const fileRecordsByEnv: Record<string, FileRecord> = {};
+  for (const group of groups.values()) {
+    const scopes = group.scopes.sort();
+    const record: FileRecord = {
+      ...group.record,
+      environment: request.environments[scopes[0]],
+      targetIds: Array.from(
+        new Set(scopes.map((scopeId) => request.targetIds[scopeId])),
+      ).sort(),
+      environmentIds: scopes,
+      envs: scopes,
+    };
+    for (const scopeId of scopes) {
+      fileRecordsByEnv[scopeId] = record;
+    }
+  }
+  return { dependencyRequestsByEnv, fileRecordsByEnv };
+}
+
+function resolvedImportsFingerprint(
+  entries: ResolvedImportsByEnv[string] | undefined,
+): string {
+  return contentHash(
+    JSON.stringify(
+      Object.fromEntries(
+        Object.entries(entries ?? {})
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, value]) => [
+            key,
+            {
+              target: value.target,
+              type: value.type,
+              representation: value.representation,
+              meta: value.meta,
+            },
+          ]),
+      ),
+    ),
+  );
+}
+
+function scopeCacheVariantKey(
+  inputFingerprint: string,
+  resolutionFingerprint: string,
+): string {
+  return contentHash(
+    JSON.stringify({ inputFingerprint, resolutionFingerprint }),
+  );
 }
 
 async function resolveDependencyRequests(
@@ -1861,6 +2132,8 @@ function buildFileCachePaths(
     fileDir,
     artifactDir: path.join(cacheRoot, "variants", fileHash),
     modulePath: path.join(fileDir, "module.json"),
+    inputDir: path.join(fileDir, "inputs"),
+    scopeVariantDir: path.join(fileDir, "scope-variants"),
     remoteBaseKey: joinRemoteKey("files", fileHash, variantHash),
     remoteArtifactBaseKey: joinRemoteKey("variants", fileHash),
   };
@@ -1939,10 +2212,11 @@ async function writeFileCache(
   moduleKey: string,
   baseKey: string,
   dependencyRequestsByEnv: Record<string, WorkerImportRequest[]>,
+  resolvedImportsByEnv: ResolvedImportsByEnv,
   moduleIdentity: string,
   variants: ModuleVariantRecord[],
+  request: WorkerRequest,
 ): Promise<void> {
-  await fs.rm(cachePaths.fileDir, { recursive: true, force: true });
   await ensureDir(cachePaths.fileDir);
   await ensureDir(cachePaths.artifactDir);
 
@@ -1989,59 +2263,92 @@ async function writeFileCache(
   const moduleRecord: ModuleCacheRecord = {
     baseKey,
     moduleKey,
-    dependencyRequestsByEnv,
-    variants: variants.map((variant) => ({
-      ...variant,
-      record: toCachedFileRecord(
-        variant.record,
-        cachePaths.fileDir,
-        moduleIdentity,
-      ),
-    })),
-    fileRecordsByEnv: toCachedFileRecords(
-      fileRecordsByEnv,
-      cachePaths.fileDir,
-      moduleIdentity,
+    scopeVariants: Object.fromEntries(
+      request.envs.map((scopeId) => {
+        const inputFingerprint = scopeInputFingerprint(request, scopeId);
+        const resolutionFingerprint = resolvedImportsFingerprint(
+          resolvedImportsByEnv[scopeId],
+        );
+        return [
+          scopeCacheVariantKey(inputFingerprint, resolutionFingerprint),
+          {
+            inputFingerprint,
+            resolutionFingerprint,
+            dependencyRequests: dependencyRequestsByEnv[scopeId] ?? [],
+            fileRecord: toCachedFileRecord(
+              fileRecordsByEnv[scopeId],
+              cachePaths.fileDir,
+              moduleIdentity,
+            ),
+          },
+        ];
+      }),
     ),
   };
+  await writeLocalModuleMetadata(
+    cachePaths,
+    moduleRecord,
+    dependencyRequestsByEnv,
+    request,
+  );
   await writeJsonAtomic(cachePaths.modulePath, moduleRecord);
+}
+
+async function writeLocalModuleMetadata(
+  cachePaths: FileCachePaths,
+  moduleRecord: ModuleCacheRecord,
+  dependencyRequestsByEnv: Record<string, WorkerImportRequest[]>,
+  request: WorkerRequest,
+): Promise<void> {
+  await ensureDir(cachePaths.inputDir);
+  await ensureDir(cachePaths.scopeVariantDir);
+  await Promise.all([
+    ...request.envs.map((scopeId) => {
+      const inputFingerprint = scopeInputFingerprint(request, scopeId);
+      return writeJsonAtomic(
+        path.join(cachePaths.inputDir, `${inputFingerprint}.json`),
+        {
+          inputFingerprint,
+          dependencyRequests: dependencyRequestsByEnv[scopeId] ?? [],
+        },
+      );
+    }),
+    ...Object.entries(moduleRecord.scopeVariants).map(([variantKey, variant]) =>
+      writeJsonAtomic(
+        path.join(cachePaths.scopeVariantDir, `${variantKey}.json`),
+        variant,
+      ),
+    ),
+  ]);
 }
 
 async function readModuleCache(
   filePath: string,
 ): Promise<ModuleCacheRecord | null> {
-  const parsed = await readJsonIfExists<
-    Partial<ModuleCacheRecord> & {
-      irHeader?: FileRecord;
-      fileRecord?: FileRecord;
-      cacheKey?: string;
-    }
-  >(filePath);
+  const parsed = await readJsonIfExists<Partial<ModuleCacheRecord>>(filePath);
   if (!parsed) {
     return null;
   }
-
-  const fileRecordsByEnv =
-    parsed.fileRecordsByEnv ??
-    (parsed.fileRecord || parsed.irHeader
-      ? { default: (parsed.fileRecord ?? parsed.irHeader) as FileRecord }
-      : null);
-  const moduleKey = parsed.moduleKey ?? parsed.cacheKey;
   if (
-    !moduleKey ||
+    !parsed.moduleKey ||
     !parsed.baseKey ||
-    !parsed.dependencyRequestsByEnv ||
-    !fileRecordsByEnv
+    !parsed.scopeVariants ||
+    Object.values(parsed.scopeVariants).some(
+      (variant) =>
+        !variant ||
+        typeof variant.inputFingerprint !== "string" ||
+        typeof variant.resolutionFingerprint !== "string" ||
+        !Array.isArray(variant.dependencyRequests) ||
+        !variant.fileRecord,
+    )
   ) {
     return null;
   }
 
   return {
     baseKey: parsed.baseKey,
-    moduleKey,
-    dependencyRequestsByEnv: parsed.dependencyRequestsByEnv,
-    variants: parsed.variants,
-    fileRecordsByEnv,
+    moduleKey: parsed.moduleKey,
+    scopeVariants: parsed.scopeVariants,
   };
 }
 
@@ -2050,37 +2357,42 @@ async function readRemoteModuleCache(
   cachePaths: FileCachePaths,
   baseKey: string,
   request: WorkerRequest,
-): Promise<ModuleCacheRecord | null> {
-  const raw = await remote.get(
-    joinRemoteKey(cachePaths.remoteBaseKey, "module.json"),
+): Promise<ValidatedModuleCacheRecord | null> {
+  let lookup = await readShardedRemoteModuleCache(
+    remote,
+    cachePaths,
+    baseKey,
+    request,
   );
-  if (!raw) {
-    return null;
+  if (!lookup) {
+    const raw = await remote.get(
+      joinRemoteKey(cachePaths.remoteBaseKey, "module.json"),
+    );
+    if (!raw) return null;
+    let parsed: ModuleCacheRecord;
+    try {
+      parsed = JSON.parse(raw) as ModuleCacheRecord;
+    } catch {
+      return null;
+    }
+    if (!parsed?.scopeVariants) return null;
+    const validated = await validateCacheCandidate(parsed, request, baseKey);
+    if (!validated) return null;
+    lookup = { record: parsed, validated };
   }
 
-  let parsed: ModuleCacheRecord | null = null;
-  try {
-    parsed = JSON.parse(raw) as ModuleCacheRecord;
-  } catch {
-    return null;
-  }
-  if (!parsed || !parsed.fileRecordsByEnv) {
-    return null;
-  }
-
-  const validated = await validateCacheCandidate(parsed, request, baseKey);
-  if (!validated) return null;
-
-  const hydrated: ModuleCacheRecord = {
-    ...validated,
-    fileRecordsByEnv: hydrateCachedFileRecords(
-      validated.fileRecordsByEnv,
-      cachePaths.fileDir,
+  const hydrated: ValidatedModuleCacheRecord = {
+    ...lookup.validated,
+    fileRecordsByEnv: applyRequestLinkUsage(
+      hydrateCachedFileRecords(
+        lookup.validated.fileRecordsByEnv,
+        cachePaths.fileDir,
+        request,
+      ),
       request,
     ),
   };
 
-  await fs.rm(cachePaths.fileDir, { recursive: true, force: true });
   await ensureDir(cachePaths.fileDir);
   await ensureDir(cachePaths.artifactDir);
 
@@ -2143,18 +2455,104 @@ async function readRemoteModuleCache(
     }
   }
 
-  await writeJsonAtomic(cachePaths.modulePath, {
-    ...hydrated,
-    fileRecordsByEnv: toCachedFileRecords(
-      hydrated.fileRecordsByEnv,
-      cachePaths.fileDir,
-      request.moduleIdentity,
-    ),
-  });
   if (!(await hasCachedArtifacts(hydrated.fileRecordsByEnv))) {
     return null;
   }
+  await writeLocalModuleMetadata(
+    cachePaths,
+    lookup.record,
+    lookup.validated.dependencyRequestsByEnv,
+    request,
+  );
+  await writeJsonAtomic(cachePaths.modulePath, lookup.record);
   return hydrated;
+}
+
+async function readShardedRemoteModuleCache(
+  remote: RemoteCacheAdapter,
+  cachePaths: FileCachePaths,
+  baseKey: string,
+  request: WorkerRequest,
+): Promise<{
+  record: ModuleCacheRecord;
+  validated: ValidatedModuleCacheRecord;
+} | null> {
+  const dependencyRequestsByEnv: Record<string, WorkerImportRequest[]> = {};
+  for (const scopeId of request.envs) {
+    const inputFingerprint = scopeInputFingerprint(request, scopeId);
+    const raw = await remote.get(
+      joinRemoteKey(
+        cachePaths.remoteBaseKey,
+        "inputs",
+        `${inputFingerprint}.json`,
+      ),
+    );
+    if (!raw) return null;
+    try {
+      const input = JSON.parse(raw) as {
+        inputFingerprint?: string;
+        dependencyRequests?: WorkerImportRequest[];
+      };
+      if (
+        input.inputFingerprint !== inputFingerprint ||
+        !Array.isArray(input.dependencyRequests)
+      ) {
+        return null;
+      }
+      dependencyRequestsByEnv[scopeId] = input.dependencyRequests;
+    } catch {
+      return null;
+    }
+  }
+
+  const resolvedImportsByEnv = await resolveDependencyRequests(
+    dependencyRequestsByEnv,
+  );
+  const matchedByEnv = new Map<
+    string,
+    ModuleCacheRecord["scopeVariants"][string]
+  >();
+  const scopeVariants: ModuleCacheRecord["scopeVariants"] = {};
+  for (const scopeId of request.envs) {
+    const inputFingerprint = scopeInputFingerprint(request, scopeId);
+    const resolutionFingerprint = resolvedImportsFingerprint(
+      resolvedImportsByEnv[scopeId],
+    );
+    const key = scopeCacheVariantKey(inputFingerprint, resolutionFingerprint);
+    const raw = await remote.get(
+      joinRemoteKey(cachePaths.remoteBaseKey, "scope-variants", `${key}.json`),
+    );
+    if (!raw) return null;
+    try {
+      const variant = JSON.parse(
+        raw,
+      ) as ModuleCacheRecord["scopeVariants"][string];
+      if (
+        variant.inputFingerprint !== inputFingerprint ||
+        variant.resolutionFingerprint !== resolutionFingerprint ||
+        !Array.isArray(variant.dependencyRequests) ||
+        !variant.fileRecord
+      ) {
+        return null;
+      }
+      matchedByEnv.set(scopeId, variant);
+      scopeVariants[key] = variant;
+    } catch {
+      return null;
+    }
+  }
+  return {
+    record: {
+      baseKey,
+      moduleKey: buildModuleKey(baseKey, resolvedImportsByEnv, request),
+      scopeVariants,
+    },
+    validated: createValidatedCacheRecord(
+      matchedByEnv,
+      dependencyRequestsByEnv,
+      request,
+    ),
+  };
 }
 
 async function writeRemoteFileCache(
@@ -2164,25 +2562,34 @@ async function writeRemoteFileCache(
   moduleKey: string,
   baseKey: string,
   dependencyRequestsByEnv: Record<string, WorkerImportRequest[]>,
+  resolvedImportsByEnv: ResolvedImportsByEnv,
   moduleIdentity: string,
   variants: ModuleVariantRecord[],
+  request: WorkerRequest,
 ): Promise<void> {
   const remoteRecord: ModuleCacheRecord = {
     baseKey,
     moduleKey,
-    dependencyRequestsByEnv,
-    variants: variants.map((variant) => ({
-      ...variant,
-      record: toCachedFileRecord(
-        variant.record,
-        cachePaths.fileDir,
-        moduleIdentity,
-      ),
-    })),
-    fileRecordsByEnv: toCachedFileRecords(
-      fileRecordsByEnv,
-      cachePaths.fileDir,
-      moduleIdentity,
+    scopeVariants: Object.fromEntries(
+      request.envs.map((scopeId) => {
+        const inputFingerprint = scopeInputFingerprint(request, scopeId);
+        const resolutionFingerprint = resolvedImportsFingerprint(
+          resolvedImportsByEnv[scopeId],
+        );
+        return [
+          scopeCacheVariantKey(inputFingerprint, resolutionFingerprint),
+          {
+            inputFingerprint,
+            resolutionFingerprint,
+            dependencyRequests: dependencyRequestsByEnv[scopeId] ?? [],
+            fileRecord: toCachedFileRecord(
+              fileRecordsByEnv[scopeId],
+              cachePaths.fileDir,
+              moduleIdentity,
+            ),
+          },
+        ];
+      }),
     ),
   };
 
@@ -2232,6 +2639,32 @@ async function writeRemoteFileCache(
     }
   }
 
+  for (const scopeId of request.envs) {
+    const inputFingerprint = scopeInputFingerprint(request, scopeId);
+    const resolutionFingerprint = resolvedImportsFingerprint(
+      resolvedImportsByEnv[scopeId],
+    );
+    const key = scopeCacheVariantKey(inputFingerprint, resolutionFingerprint);
+    const variant = remoteRecord.scopeVariants[key];
+    await remote.set(
+      joinRemoteKey(cachePaths.remoteBaseKey, "scope-variants", `${key}.json`),
+      JSON.stringify(variant),
+    );
+    await remote.set(
+      joinRemoteKey(
+        cachePaths.remoteBaseKey,
+        "inputs",
+        `${inputFingerprint}.json`,
+      ),
+      JSON.stringify({
+        inputFingerprint,
+        dependencyRequests: dependencyRequestsByEnv[scopeId] ?? [],
+      }),
+    );
+  }
+
+  // Retain an aggregate snapshot for compatibility with older workers. New
+  // workers use the independently keyed immutable records above.
   await remote.set(
     joinRemoteKey(cachePaths.remoteBaseKey, "module.json"),
     JSON.stringify(remoteRecord),
@@ -2286,16 +2719,72 @@ function hydrateCachedFileRecords(
   );
 }
 
-function toCachedFileRecords(
+function applyRequestLinkUsage(
   records: Record<string, FileRecord>,
-  fileDir: string,
-  moduleIdentity: string,
+  request: WorkerRequest,
 ): Record<string, FileRecord> {
+  const requestedEnvironment =
+    typeof request.resolutionMeta?.requestedEnvironment === "string"
+      ? request.resolutionMeta.requestedEnvironment
+      : undefined;
+  const requestedTarget =
+    typeof request.resolutionMeta?.requestedTarget === "string"
+      ? request.resolutionMeta.requestedTarget
+      : undefined;
+  const requestedUrlMode =
+    request.resolutionMeta?.requestedUrlMode === "public" ||
+    request.resolutionMeta?.requestedUrlMode === "module-relative"
+      ? request.resolutionMeta.requestedUrlMode
+      : requestedTarget
+        ? "public"
+        : undefined;
+  if (!requestedEnvironment && !requestedTarget && !requestedUrlMode) {
+    return records;
+  }
+  const adaptReference = (reference: LinkReference): LinkReference => {
+    if (reference.kind !== "output-url") return reference;
+    const rest = { ...reference };
+    delete rest.environment;
+    delete rest.targetId;
+    delete rest.urlMode;
+    return {
+      ...rest,
+      ...(requestedEnvironment ? { environment: requestedEnvironment } : {}),
+      ...(requestedTarget ? { targetId: requestedTarget } : {}),
+      ...(requestedUrlMode && requestedUrlMode !== "module-relative"
+        ? { urlMode: requestedUrlMode }
+        : {}),
+    };
+  };
   return Object.fromEntries(
-    Object.entries(records).map(([envId, record]) => [
-      envId,
-      toCachedFileRecord(record, fileDir, moduleIdentity),
-    ]),
+    Object.entries(records).map(([scopeId, record]) => {
+      const linkReferences = record.linkReferences?.map(adaptReference);
+      return [
+        scopeId,
+        {
+          ...record,
+          resolutionMeta: request.resolutionMeta,
+          discoveredEntrypoints: record.discoveredEntrypoints.map((entry) => {
+            if (entry.self !== "normal") return entry;
+            const rest = { ...entry };
+            delete rest.environment;
+            delete rest.targets;
+            return {
+              ...rest,
+              ...(requestedEnvironment
+                ? { environment: requestedEnvironment }
+                : {}),
+              ...(requestedTarget ? { targets: [requestedTarget] } : {}),
+            };
+          }),
+          linkReferences,
+          cells: record.cells.map((cell) => ({
+            ...cell,
+            linkReferences: cell.linkReferences?.map(adaptReference),
+          })),
+        },
+      ];
+    }),
   );
 }
 

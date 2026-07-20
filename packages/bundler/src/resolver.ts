@@ -267,15 +267,29 @@ export async function createResolver(
       envConfig.environmentId,
     )}`;
     const moduleIdentity = `${baseModuleIdentity}${representationSuffix}${environmentSuffix}`;
+    const linkVariant =
+      representation &&
+      (importAttributes?.environment ||
+        importAttributes?.target ||
+        importAttributes?.urlMode)
+        ? `::link=${hashString(
+            JSON.stringify({
+              environment: importAttributes.environment,
+              target: importAttributes.target,
+              urlMode: importAttributes.urlMode,
+            }),
+          ).slice(0, 12)}`
+        : "";
+    const graphNodeId = `${moduleIdentity}${linkVariant}`;
     return {
-      id: moduleIdentity,
+      id: graphNodeId,
       moduleIdentity,
       filePath,
       scopeId: resolvedScopeId,
       pkg,
       target: {
         kind: "file",
-        moduleId: moduleIdentity,
+        moduleId: graphNodeId,
         canonicalPath,
       },
       type: resolved.type ?? inferModuleType(filePath),

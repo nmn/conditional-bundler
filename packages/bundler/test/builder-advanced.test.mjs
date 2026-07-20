@@ -110,7 +110,7 @@ test("bundles complex dynamic imports", async () => {
   expect(snapshot).toMatchInlineSnapshot(`
 {
   "name": "complex-dynamic",
-  "output": "const __bundler_d9pkv5gb60_output_url = [new URL("./complex-dynamic.browser.2rqcnap5.js", import.meta.url).href];
+  "output": "const __bundler_d9pkv5gb60_output_url = [new URL("./complex-dynamic.browser.6co61pqn.js", import.meta.url).href];
 
 const hadi3ogo_default = __bundler_d9pkv5gb60_output_url;
 const a5wq2vqaf__bundler_dynamic_import = () => Promise.all(hadi3ogo_default.map(_bundler_dynamic_dependency_url => import(_bundler_dynamic_dependency_url))).then(_bundler_dynamic_modules => _bundler_dynamic_modules[0]);
@@ -177,7 +177,7 @@ test("bundles a hybrid graph with conditionals, barrels, and dynamic namespace u
 {
   "name": "hybrid",
   "outputs": {
-    "hybrid.browser.bl8rpatp.js": "const __bundler_d7xkyvhykn_output_url = [new URL("./hybrid.browser.oml7x7qy.js", import.meta.url).href];
+    "hybrid.browser.gvgobzvg.js": "const __bundler_d7xkyvhykn_output_url = [new URL("./hybrid.browser.pk46wpan.id-x.js", import.meta.url).href];
 
 const a2w8rxzb5_default = __bundler_d7xkyvhykn_output_url;
 const oueauf3s_label = "base";
@@ -201,7 +201,7 @@ async function cl2aeuiz_run(key) {
   return mod.default(\`\${a1zfnyfv5_label}:\${cl2aeuiz_feature}:\${key}\`);
 }
 export { cl2aeuiz_run as run };",
-    "hybrid.browser.oml7x7qy.js": "
+    "hybrid.browser.pk46wpan.js": "
 const f29lxr59_suffix = "tail";
 const __NS__f29lxr59 = Object.create(null);
 Object.defineProperty(__NS__f29lxr59, Symbol.toStringTag, { value: "Module" });

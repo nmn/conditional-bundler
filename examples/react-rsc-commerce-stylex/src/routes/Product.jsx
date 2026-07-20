@@ -9,7 +9,7 @@ import {
   shippingWindow,
 } from "../../../react-rsc-commerce/src/lib/pricing.js";
 import { merchandisingNote } from "../../../react-rsc-commerce/src/lib/merchandising.dev.js" with {
-  condition: "DEV",
+  NODE_ENV: "development",
   else: "../../../react-rsc-commerce/src/lib/merchandising.prod.js",
 };
 import { ProductActionBoundary } from "../components/ProductActionBoundary.jsx";

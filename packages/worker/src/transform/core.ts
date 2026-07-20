@@ -21,6 +21,7 @@ import { modulePrefixIdentity } from "../module-identity.js";
 
 export type CoreTransformOptions = {
   importAttrAllow: string[];
+  environmentVariables?: Readonly<Record<string, string>>;
   generateModuleOutput?: boolean;
   sourceMap?: {
     sourceFileName: string;
@@ -77,7 +78,9 @@ export type PreparedCoreTransform = {
 };
 
 export function prepareCoreTransform(
-  input: Pick<TransformInput, "code" | "realPath" | "syntax">,
+  input: Pick<TransformInput, "code" | "realPath" | "syntax"> & {
+    environmentVariables?: Readonly<Record<string, string>>;
+  },
   sourceFileName = input.realPath,
 ): PreparedCoreTransform {
   const ast = parse(input.code, {
@@ -85,6 +88,11 @@ export function prepareCoreTransform(
     sourceFilename: sourceFileName,
     plugins: getParserPlugins(input),
   });
+  foldBuildTimeImportConditions(
+    ast,
+    input.environmentVariables ?? {},
+    input.realPath,
+  );
   return {
     ast,
     importRequests: scanImportRequestsFromAst(ast),
@@ -92,7 +100,9 @@ export function prepareCoreTransform(
 }
 
 export function scanImportRequests(
-  input: Pick<TransformInput, "code" | "realPath" | "syntax">,
+  input: Pick<TransformInput, "code" | "realPath" | "syntax"> & {
+    environmentVariables?: Readonly<Record<string, string>>;
+  },
 ): CoreImportRequest[] {
   return prepareCoreTransform(input).importRequests;
 }
@@ -166,11 +176,15 @@ export function transformWithCore(
 ): TransformResult {
   const ast =
     prepared?.ast ??
-    parse(input.code, {
-      sourceType: "module",
-      sourceFilename: options.sourceMap?.sourceFileName ?? input.realPath,
-      plugins: getParserPlugins(input),
-    });
+    prepareCoreTransform(
+      {
+        code: input.code,
+        realPath: input.realPath,
+        syntax: input.syntax,
+        environmentVariables: options.environmentVariables,
+      },
+      options.sourceMap?.sourceFileName,
+    ).ast;
 
   const traverse = ((
     traverseModule as unknown as {
@@ -235,6 +249,22 @@ export function transformWithCore(
   const exportStars: ExportStar[] = [];
   const reexportsNamed: ReexportNamed[] = [];
   const exportsLocal: ExportLocal[] = [];
+  const importedBindings = new Map<
+    string,
+    { entry: ImportEntry; specifier: ImportSpecifier }
+  >();
+  for (const entry of importMeta.imports) {
+    if (
+      entry.kind !== "value" ||
+      entry.target.kind !== "file" ||
+      entry.condition
+    ) {
+      continue;
+    }
+    for (const specifier of entry.specifiers) {
+      importedBindings.set(specifier.local, { entry, specifier });
+    }
+  }
   const externalImportLocals = new Set<string>();
   for (const entry of importMeta.imports) {
     if (entry.target.kind !== "runtime" || entry.kind !== "value") {
@@ -392,6 +422,20 @@ export function transformWithCore(
             const localRenamed = renameMap.get(local) ?? local;
             const originalLocal =
               renameReverse.get(localRenamed) ?? localRenamed;
+            const importedBinding = importedBindings.get(originalLocal);
+            if (importedBinding) {
+              reexportsNamed.push({
+                source: importedBinding.entry.source,
+                request: importedBinding.entry.request,
+                target: importedBinding.entry.target,
+                imported: importedBinding.specifier.imported,
+                exported,
+                isNamespace:
+                  importedBinding.specifier.imported === "*" || undefined,
+                sourceOrder: path.node.start ?? 0,
+              });
+              continue;
+            }
             if (exported && originalLocal !== exported) {
               exportsLocal.push({ local: exported, exported, kind: "var" });
               declarations.push(
@@ -1689,6 +1733,82 @@ function readImportAttributes(
     }
     return acc;
   }, {});
+}
+
+function foldBuildTimeImportConditions(
+  ast: t.File,
+  environmentVariables: Readonly<Record<string, string>>,
+  realPath: string,
+): void {
+  const names = Object.keys(environmentVariables);
+  const traverse = ((
+    traverseModule as unknown as {
+      default?: typeof import("@babel/traverse").default;
+    }
+  ).default ??
+    (traverseModule as unknown as typeof import("@babel/traverse").default)) as typeof import("@babel/traverse").default;
+
+  traverse(ast, {
+    ImportDeclaration(path: NodePath<t.ImportDeclaration>) {
+      const attributes = readImportAttributes(path.node);
+      const buildConditionNames = names.filter((name) =>
+        Object.prototype.hasOwnProperty.call(attributes, name),
+      );
+      if (buildConditionNames.length === 0) {
+        if (attributes.else && !attributes.condition) {
+          throw new Error(
+            `E_BUILD_CONDITION: Import 'else' at ${realPath} requires either a runtime condition or a configured environment-variable attribute.`,
+          );
+        }
+        return;
+      }
+      if (attributes.condition) {
+        throw new Error(
+          `E_BUILD_CONDITION: Import at ${realPath} cannot mix runtime and build-time conditions.`,
+        );
+      }
+
+      const matches = buildConditionNames.every(
+        (name) => attributes[name] === environmentVariables[name],
+      );
+      if (!matches && !attributes.else) {
+        if (path.node.specifiers.length > 0) {
+          throw new Error(
+            `E_BUILD_CONDITION: A build-time conditional value import at ${realPath} requires an 'else' branch.`,
+          );
+        }
+        path.remove();
+        return;
+      }
+
+      if (!matches) {
+        path.node.source = t.stringLiteral(attributes.else!);
+      }
+      const removedNames = new Set([...buildConditionNames, "else"]);
+      const importAttributes =
+        path.node.attributes ??
+        (
+          path.node as t.ImportDeclaration & {
+            assertions?: t.ImportAttribute[];
+          }
+        ).assertions ??
+        [];
+      path.node.attributes = importAttributes.filter((attribute) => {
+        if (!t.isImportAttribute(attribute)) return true;
+        const key = t.isIdentifier(attribute.key)
+          ? attribute.key.name
+          : t.isStringLiteral(attribute.key)
+            ? attribute.key.value
+            : undefined;
+        return key == null || !removedNames.has(key);
+      });
+      (
+        path.node as t.ImportDeclaration & {
+          assertions?: t.ImportAttribute[];
+        }
+      ).assertions = undefined;
+    },
+  });
 }
 
 function parseCondition(value: string): ConditionalImport["condition"] {

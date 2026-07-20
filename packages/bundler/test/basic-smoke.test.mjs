@@ -9,6 +9,28 @@ const execFileAsync = promisify(execFile);
 const rootDir = path.resolve(process.cwd());
 const exampleDir = path.join(rootDir, "examples/react-rsc-basic");
 const sourceMapRegister = "@bundler/react-rsc-plugin/register-source-maps";
+const browserCases = [
+  {
+    id: "1",
+    selected: "Chrome browser variant",
+    userAgent: "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36",
+  },
+  {
+    id: "2",
+    selected: "Firefox browser variant",
+    userAgent: "Mozilla/5.0 Firefox/128.0",
+  },
+  {
+    id: "4",
+    selected: "Safari browser variant",
+    userAgent: "Mozilla/5.0 (Macintosh) Version/17.5 Safari/605.1.15",
+  },
+  {
+    id: "0",
+    selected: "Unknown browser variant",
+    userAgent: "curl/8.7.1",
+  },
+];
 
 jest.setTimeout(120_000);
 
@@ -54,6 +76,9 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
   const counterBundle = manifest.bundles.find(
     (bundle) => bundle.id === clientReferences["/src/Counter.jsx"].client,
   );
+  const browserStringBundle = manifest.bundles.find(
+    (bundle) => bundle.id === clientReferences["/src/BrowserString.jsx"].client,
+  );
   const rawCounterCode = await fs.readFile(
     path.join(exampleDir, "dist", counterBundle.fileName),
     "utf8",
@@ -63,7 +88,7 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
     client: expect.any(String),
     server: expect.any(String),
   });
-  expect(clientBundleFiles).toHaveLength(5);
+  expect(clientBundleFiles).toHaveLength(6);
   expect(clientBundleFiles).toEqual(
     expect.arrayContaining([
       expect.stringMatching(/^Counter\.client\.react\.client\.[a-z0-9]+\.js$/),
@@ -72,11 +97,12 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
         /^PreferenceSwitch\.client\.react\.client\.[a-z0-9]+\.js$/,
       ),
       expect.stringMatching(
-        /^bundler-shared-[a-z0-9]+\.client\.react\.client\.[a-z0-9]+\.js$/,
+        /^BrowserString\.client\.react\.client\.[a-z0-9]+\.js$/,
       ),
       expect.stringMatching(
-        /^runtime-client\.client\.react\.client\.[a-z0-9]+\.js$/,
+        /^bundler-shared-[a-z0-9]+\.client\.react\.client\.[a-z0-9]+\.js$/,
       ),
+      expect.stringMatching(/^client\.client\.react\.client\.[a-z0-9]+\.js$/),
     ]),
   );
   expect(
@@ -93,6 +119,7 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
   );
   expect(commonCode).toContain("ReactSharedInternals");
   for (const logicalId of [
+    "/src/BrowserString.jsx",
     "/src/Counter.jsx",
     "/src/DraftPad.jsx",
     "/src/PreferenceSwitch.jsx",
@@ -104,16 +131,34 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
       path.join(exampleDir, "dist", referenceBundle.fileName),
       "utf8",
     );
-    expect(code).toContain(`from "./${commonBundle.fileName}"`);
+    expect(code).toContain(
+      `from "./${conditionFileName(commonBundle.fileName, "x")}"`,
+    );
     expect(code).not.toContain("ReactSharedInternals");
   }
   expect(Object.keys(clientReferences).sort()).toEqual([
+    "/src/BrowserString.jsx",
     "/src/Counter.jsx",
     "/src/DraftPad.jsx",
     "/src/PreferenceSwitch.jsx",
   ]);
   expect(JSON.stringify(clientReferences)).not.toContain(rootDir);
-  expect(counterBundle.conditionNames).toEqual(["DEV"]);
+  expect(counterBundle.conditionNames).toEqual([]);
+  expect(browserStringBundle.conditionNames).toEqual([
+    "isChrome",
+    "isFirefox",
+    "isSafari",
+  ]);
+  expect(manifest.metadata.conditions.global).toEqual([
+    "isChrome",
+    "isFirefox",
+    "isSafari",
+  ]);
+  await expect(
+    fs.readFile(path.join(exampleDir, "dist/conditions.json"), "utf8"),
+  ).resolves.toBe(
+    JSON.stringify(["isChrome", "isFirefox", "isSafari"], null, 2),
+  );
   for (const bundle of manifest.bundles) {
     expect(bundle.mapFileName).toBe(`${bundle.fileName}.map`);
     expect(
@@ -136,19 +181,30 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
     expect(html).toContain(
       "Server components with a conditional client branch.",
     );
+    expect(html).toMatch(/^<!DOCTYPE html>/);
+    expect(html).toContain('<html lang="en">');
+    expect(html).toContain(
+      '<meta name="description" content="A small React Server Components example built with conditional-bundler."/>',
+    );
+    expect(html).not.toContain("<style>");
     expect(html).toMatch(/<main class="shell [a-z][a-z0-9]{7}">/);
     expect(html).not.toContain("__BUNDLER_RSC_CHUNKS__");
     expect(html).toContain("__BUNDLER_RSC_DATA__");
     expect(html).not.toContain("importmap");
     expect(html).not.toContain("esm.sh");
     expect(html).toContain(
-      `<script type="module" src="/${clientBundle.fileName}"></script>`,
+      `<script type="module" src="/${conditionFileName(
+        clientBundle.fileName,
+        "0",
+      )}"></script>`,
     );
     expect(html).toContain(
       `<link rel="stylesheet" href="/${showcaseAssets.style.fileName}"`,
     );
 
-    const clientAsset = await fetchAsset(`${baseUrl}/${clientBundle.fileName}`);
+    const clientAsset = await fetchAsset(
+      `${baseUrl}/${conditionFileName(clientBundle.fileName, "0")}`,
+    );
     expect(clientAsset.contentType).toContain("text/javascript");
     expectNoWebpackRuntime(clientAsset.text);
     expect(clientAsset.text).toContain(
@@ -175,31 +231,61 @@ test("react-rsc-basic production serves hydrated RSC output and source maps", as
     expect(flight).toContain("src/Counter.jsx");
     expect(flight).toContain("src/DraftPad.jsx");
     expect(flight).toContain("src/PreferenceSwitch.jsx");
+    expect(flight).toContain("src/BrowserString.jsx");
     expect(flight).toContain(
-      `["/src/Counter.jsx",["/${counterBundle.fileName}","/${commonBundle.fileName}"],"Counter"]`,
+      `["/src/Counter.jsx",["/${conditionFileName(
+        counterBundle.fileName,
+        "0",
+      )}","/${conditionFileName(commonBundle.fileName, "0")}"],"Counter"]`,
     );
     expect(flight).not.toContain(":E");
 
     const counterAsset = await fetchAsset(
-      `${baseUrl}/${counterBundle.fileName}`,
+      `${baseUrl}/${conditionFileName(counterBundle.fileName, "0")}`,
     );
     expect(counterAsset.text).toHaveLength(rawCounterCode.length);
     expect(counterAsset.text).not.toContain("CONDITION_START");
     expect(counterAsset.text).not.toContain("console.log(message);");
-  });
 
-  await withExampleServer(
-    "scripts/start.mjs",
-    { DEV: "1" },
-    async (baseUrl) => {
-      const counterAsset = await fetchAsset(
-        `${baseUrl}/${counterBundle.fileName}`,
+    const rawResponse = await fetchWithTimeout(
+      `${baseUrl}/${clientBundle.fileName}`,
+    );
+    expect(rawResponse.status).toBe(404);
+    const invalidResponse = await fetchWithTimeout(
+      `${baseUrl}/${conditionFileName(clientBundle.fileName, "8")}`,
+    );
+    expect(invalidResponse.status).toBe(404);
+
+    for (const browser of browserCases) {
+      const response = await fetchWithTimeout(`${baseUrl}/`, {
+        headers: { "user-agent": browser.userAgent },
+      });
+      const browserHtml = await response.text();
+      expect(response.status).toBe(200);
+      expect(browserHtml).toContain(
+        `<script type="module" src="/${conditionFileName(
+          clientBundle.fileName,
+          browser.id,
+        )}"></script>`,
       );
-      expect(counterAsset.text).toHaveLength(rawCounterCode.length);
-      expect(counterAsset.text).not.toContain("CONDITION_START");
-      expect(counterAsset.text).toContain("console.log(message);");
-    },
-  );
+      const browserAsset = await fetchAsset(
+        `${baseUrl}/${conditionFileName(
+          browserStringBundle.fileName,
+          browser.id,
+        )}`,
+      );
+      expect(browserAsset.text).toHaveLength(
+        (
+          await fs.readFile(
+            path.join(exampleDir, "dist", browserStringBundle.fileName),
+            "utf8",
+          )
+        ).length,
+      );
+      expect(browserAsset.text).toContain(browser.selected);
+      expect(browserAsset.text).not.toContain("CONDITION_START");
+    }
+  });
 });
 
 test("react-rsc-basic development serves HMR output and linked source maps", async () => {
@@ -211,33 +297,37 @@ test("react-rsc-basic development serves HMR output and linked source maps", asy
       expect(html).toContain(
         "Server components with a conditional client branch.",
       );
+      expect(html).toMatch(/^<!DOCTYPE html>/);
+      expect(html).not.toContain("<style>");
       expect(html).toContain("__BUNDLER_RSC_DATA__");
       expect(html).toContain("Counter.client.react.client.");
       expect(html).toContain("DraftPad.client.react.client.");
       expect(html).toContain("PreferenceSwitch.client.react.client.");
+      expect(html).toContain("BrowserString.client.react.client.");
       const styleMatch = html.match(
         /<link rel="stylesheet" href="\/(server\.server\.react\.server\.[a-z0-9]+\.css)"/,
       );
       expect(styleMatch).not.toBeNull();
       const scriptMatch = html.match(
-        /<script type="module" src="\/(runtime-client\.client\.react\.client\.[a-z0-9]+\.js)"><\/script>/,
+        /<script type="module" src="\/(client\.client\.react\.client\.[a-z0-9]+\.id-0\.js)"><\/script>/,
       );
       expect(scriptMatch).not.toBeNull();
 
       const clientFileName = scriptMatch[1];
+      const rawClientFileName = clientFileName.replace(".id-0.js", ".js");
       const clientAsset = await fetchAsset(`${baseUrl}/${clientFileName}`);
       expect(clientAsset.contentType).toContain("text/javascript");
       expectNoWebpackRuntime(clientAsset.text);
       expect(clientAsset.text).toContain("__BUNDLER_HMR__");
       expect(clientAsset.text).toContain(
-        `//# sourceMappingURL=${clientFileName}.map`,
+        `//# sourceMappingURL=${rawClientFileName}.map`,
       );
 
-      const mapAsset = await fetchAsset(`${baseUrl}/${clientFileName}.map`);
+      const mapAsset = await fetchAsset(`${baseUrl}/${rawClientFileName}.map`);
       expect(mapAsset.contentType).toContain("application/json");
       expect(JSON.parse(mapAsset.text)).toMatchObject({
         version: 3,
-        file: clientFileName,
+        file: rawClientFileName,
         sections: expect.any(Array),
       });
 
@@ -245,6 +335,7 @@ test("react-rsc-basic development serves HMR output and linked source maps", asy
       expect(flight).toContain("src/Counter.jsx");
       expect(flight).toContain("src/DraftPad.jsx");
       expect(flight).toContain("src/PreferenceSwitch.jsx");
+      expect(flight).toContain("src/BrowserString.jsx");
       expect(flight).not.toContain(":E");
 
       const manifest = await readManifest();
@@ -293,22 +384,26 @@ test("react-rsc-basic development serves HMR output and linked source maps", asy
         if (bundle.entryId === runtimeBundle.entryId) {
           continue;
         }
-        expect(code).toContain(`from "./${runtimeBundle.fileName}"`);
+        expect(code).toContain(
+          `from "./${conditionFileName(runtimeBundle.fileName, "x")}"`,
+        );
       }
       const serverBundle = findBundle(manifest, "rsc");
-      const counterBundle = manifest.bundles.find((bundle) =>
-        bundle.conditionNames?.includes("DEV"),
+      const conditionBundle = manifest.bundles.find(
+        (bundle) =>
+          bundleAppliesTo(bundle, "client") &&
+          bundle.conditionNames?.includes("isChrome"),
       );
-      const rawCounterCode = await fs.readFile(
-        path.join(exampleDir, "dist", counterBundle.fileName),
+      const rawConditionCode = await fs.readFile(
+        path.join(exampleDir, "dist", conditionBundle.fileName),
         "utf8",
       );
-      const counterAsset = await fetchAsset(
-        `${baseUrl}/${counterBundle.fileName}`,
+      const conditionAsset = await fetchAsset(
+        `${baseUrl}/${conditionFileName(conditionBundle.fileName, "0")}`,
       );
-      expect(counterAsset.text).toHaveLength(rawCounterCode.length);
-      expect(counterAsset.text).not.toContain("CONDITION_START");
-      expect(counterAsset.text).not.toContain("console.log(message);");
+      expect(conditionAsset.text).toHaveLength(rawConditionCode.length);
+      expect(conditionAsset.text).not.toContain("CONDITION_START");
+      expect(conditionAsset.text).toContain("Unknown browser variant");
       await expectMappedServerStack(serverBundle.fileName, "?stack-probe=1");
     },
   );
@@ -432,9 +527,11 @@ async function expectShowcaseAssets(manifest) {
   expect(css.indexOf("isolation: isolate")).toBeLessThan(
     css.indexOf("position: relative"),
   );
-  expect(css.indexOf("position: relative")).toBeLessThan(
-    css.indexOf("background: var(--"),
+  const assetBackgroundIndex = css.search(
+    /background: var\(--[^)]*__finalURL\)/,
   );
+  expect(assetBackgroundIndex).toBeGreaterThan(-1);
+  expect(css.indexOf("position: relative")).toBeLessThan(assetBackgroundIndex);
 
   const serverBundle = findBundle(manifest, "rsc");
   const serverCode = await fs.readFile(
@@ -477,7 +574,7 @@ function findBundle(manifest, kind) {
       return (
         bundleAppliesTo(bundle, "client") &&
         bundle.environmentIds.includes("react.client") &&
-        bundle.entryId.endsWith("runtime-client.js")
+        bundle.entryId.endsWith("client.jsx")
       );
     }
     return (
@@ -492,8 +589,12 @@ function bundleAppliesTo(bundle, targetId) {
   return (bundle.targetIds ?? [bundle.targetId]).includes(targetId);
 }
 
-async function fetchText(url) {
-  const response = await fetchWithTimeout(url);
+function conditionFileName(fileName, id) {
+  return fileName.replace(/\.js$/, `.id-${id}.js`);
+}
+
+async function fetchText(url, options) {
+  const response = await fetchWithTimeout(url, options);
   const text = await response.text();
   if (!response.ok) {
     throw new Error(`${url} returned ${response.status}: ${text}`);
@@ -501,8 +602,8 @@ async function fetchText(url) {
   return text;
 }
 
-async function fetchAsset(url) {
-  const response = await fetchWithTimeout(url);
+async function fetchAsset(url, options) {
+  const response = await fetchWithTimeout(url, options);
   const text = await response.text();
   if (!response.ok) {
     throw new Error(`${url} returned ${response.status}: ${text}`);
@@ -513,11 +614,11 @@ async function fetchAsset(url) {
   };
 }
 
-async function fetchWithTimeout(url) {
+async function fetchWithTimeout(url, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2_000);
   try {
-    return await fetch(url, { signal: controller.signal });
+    return await fetch(url, { ...options, signal: controller.signal });
   } finally {
     clearTimeout(timeout);
   }

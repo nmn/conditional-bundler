@@ -118,6 +118,10 @@ async function expectHealthyRoutes(baseUrl) {
     const response = await fetch(`${baseUrl}${route}`);
     const text = await response.text();
     expect(response.status).toBe(200);
+    expect(text).toMatch(/^<!DOCTYPE html>/);
+    expect(text).toContain('<html lang="en">');
+    expect(text).toContain('data-router="client"');
+    expect(text).not.toContain("<style>");
     expect(text).toContain("Monarch Goods");
     expect(text).not.toContain("Internal server error");
   }
@@ -130,6 +134,7 @@ async function expectHealthyRoutes(baseUrl) {
 function expectClientComponentParity(clientReferences) {
   const ids = Object.keys(clientReferences);
   for (const fileName of [
+    "../BrowserString.jsx",
     "CartContext.jsx",
     "CartTable.jsx",
     "CategoryPicker.jsx",
@@ -137,8 +142,13 @@ function expectClientComponentParity(clientReferences) {
     "DeliveryEstimator.jsx",
     "HomeCounter.jsx",
     "ProductActions.jsx",
+    "Router.jsx",
   ]) {
-    expect(ids).toContain(`/src/client/${fileName}`);
+    expect(ids).toContain(
+      fileName.startsWith("../")
+        ? `/src/${fileName.slice(3)}`
+        : `/src/client/${fileName}`,
+    );
   }
 }
 
@@ -168,10 +178,16 @@ function clientReferenceChunkUrls(manifest, clientReferences) {
         const entrypoint = entrypoints.find(
           (candidate) => candidate.bundleId === reference.client,
         );
-        return (entrypoint?.bundles ?? []).map((fileName) => `/${fileName}`);
+        return (entrypoint?.bundles ?? []).map(
+          (fileName) => `/${conditionFileName(fileName, "0")}`,
+        );
       }),
     ),
   );
+}
+
+function conditionFileName(fileName, id) {
+  return fileName.replace(/\.js$/, `.id-${id}.js`);
 }
 
 async function withServer(script, run) {

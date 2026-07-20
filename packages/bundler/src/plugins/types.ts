@@ -6,7 +6,7 @@ import type {
   ResourceTemplate,
 } from "@bundler/shared";
 import type { BundleManifest } from "../manifest.js";
-import type { OutputSpec, Platform } from "../config.js";
+import type { BundleEntryKind, OutputSpec, Platform } from "../config.js";
 
 export type EnvValue<T> = T | ({ default?: T } & Record<string, T | undefined>);
 
@@ -56,11 +56,8 @@ export type RepresentationWorkerTransformContext = {
   moduleIdentity: string;
   canonicalPath: string;
   representation: string;
+  /** Representation transforms are semantic-environment scoped, not target scoped. */
   environmentId: string;
-  environmentIds: string[];
-  targetId: string;
-  targetIds: string[];
-  platform: Platform;
   source: string;
   bytes: Uint8Array;
   metadata?: Record<string, unknown>;
@@ -88,9 +85,7 @@ export type ScopedBabelPluginSpec =
 export type TransformStageContext = {
   id: string;
   filePath: string;
-  environments: string[];
   environmentId?: string;
-  targets: string[];
   targetId?: string;
   platform?: Platform;
   pkg: { name: string; version: string; root: string };
@@ -173,6 +168,7 @@ export type DocumentTransformResult = {
 export type BundlePlanDraft = {
   envId: string;
   entryId: string;
+  entryKind?: BundleEntryKind;
   exportMode: "entry" | "dynamic";
   modules: string[];
   conditions: Array<{ moduleId: string; condition: ConditionExpr }>;
@@ -191,9 +187,15 @@ export type BeforeCombineContext = {
 export type AfterCombineContext = {
   envId: string;
   entryId: string;
+  entryKind: BundleEntryKind;
   exportMode: "entry" | "dynamic";
   code: string;
   map?: string;
+  /**
+   * Structured link metadata for the combined code. Hooks that add, remove,
+   * or rename placeholders can return a replacement reference list.
+   */
+  references: LinkReference[];
   emitFile: EmitFile;
 };
 
@@ -208,11 +210,12 @@ export type BuildEndContext = {
       environmentId: string;
       targetId: string;
       entryId: string;
+      entryKind: BundleEntryKind;
       exportMode: "entry" | "dynamic";
     }>;
-    environmentId: string;
-    targetId: string;
-    platform: Platform;
+    environmentId?: string;
+    targetId?: string;
+    platform?: Platform;
     envId: string;
     entryId: string;
     fileName: string;
@@ -221,7 +224,11 @@ export type BuildEndContext = {
   diagnostics: Diagnostic[];
   modules: FileRecord[];
   outputs: OutputSpec;
-  resolveReference: (referenceId: string, fromFileName: string) => string;
+  resolveReference: (
+    referenceId: string,
+    fromFileName: string,
+    scopeId?: string,
+  ) => string;
   emitFile: EmitFile;
 };
 
@@ -241,20 +248,30 @@ export type GenerateBundleResourcesContext = {
       environmentId: string;
       targetId: string;
       entryId: string;
+      entryKind: BundleEntryKind;
       exportMode: "entry" | "dynamic";
     }>;
-    environmentId: string;
-    targetId: string;
-    platform: Platform;
+    environmentId?: string;
+    targetId?: string;
+    platform?: Platform;
     envId: string;
     entryId: string;
     modules: string[];
   }>;
   modules: FileRecord[];
   outputs: OutputSpec;
-  resolveReference: (referenceId: string, fromFileName: string) => string;
+  resolveReference: (
+    referenceId: string,
+    fromFileName: string,
+    scopeId?: string,
+  ) => string;
   emitFile: EmitFile;
 };
+
+export type PlanBundleResourcesContext = Omit<
+  GenerateBundleResourcesContext,
+  "resolveReference" | "emitFile"
+>;
 
 export type BeforeCombineHook = (
   context: BeforeCombineContext,
@@ -263,8 +280,12 @@ export type BeforeCombineHook = (
 export type AfterCombineHook = (
   context: AfterCombineContext,
 ) =>
-  | Promise<{ code: string; map?: string } | string | void>
-  | { code: string; map?: string }
+  | Promise<
+      | { code: string; map?: string; references?: LinkReference[] }
+      | string
+      | void
+    >
+  | { code: string; map?: string; references?: LinkReference[] }
   | string
   | void;
 
@@ -276,6 +297,16 @@ export type BuildEndHook = (context: BuildEndContext) => Promise<void> | void;
 export type GenerateBundleResourcesHook = (
   context: GenerateBundleResourcesContext,
 ) => Promise<void> | void;
+export type PlanBundleResourcesHook = (
+  context: PlanBundleResourcesContext,
+) => /**
+   * Return a deterministic descriptor for every bundle. Use an explicit
+   * sentinel such as "none" when the plugin emits no resource for a bundle;
+   * omitted descriptors conservatively prevent cross-scope coalescing.
+   */
+  | Promise<Record<string, string | undefined> | void>
+  | Record<string, string | undefined>
+  | void;
 
 export type RepresentationHandler = {
   /**
@@ -333,6 +364,7 @@ export type InlineBundlerPlugin = {
   beforeCombine?: EnvValue<BeforeCombineHook[]>;
   afterCombine?: EnvValue<AfterCombineHook[]>;
   buildEnd?: BuildEndHook;
+  planBundleResources?: PlanBundleResourcesHook;
   generateBundleResources?: GenerateBundleResourcesHook;
   representations?: Record<string, RepresentationHandler>;
   manualChunk?: ManualChunkHook;
@@ -390,6 +422,7 @@ export type NormalizedPlugin = {
   beforeCombine?: InlineBundlerPlugin["beforeCombine"];
   afterCombine?: InlineBundlerPlugin["afterCombine"];
   buildEnd?: BuildEndHook;
+  planBundleResources?: PlanBundleResourcesHook;
   generateBundleResources?: GenerateBundleResourcesHook;
   representations?: Record<string, NormalizedRepresentationHandler>;
   manualChunk?: ManualChunkHook;

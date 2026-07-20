@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useId, useState } from "react";
+import React, { useState } from "react";
 
 const maxLength = 80;
+const fieldId = "local-draft";
 
 export function DraftPad() {
-  const fieldId = useId();
   const [draft, setDraft] = useState("");
 
   return (

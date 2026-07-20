@@ -20,6 +20,9 @@ export default {
     "react.server": {},
     "react.client": {},
   },
+  environmentVariables: {
+    NODE_ENV: process.env.NODE_ENV ?? "development",
+  },
   entries: [
     {
       path: path.join(root, "src/server.jsx"),
@@ -39,7 +42,7 @@ export default {
       name: "react-rsc-commerce",
       jsx: "classic",
       clientEntry: false,
-      runtimeEntry: true,
+      runtimeEntry: false,
     }),
     plugin("@bundler/cjs-to-esm/bundler"),
   ],

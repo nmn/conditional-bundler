@@ -7,6 +7,7 @@
   "exports": {
     ".": "./index.mjs",
     "./register-source-maps": "./register-source-maps.cjs",
+    "./runtime-client": "./runtime-client.js",
     "./transform": "./transform.mjs"
   },
   "dependencies": {

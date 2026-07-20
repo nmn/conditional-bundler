@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useId, useState } from "react";
+import React, { useState } from "react";
 import * as stylex from "@stylexjs/stylex";
 
 export function DeliveryEstimator() {
-  const selectId = useId();
+  const selectId = "delivery-region";
   const [zone, setZone] = useState("local");
 
   return (

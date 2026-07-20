@@ -134,9 +134,6 @@ importers:
       '@bundler/react-server-dom':
         specifier: workspace:*
         version: link:../../packages/react-server-dom
-      '@bundler/rsc-example-server':
-        specifier: workspace:*
-        version: link:../../packages/rsc-example-server
       '@bundler/stylex-plugin':
         specifier: workspace:*
         version: link:../../packages/stylex-plugin
@@ -173,9 +170,6 @@ importers:
       '@bundler/react-server-dom':
         specifier: workspace:*
         version: link:../../packages/react-server-dom
-      '@bundler/rsc-example-server':
-        specifier: workspace:*
-        version: link:../../packages/rsc-example-server
       '@bundler/tailwind-plugin':
         specifier: workspace:*
         version: link:../../packages/tailwind-plugin
@@ -209,9 +203,6 @@ importers:
       '@bundler/react-rsc-plugin':
         specifier: workspace:*
         version: link:../../packages/react-rsc-plugin
-      '@bundler/spa-example-server':
-        specifier: workspace:*
-        version: link:../../packages/spa-example-server
       '@bundler/stylex-plugin':
         specifier: workspace:*
         version: link:../../packages/stylex-plugin
@@ -251,9 +242,6 @@ importers:
       '@bundler/react-rsc-plugin':
         specifier: workspace:*
         version: link:../../packages/react-rsc-plugin
-      '@bundler/spa-example-server':
-        specifier: workspace:*
-        version: link:../../packages/spa-example-server
       '@bundler/tailwind-plugin':
         specifier: workspace:*
         version: link:../../packages/tailwind-plugin
@@ -292,6 +280,9 @@ importers:
       '@babel/types':
         specifier: ^7.24.0
         version: 7.28.6
+      '@bundler/asset-imports':
+        specifier: workspace:*
+        version: link:../asset-imports
       '@bundler/assets':
         specifier: workspace:*
         version: link:../assets
@@ -301,9 +292,15 @@ importers:
       '@bundler/css-plugin':
         specifier: workspace:*
         version: link:../css-plugin
+      '@bundler/dynamic-imports':
+        specifier: workspace:*
+        version: link:../dynamic-imports
       '@bundler/html-plugin':
         specifier: workspace:*
         version: link:../html-plugin
+      '@bundler/import-attributes':
+        specifier: workspace:*
+        version: link:../import-attributes
       '@bundler/json-plugin':
         specifier: workspace:*
         version: link:../json-plugin
@@ -313,6 +310,9 @@ importers:
       '@bundler/node-package-resolver':
         specifier: workspace:*
         version: link:../node-package-resolver
+      '@bundler/query-imports':
+        specifier: workspace:*
+        version: link:../query-imports
       '@bundler/shared':
         specifier: workspace:*
         version: link:../shared
@@ -443,21 +443,7 @@ importers:
         specifier: 19.2.5
         version: 19.2.5(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(webpack@5.106.2)
 
-  packages/rsc-example-server:
-    dependencies:
-      '@bundler/react-server-dom':
-        specifier: workspace:*
-        version: link:../react-server-dom
-      react:
-        specifier: 19.2.5
-        version: 19.2.5
-      react-dom:
-        specifier: 19.2.5
-        version: 19.2.5(react@19.2.5)
-
   packages/shared: {}
-
-  packages/spa-example-server: {}
 
   packages/static-assets:
     dependencies:

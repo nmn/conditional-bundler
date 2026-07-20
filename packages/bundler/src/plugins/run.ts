@@ -6,6 +6,7 @@ import type {
   BuildEndContext,
   BuildStartContext,
   GenerateBundleResourcesContext,
+  PlanBundleResourcesContext,
   BundlePlanDraft,
   DocumentTransformContext,
   DocumentTransformResult,
@@ -104,8 +105,16 @@ export async function runBeforeCombine(
 export async function runAfterCombine(
   plugins: NormalizedPlugin[],
   context: AfterCombineContext,
-): Promise<{ code: string; map?: string }> {
-  let current = { code: context.code, map: context.map };
+): Promise<{
+  code: string;
+  map?: string;
+  references: AfterCombineContext["references"];
+}> {
+  let current = {
+    code: context.code,
+    map: context.map,
+    references: context.references,
+  };
   for (const plugin of plugins) {
     const hooks = getEnvListValue(plugin.afterCombine, context.envId);
     for (const hook of hooks) {
@@ -116,7 +125,7 @@ export async function runAfterCombine(
             `Plugin '${plugin.name}' changed combined code without returning an updated source map.`,
           );
         }
-        current = { code: next, map: current.map };
+        current = { ...current, code: next };
         continue;
       }
       if (next) {
@@ -131,6 +140,7 @@ export async function runAfterCombine(
         current = {
           code: next.code,
           map: next.map ?? current.map,
+          references: next.references ?? current.references,
         };
       }
     }
@@ -163,4 +173,26 @@ export async function runGenerateBundleResources(
   for (const plugin of plugins) {
     await plugin.generateBundleResources?.(context);
   }
+}
+
+export async function runPlanBundleResources(
+  plugins: NormalizedPlugin[],
+  context: PlanBundleResourcesContext,
+): Promise<Map<string, string[]>> {
+  const fingerprints = new Map(
+    context.bundles.map((bundle) => [bundle.id, [] as string[]]),
+  );
+  for (const plugin of plugins) {
+    if (!plugin.generateBundleResources) continue;
+    const planned = await plugin.planBundleResources?.(context);
+    for (const bundle of context.bundles) {
+      const value = planned?.[bundle.id];
+      const fingerprint =
+        typeof value === "string"
+          ? `${plugin.resourceFingerprint ?? plugin.name}:${value}`
+          : `${plugin.resourceFingerprint ?? plugin.name}:scope:${bundle.envId}`;
+      fingerprints.get(bundle.id)?.push(fingerprint);
+    }
+  }
+  return fingerprints;
 }

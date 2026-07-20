@@ -20,6 +20,9 @@ export default {
     "react.server": {},
     "react.client": {},
   },
+  environmentVariables: {
+    NODE_ENV: process.env.NODE_ENV ?? "development",
+  },
   entries: [
     {
       path: path.join(root, "src/server.jsx"),
@@ -39,12 +42,12 @@ export default {
       name: "react-rsc-basic",
       jsx: "classic",
       clientEntry: false,
-      runtimeEntry: true,
+      runtimeEntry: false,
     }),
     plugin("@bundler/cjs-to-esm/bundler"),
   ],
   cacheDir: path.join(root, ".cache/conditional-bundler"),
-  maxWorkers: 2,
+  maxWorkers: 6,
   diagnostics: "human",
   dev: isDev
     ? {

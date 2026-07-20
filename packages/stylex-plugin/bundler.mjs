@@ -1,6 +1,7 @@
 import path from "node:path";
 import { createRequire } from "node:module";
 import {
+  contentHash,
   contentHashShort,
   findPkgRoot,
   normalizePosixPath,
@@ -42,17 +43,16 @@ export default function stylexBundlerPlugin(options = {}) {
         },
       ],
     ],
-    async generateBundleResources(context) {
-      const rules = dedupeRules(
-        context.modules.flatMap((moduleRecord) =>
-          Object.values(moduleRecord.extraOutputs ?? {}).flatMap((output) =>
-            output.type === "stylex-json" &&
-            Array.isArray(output.metadata?.rules)
-              ? output.metadata.rules
-              : [],
-          ),
-        ),
+    planBundleResources(context) {
+      const rules = collectStylexRules(context.modules);
+      const fingerprint =
+        rules.length === 0 ? "none" : contentHash(JSON.stringify(rules));
+      return Object.fromEntries(
+        context.bundles.map((bundle) => [bundle.id, fingerprint]),
       );
+    },
+    async generateBundleResources(context) {
+      const rules = collectStylexRules(context.modules);
       if (rules.length === 0) {
         return;
       }
@@ -110,6 +110,18 @@ export default function stylexBundlerPlugin(options = {}) {
       }
     },
   };
+}
+
+function collectStylexRules(modules) {
+  return dedupeRules(
+    modules.flatMap((moduleRecord) =>
+      Object.values(moduleRecord.extraOutputs ?? {}).flatMap((output) =>
+        output.type === "stylex-json" && Array.isArray(output.metadata?.rules)
+          ? output.metadata.rules
+          : [],
+      ),
+    ),
+  );
 }
 
 function outputAxisToken(values, override) {

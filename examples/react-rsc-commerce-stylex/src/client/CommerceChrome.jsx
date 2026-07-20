@@ -7,22 +7,8 @@ import { useCart } from "./CartContext.jsx";
 export function CommerceChrome({ children, path }) {
   const cart = useCart();
 
-  function handleClick(event) {
-    const anchor = event.target.closest("a[href]");
-    if (!anchor || anchor.target || anchor.origin !== window.location.origin) {
-      return;
-    }
-    event.preventDefault();
-    window.dispatchEvent(
-      new CustomEvent("bundler:rsc-navigate", {
-        cancelable: true,
-        detail: { path: anchor.pathname + anchor.search },
-      }),
-    );
-  }
-
   return (
-    <div onClick={handleClick}>
+    <>
       <aside {...stylex.props(styles.clientRail)} aria-label="Cart status">
         <a href="/cart" {...stylex.props(styles.cartChip)}>
           <span {...stylex.props(styles.count)}>{cart.count}</span>
@@ -34,19 +20,24 @@ export function CommerceChrome({ children, path }) {
         <span {...stylex.props(styles.smallCaps)}>{path || "/"}</span>
       </aside>
       {children}
-    </div>
+    </>
   );
 }
 
 const styles = stylex.create({
   clientRail: {
     alignItems: "center",
-    bottom: 18,
     display: "flex",
     gap: 8,
-    position: "fixed",
-    right: 18,
-    zIndex: 20,
+    justifyContent: "flex-end",
+    marginInline: "auto",
+    maxWidth: 1380,
+    paddingBlockStart: 12,
+    paddingInline: 32,
+    "@media (max-width: 640px)": {
+      justifyContent: "flex-start",
+      paddingInline: 16,
+    },
   },
   cartChip: {
     alignItems: "center",

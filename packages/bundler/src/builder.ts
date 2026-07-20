@@ -2,10 +2,11 @@ import fs from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { availableParallelism } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { WorkerPool } from "./worker-pool.js";
 import { resolveWorkerPath } from "./worker-path.js";
 import { joinRootURL, resolveRootURL } from "./output-url.js";
+import { withConditionIdPlaceholder, type OptionSet } from "@bundler/assets";
 import {
   collectPackageResolverCacheIdentity,
   collectResolverAliasCacheIdentity,
@@ -52,9 +53,11 @@ import {
   runBuildStart,
   runTransformDocument,
   runGenerateBundleResources,
+  runPlanBundleResources,
 } from "./plugins/run.js";
 import {
   buildScopeId,
+  type BundleEntryKind,
   normalizeBundlerConfig,
   normalizeEntrySpec,
   type BundlerConfig,
@@ -91,6 +94,8 @@ import type {
   DocumentTransformResult,
 } from "./plugins/types.js";
 
+const requireFromBundler = createRequire(import.meta.url);
+
 import type { ModuleGraph } from "./graph/build.js";
 import type {
   CellRecord,
@@ -101,6 +106,8 @@ import type {
 } from "@bundler/shared";
 
 export type BuildResult = {
+  /** Sorted, deduplicated boolean conditions used anywhere in this build. */
+  conditionNames: string[];
   bundles: Array<{
     id: string;
     /** Concrete environment/target scopes contributing to this artifact. */
@@ -112,21 +119,27 @@ export type BuildResult = {
       environmentId: string;
       targetId: string;
       entryId: string;
+      entryKind: BundleEntryKind;
       exportMode: "entry" | "dynamic";
     }>;
-    environmentId: string;
-    targetId: string;
-    platform: "node" | "browser";
+    environmentId?: string;
+    targetId?: string;
+    platform?: "node" | "browser";
     /** Internal concrete scope retained for graph and manifest lookup keys. */
     envId: string;
     entryId: string;
     fileName: string;
     runtimeHash: string;
     exportMode: "entry" | "dynamic";
+    entryKind: BundleEntryKind;
     mapFileName?: string;
     modules: string[];
     conditionNames: string[];
     dependencies: string[];
+    staticDependencies: string[];
+    dynamicDependencies: string[];
+    staticFiles: string[];
+    dynamicFiles: string[];
   }>;
   entrypoints: BundleManifest["entrypoints"];
   manifest: BundleManifest;
@@ -138,6 +151,7 @@ export type BuildResult = {
 type BundlePlan = {
   envId: string;
   entryId: string;
+  entryKind: BundleEntryKind;
   exportMode: "entry" | "dynamic";
   parts: BundlePart[];
   staticImports: StaticBundleImport[];
@@ -154,6 +168,7 @@ type PhysicalBundlePlan = {
   entrypoints: Array<{
     envId: string;
     entryId: string;
+    entryKind: BundleEntryKind;
     exportMode: "entry" | "dynamic";
   }>;
   plan: BundlePlan;
@@ -167,34 +182,41 @@ type PhysicalBundleOutput = {
 
 function describeBuildScopes(
   scopeIds: string[],
-  primaryScopeId: string,
+  _primaryScopeId: string,
   config: InternalBundlerConfig,
 ): {
   scopeIds: string[];
   environmentIds: string[];
   targetIds: string[];
-  environmentId: string;
-  targetId: string;
-  platform: "node" | "browser";
+  environmentId?: string;
+  targetId?: string;
+  platform?: "node" | "browser";
 } {
-  const primary = config.envs[primaryScopeId];
+  const environmentIds = Array.from(
+    new Set(scopeIds.map((scopeId) => config.envs[scopeId].environmentId)),
+  ).sort();
+  const targetIds = Array.from(
+    new Set(scopeIds.map((scopeId) => config.envs[scopeId].targetId)),
+  ).sort();
+  const platforms = Array.from(
+    new Set(scopeIds.map((scopeId) => config.envs[scopeId].platform)),
+  );
   return {
     scopeIds: [...scopeIds],
-    environmentIds: Array.from(
-      new Set(scopeIds.map((scopeId) => config.envs[scopeId].environmentId)),
-    ).sort(),
-    targetIds: Array.from(
-      new Set(scopeIds.map((scopeId) => config.envs[scopeId].targetId)),
-    ).sort(),
-    environmentId: primary.environmentId,
-    targetId: primary.targetId,
-    platform: primary.platform,
+    environmentIds,
+    targetIds,
+    ...(environmentIds.length === 1
+      ? { environmentId: environmentIds[0] }
+      : {}),
+    ...(targetIds.length === 1 ? { targetId: targetIds[0] } : {}),
+    ...(platforms.length === 1 ? { platform: platforms[0] } : {}),
   };
 }
 
 type BundleEntry = {
   entryId: string;
   entryNodeId?: string;
+  entryKind: BundleEntryKind;
   exportMode: "entry" | "dynamic";
 };
 
@@ -246,6 +268,7 @@ type DynamicEntryDiscovery = ModuleResolution & {
   entryId?: string;
   entryEnvs?: string[];
   exportMode?: "entry" | "dynamic";
+  entryKind?: BundleEntryKind;
 };
 
 type ModuleCollection = {
@@ -274,9 +297,95 @@ type PendingEmitFile = EmitFileInput & {
   pluginName?: string;
 };
 
+type PlannedOutput = {
+  fileName: string;
+  contents: string | Uint8Array;
+  owner: string;
+};
+
+class OutputRegistry {
+  readonly #outDir: string;
+  readonly #outputs = new Map<string, PlannedOutput>();
+
+  constructor(outDir: string) {
+    this.#outDir = path.resolve(outDir);
+  }
+
+  add(fileName: string, contents: string | Uint8Array, owner: string): string {
+    const normalized = normalizeOutputFileName(fileName);
+    const existing = this.#outputs.get(normalized);
+    if (existing) {
+      const sameOwner = existing.owner === owner;
+      const sameContents = Buffer.from(existing.contents).equals(
+        Buffer.from(contents),
+      );
+      if (!sameOwner || !sameContents) {
+        throw new Error(
+          `Output path collision for '${normalized}' between '${existing.owner}' and '${owner}'.`,
+        );
+      }
+      return normalized;
+    }
+    this.#outputs.set(normalized, {
+      fileName: normalized,
+      contents,
+      owner,
+    });
+    return normalized;
+  }
+
+  contents(fileName: string): Uint8Array | undefined {
+    const normalized = normalizeOutputFileName(fileName);
+    const output = this.#outputs.get(normalized);
+    return output ? Buffer.from(output.contents) : undefined;
+  }
+
+  async flush(): Promise<void> {
+    await fs.mkdir(this.#outDir, { recursive: true });
+    for (const output of Array.from(this.#outputs.values()).sort(
+      (left, right) => left.fileName.localeCompare(right.fileName),
+    )) {
+      const outputPath = path.join(this.#outDir, output.fileName);
+      await fs.mkdir(path.dirname(outputPath), { recursive: true });
+      await fs.writeFile(outputPath, output.contents);
+    }
+  }
+}
+
+function normalizeOutputFileName(fileName: string): string {
+  if (
+    !fileName ||
+    fileName.includes("\0") ||
+    path.isAbsolute(fileName) ||
+    /^[a-zA-Z]:[\\/]/.test(fileName)
+  ) {
+    throw new Error(`Output file name '${fileName}' must be relative.`);
+  }
+  const portable = fileName.replaceAll("\\", "/");
+  const normalized = path.posix.normalize(portable);
+  if (
+    normalized === "." ||
+    normalized === ".." ||
+    normalized.startsWith("../") ||
+    normalized.startsWith("/")
+  ) {
+    throw new Error(
+      `Output file name '${fileName}' escapes the configured output directory.`,
+    );
+  }
+  if (normalized !== portable) {
+    throw new Error(
+      `Output file name '${fileName}' must not contain redundant or traversal path segments.`,
+    );
+  }
+  return normalized;
+}
+
 type CacheRootInfo = {
   activeRoot: string;
   configHash: string;
+  transformRoot: string;
+  transformHash: string;
   remote?: RemoteCacheConfig;
 };
 
@@ -324,6 +433,7 @@ export async function buildProject(
   ];
   const sourceMapOutput = resolveSourceMapOutput(config.outputs.sourceMap);
   const pendingFiles: PendingEmitFile[] = [];
+  const outputRegistry = new OutputRegistry(config.outputs.outDir);
   const { plugins: normalizedPlugins, workerProfile } =
     await normalizePlugins(allPlugins);
   const cacheBaseDir = path.resolve(
@@ -333,12 +443,9 @@ export async function buildProject(
   );
   const debugOutputDir = await prepareDebugOutput(config, cacheBaseDir);
   const envs = Object.keys(config.envs);
-  const pool = new WorkerPool({
-    workerPath: resolveWorkerPath(),
-    size: resolveWorkerCount(config.maxWorkers),
-  });
+  let pool: WorkerPool | undefined;
   const cleanup = async () => {
-    await pool.close();
+    await pool?.close();
   };
 
   try {
@@ -367,6 +474,16 @@ export async function buildProject(
       buildMode,
     );
     explicitEntries.splice(0, explicitEntries.length, ...prepared.entries);
+    const workerCount = resolveWorkerCount(config.maxWorkers);
+    const initialWorkerCount = Math.min(
+      workerCount,
+      Math.max(1, explicitEntries.length),
+    );
+    pool = new WorkerPool({
+      workerPath: resolveWorkerPath(),
+      size: workerCount,
+      initialSize: initialWorkerCount,
+    });
     const devOptions = await resolveDevOptions(config, explicitEntries);
     const cacheRoot = await prepareCacheRoot(
       cacheBaseDir,
@@ -385,8 +502,8 @@ export async function buildProject(
       await collectTransformedModules(
         explicitEntries,
         envs,
-        cacheRoot.activeRoot,
-        cacheRoot.configHash,
+        cacheRoot.transformRoot,
+        cacheRoot.transformHash,
         cacheRoot.remote,
         normalizedPlugins,
         workerProfile,
@@ -439,6 +556,7 @@ export async function buildProject(
           resolvedMapByEnv.get(graph.envId)?.get(entry.path)?.id ??
           entry.path,
         exportMode: "entry",
+        entryKind: "explicit",
       }));
       const dynamicForEnv = pickEntriesForEnv(
         dynamicEntries,
@@ -456,6 +574,7 @@ export async function buildProject(
             resolvedMapByEnv.get(graph.envId)?.get(entry.path)?.id ??
             entry.path,
           exportMode: entry.exportMode ?? "dynamic",
+          entryKind: entry.entryKind ?? "dynamic",
         });
       }
       bundleEntriesByEnv.set(graph.envId, bundleEntries);
@@ -464,6 +583,7 @@ export async function buildProject(
       graphs,
       bundleEntriesByEnv,
       normalizedPlugins,
+      config,
     );
 
     const bundlePlans: BundlePlan[] = [];
@@ -513,6 +633,18 @@ export async function buildProject(
       bundlePlans.push(...drafts.map((draft) => fromBundleDraft(draft)));
     }
 
+    const conditionNames = Array.from(
+      new Set(bundlePlans.flatMap((plan) => plan.conditionNames)),
+    ).sort();
+    const conditionOptionSet: OptionSet = { conditions: conditionNames };
+    pendingFiles.push({
+      fileName: "conditions.json",
+      contents: JSON.stringify(conditionNames, null, 2),
+      type: "manifest",
+      contentType: "application/json; charset=utf-8",
+      global: conditionNames.length > 0 ? true : undefined,
+    });
+
     const usedAssetIds = collectUsedAssetIds(
       bundlePlans,
       fileRecords,
@@ -547,9 +679,11 @@ export async function buildProject(
       const finalBundle = await runAfterCombine(normalizedPlugins, {
         envId: plan.envId,
         entryId: plan.entryId,
+        entryKind: plan.entryKind,
         exportMode: plan.exportMode,
         code: assembled.code,
         map: sourceMapOutput ? stringifySourceMap(assembled.map) : undefined,
+        references,
         emitFile(file) {
           pendingFiles.push(file);
         },
@@ -558,14 +692,45 @@ export async function buildProject(
         {
           code: finalBundle.code,
           map: finalBundle.map,
-          references,
+          references: finalBundle.references,
         },
       ];
     }
+    const resourcePlanFingerprints = await runPlanBundleResources(
+      normalizedPlugins,
+      {
+        bundles: bundlePlans.map((plan) => {
+          const scope = config.envs[plan.envId];
+          return {
+            ...describeBuildScopes([plan.envId], plan.envId, config),
+            id: logicalBundlePlanKey(plan),
+            entrypoints: [
+              {
+                envId: plan.envId,
+                environmentId: scope.environmentId,
+                targetId: scope.targetId,
+                entryId: plan.entryId,
+                entryKind: plan.entryKind,
+                exportMode: plan.exportMode,
+              },
+            ],
+            envId: plan.envId,
+            entryId: plan.entryId,
+            modules: plan.modules,
+          };
+        }),
+        modules: fileRecords,
+        outputs: config.outputs,
+      },
+    );
     const physicalPlans = coalescePhysicalBundlePlans(
       bundlePlans,
       devOptions.hmr,
       fileRecords,
+      resolvedMapByEnv,
+      config,
+      resourcePlanFingerprints,
+      conditionNames,
     );
     const physicalBundleIdByEntrypoint = new Map(
       physicalPlans.flatMap((physicalPlan) =>
@@ -578,6 +743,19 @@ export async function buildProject(
         ),
       ),
     );
+    for (const physicalPlan of physicalPlans) {
+      for (const entrypoint of physicalPlan.entrypoints) {
+        const moduleIdentity = resolvedMapByEnv
+          .get(entrypoint.envId)
+          ?.get(entrypoint.entryId)?.moduleIdentity;
+        if (moduleIdentity) {
+          physicalBundleIdByEntrypoint.set(
+            `${entrypoint.envId}:${moduleIdentity}`,
+            physicalPlan.id,
+          );
+        }
+      }
+    }
     const resolveReference = createReferenceResolver(
       fileRecords,
       staticAssetFileNames,
@@ -626,6 +804,7 @@ export async function buildProject(
       collectResourceFingerprints(physicalPlans, pendingFiles, {
         includeGlobalStyles: !devOptions.hmr,
       }),
+      conditionNames,
     );
     bundleMap.clear();
     for (const output of bundleOutputs.values()) {
@@ -658,7 +837,6 @@ export async function buildProject(
       config,
     );
 
-    await fs.mkdir(config.outputs.outDir, { recursive: true });
     const bundles: Array<{
       id: string;
       scopeIds: string[];
@@ -669,20 +847,26 @@ export async function buildProject(
         environmentId: string;
         targetId: string;
         entryId: string;
+        entryKind: BundleEntryKind;
         exportMode: "entry" | "dynamic";
       }>;
-      environmentId: string;
-      targetId: string;
-      platform: "node" | "browser";
+      environmentId?: string;
+      targetId?: string;
+      platform?: "node" | "browser";
       envId: string;
       entryId: string;
       fileName: string;
       runtimeHash: string;
+      entryKind: BundleEntryKind;
       exportMode: "entry" | "dynamic";
       mapFileName?: string;
       modules: string[];
       conditionNames: string[];
       dependencies: string[];
+      staticDependencies: string[];
+      dynamicDependencies: string[];
+      staticFiles: string[];
+      dynamicFiles: string[];
     }> = [];
     for (const physicalPlan of physicalPlans) {
       const plan = physicalPlan.plan;
@@ -693,7 +877,17 @@ export async function buildProject(
         );
       }
       const header = [
-        emitStaticBundleImports(plan.staticImports, bundleMap, plan.envId),
+        emitStaticBundleImports(
+          plan.staticImports,
+          bundleMap,
+          plan.envId,
+          bundleOutput.fileName,
+          config.envs[plan.envId].platform === "browser" &&
+            conditionNames.length > 0
+            ? (fileName) =>
+                withConditionIdPlaceholder(fileName, conditionOptionSet)
+            : undefined,
+        ),
         emitAssetReferencePrelude(
           dedupeBundleReferences(plan.parts),
           staticAssetFileNames,
@@ -709,6 +903,7 @@ export async function buildProject(
           pendingFiles,
           config.outputs.rootURL,
           config,
+          conditionOptionSet,
         ),
       ]
         .filter(Boolean)
@@ -723,16 +918,16 @@ export async function buildProject(
           ? `${assembled.code}\n//# sourceMappingURL=${path.basename(mapFileName)}`
           : assembled.code;
 
-      const outputPath = path.join(
-        config.outputs.outDir,
+      outputRegistry.add(
         bundleOutput.fileName,
+        patchedBundle,
+        `bundle:${physicalPlan.id}`,
       );
-      await fs.writeFile(outputPath, patchedBundle, "utf8");
       if (mapFileName) {
-        await fs.writeFile(
-          path.join(config.outputs.outDir, mapFileName),
+        outputRegistry.add(
+          mapFileName,
           stringifySourceMap(assembled.map),
-          "utf8",
+          `bundle-map:${physicalPlan.id}`,
         );
       }
       const scopes = describeBuildScopes(
@@ -740,6 +935,42 @@ export async function buildProject(
         plan.envId,
         config,
       );
+      const staticDependencies = Array.from(
+        new Set(
+          (plan.staticImports ?? [])
+            .map((item) =>
+              physicalBundleIdByEntrypoint.get(`${plan.envId}:${item.entryId}`),
+            )
+            .filter((id): id is string => Boolean(id)),
+        ),
+      );
+      const dynamicDependencies = Array.from(
+        new Set(
+          dedupeBundleReferences(plan.parts)
+            .filter(
+              (
+                reference,
+              ): reference is Extract<LinkReference, { kind: "output-url" }> =>
+                reference.kind === "output-url" &&
+                reference.outputType === "script",
+            )
+            .map((reference) =>
+              physicalBundleIdByEntrypoint.get(
+                `${resolveReferenceScopeId(
+                  reference,
+                  plan.envId,
+                  config,
+                )}:${reference.outputId}`,
+              ),
+            )
+            .filter((id): id is string => Boolean(id)),
+        ),
+      );
+      const filesForBundleIds = (ids: string[]) =>
+        ids.flatMap((id) => {
+          const output = bundleOutputs.get(id);
+          return output ? [output.fileName] : [];
+        });
       bundles.push({
         ...scopes,
         id: physicalPlan.id,
@@ -755,21 +986,16 @@ export async function buildProject(
         entryId: plan.entryId,
         fileName: bundleOutput.fileName,
         runtimeHash: contentHash(assembled.code),
+        entryKind: plan.entryKind,
         exportMode: plan.exportMode,
         mapFileName,
         modules: plan.modules,
         conditionNames: plan.conditionNames,
-        dependencies: Array.from(
-          new Set(
-            (plan.staticImports ?? [])
-              .map((item) =>
-                physicalBundleIdByEntrypoint.get(
-                  `${plan.envId}:${item.entryId}`,
-                ),
-              )
-              .filter((id): id is string => Boolean(id)),
-          ),
-        ),
+        dependencies: staticDependencies,
+        staticDependencies,
+        dynamicDependencies,
+        staticFiles: filesForBundleIds(staticDependencies),
+        dynamicFiles: filesForBundleIds(dynamicDependencies),
       });
     }
 
@@ -811,10 +1037,20 @@ export async function buildProject(
             {
               bundleId: bundle.id,
               fileName: bundle.fileName,
+              entryId:
+                resolvedMapByEnv.get(entrypoint.envId)?.get(entrypoint.entryId)
+                  ?.moduleIdentity ??
+                portableManifestIdentity(entrypoint.entryId, fileRecords),
+              scopeId: entrypoint.envId,
+              entryKind: entrypoint.entryKind,
               exportMode: entrypoint.exportMode,
               environmentId: entrypoint.environmentId,
               targetId: entrypoint.targetId,
               bundles: collectBundleFiles(bundle.id),
+              staticDependencies: bundle.staticDependencies,
+              dynamicDependencies: bundle.dynamicDependencies,
+              staticFiles: bundle.staticFiles,
+              dynamicFiles: bundle.dynamicFiles,
               styles:
                 stylesByBundle.get(
                   `${entrypoint.envId}:${entrypoint.entryId}`,
@@ -825,10 +1061,11 @@ export async function buildProject(
       ),
       dynamicImports: Object.fromEntries(
         bundles.flatMap((bundle) =>
-          bundle.entrypoints.map((entrypoint) => [
-            `${entrypoint.envId}:${entrypoint.entryId}`,
-            bundle.fileName,
-          ]),
+          bundle.entrypoints.flatMap((entrypoint) =>
+            entrypoint.entryKind === "dynamic"
+              ? [[`${entrypoint.envId}:${entrypoint.entryId}`, bundle.fileName]]
+              : [],
+          ),
         ),
       ),
       emittedFiles: [],
@@ -877,6 +1114,8 @@ export async function buildProject(
       ],
       metadata: {
         conditions: {
+          fileName: "conditions.json",
+          global: conditionNames,
           byBundle: Object.fromEntries(
             physicalPlans.flatMap((physicalPlan) => {
               const value = {
@@ -919,7 +1158,7 @@ export async function buildProject(
         pendingFiles.push(file);
       },
     });
-    await flushPendingFiles(config.outputs.outDir, pendingFiles, manifest);
+    flushPendingFiles(pendingFiles, manifest, outputRegistry);
     pendingFiles.length = 0;
     await emitDocuments(
       prepared.documents,
@@ -929,15 +1168,17 @@ export async function buildProject(
       pendingFiles,
       stylesByBundle,
       documentStyleOutputs,
+      outputRegistry,
     );
-    await flushPendingFiles(config.outputs.outDir, pendingFiles, manifest);
+    flushPendingFiles(pendingFiles, manifest, outputRegistry);
     if (config.outputs.manifestFile) {
-      await fs.writeFile(
-        path.join(config.outputs.outDir, config.outputs.manifestFile),
+      outputRegistry.add(
+        config.outputs.manifestFile,
         JSON.stringify(manifest, null, 2),
-        "utf8",
+        "manifest",
       );
     }
+    await outputRegistry.flush();
 
     const hmr = devOptions.hmr
       ? {
@@ -954,6 +1195,7 @@ export async function buildProject(
       : undefined;
 
     return {
+      conditionNames,
       bundles,
       entrypoints: manifest.entrypoints,
       manifest,
@@ -1272,6 +1514,7 @@ async function emitDocuments(
   pendingFiles: PendingEmitFile[],
   stylesByBundle: Map<string, string[]>,
   documentStyleOutputs: Map<string, string>,
+  outputRegistry: OutputRegistry,
 ): Promise<void> {
   for (const document of documents) {
     const entryName = sanitizeDocumentName(document.entryId, document.filePath);
@@ -1372,9 +1615,12 @@ async function emitDocuments(
           );
         }
         if (reference.kind === "output-integrity") {
-          const contents = await fs.readFile(
-            path.join(config.outputs.outDir, target),
-          );
+          const contents = outputRegistry.contents(target);
+          if (!contents) {
+            throw new Error(
+              `Missing planned output '${target}' while computing integrity for '${document.filePath}'.`,
+            );
+          }
           return `sha384-${createHash("sha384")
             .update(contents)
             .digest("base64")}`;
@@ -1508,18 +1754,38 @@ function sanitizeDocumentName(entryId: string, filePath: string): string {
 function collectFileReferences(
   fileRecords: FileRecord[],
 ): Map<string, LinkReference> {
-  const entries: Array<[string, LinkReference]> = [];
-  for (const fileRecord of fileRecords) {
-    for (const reference of fileRecord.linkReferences ?? []) {
-      entries.push([reference.id, reference]);
+  const references = new Map<string, LinkReference>();
+  const ambiguous = new Set<string>();
+  const add = (key: string, reference: LinkReference) => {
+    const existing = references.get(key);
+    if (existing && JSON.stringify(existing) !== JSON.stringify(reference)) {
+      throw new Error(`Conflicting link reference '${key}'.`);
     }
-    for (const output of Object.values(fileRecord.extraOutputs ?? {})) {
-      for (const reference of output.template?.references ?? []) {
-        entries.push([reference.id, reference]);
+    references.set(key, reference);
+  };
+  for (const fileRecord of fileRecords) {
+    const recordReferences = [
+      ...(fileRecord.linkReferences ?? []),
+      ...Object.values(fileRecord.extraOutputs ?? {}).flatMap(
+        (output) => output.template?.references ?? [],
+      ),
+    ];
+    for (const reference of recordReferences) {
+      for (const scopeId of fileRecord.environmentIds ??
+        fileRecord.envs ??
+        []) {
+        add(`${scopeId}:${reference.id}`, reference);
+      }
+      const existing = references.get(reference.id);
+      if (existing && JSON.stringify(existing) !== JSON.stringify(reference)) {
+        references.delete(reference.id);
+        ambiguous.add(reference.id);
+      } else if (!ambiguous.has(reference.id)) {
+        references.set(reference.id, reference);
       }
     }
   }
-  return new Map(entries);
+  return references;
 }
 
 function createReferenceResolver(
@@ -1527,10 +1793,12 @@ function createReferenceResolver(
   assetFileNames: Map<string, string>,
   pendingFiles: PendingEmitFile[],
   config: InternalBundlerConfig,
-): (referenceId: string, fromFileName: string) => string {
+): (referenceId: string, fromFileName: string, scopeId?: string) => string {
   const references = collectFileReferences(fileRecords);
-  return (referenceId, fromFileName) => {
-    const reference = references.get(referenceId);
+  return (referenceId, fromFileName, scopeId) => {
+    const reference =
+      (scopeId ? references.get(`${scopeId}:${referenceId}`) : undefined) ??
+      references.get(referenceId);
     if (!reference) {
       throw new Error(`Unknown asset reference '${referenceId}'.`);
     }
@@ -1703,9 +1971,24 @@ async function prepareCacheRoot(
     config.cache?.local?.retentionDays ?? 7,
   );
 
+  const transformConfig = {
+    artifactFormat: 3,
+    workerProfile: workerProfile.fingerprint,
+    buildMode,
+    environmentVariables: config.environmentVariables ?? {},
+    transforms: serializeConfigValue(config.transforms),
+    imports: serializeConfigValue(config.imports),
+    css: config.css,
+  };
+  const transformHash = contentHash(JSON.stringify(transformConfig));
+  const transformRoot = path.join(cacheBaseDir, "transform-v3", transformHash);
+  await ensureDir(transformRoot);
+
   return {
     activeRoot,
     configHash,
+    transformRoot,
+    transformHash,
     remote: config.cache?.remote || undefined,
   };
 }
@@ -1726,6 +2009,7 @@ function normalizeConfigForCache(
           targetId,
           {
             platform: target.platform,
+            chunking: target.chunking,
             packageResolver: serializeConfigValue(target.packageResolver),
             defines: serializeConfigValue(target.defines ?? {}),
           },
@@ -1758,6 +2042,9 @@ function normalizeConfigForCache(
       }),
     ),
     buildMode,
+    environmentVariables: serializeConfigValue(
+      config.environmentVariables ?? {},
+    ),
     transforms: serializeConfigValue(config.transforms),
     imports: serializeConfigValue(config.imports),
     css: config.css,
@@ -2037,45 +2324,31 @@ function createBuiltinPlugins(config: InternalBundlerConfig): BundlerPlugin[] {
   const plugins: BundlerPlugin[] = [
     {
       __bundlerPluginRef: true,
-      module: fileURLToPath(
-        new URL("../../html-plugin/bundler.mjs", import.meta.url),
-      ),
+      module: resolveBundlerDependency("@bundler/html-plugin"),
     },
     {
       __bundlerPluginRef: true,
-      module: fileURLToPath(
-        new URL("../../json-plugin/bundler.mjs", import.meta.url),
-      ),
+      module: resolveBundlerDependency("@bundler/json-plugin"),
     },
     {
       __bundlerPluginRef: true,
-      module: fileURLToPath(
-        new URL("../../typescript-plugin/bundler.mjs", import.meta.url),
-      ),
+      module: resolveBundlerDependency("@bundler/typescript-plugin"),
     },
     {
       __bundlerPluginRef: true,
-      module: fileURLToPath(
-        new URL("../../dynamic-imports/bundler.mjs", import.meta.url),
-      ),
+      module: resolveBundlerDependency("@bundler/dynamic-imports/bundler"),
     },
     {
       __bundlerPluginRef: true,
-      module: fileURLToPath(
-        new URL("../../query-imports/bundler.mjs", import.meta.url),
-      ),
+      module: resolveBundlerDependency("@bundler/query-imports/bundler"),
     },
     {
       __bundlerPluginRef: true,
-      module: fileURLToPath(
-        new URL("../../import-attributes/bundler.mjs", import.meta.url),
-      ),
+      module: resolveBundlerDependency("@bundler/import-attributes/bundler"),
     },
     {
       __bundlerPluginRef: true,
-      module: fileURLToPath(
-        new URL("../../asset-imports/bundler.mjs", import.meta.url),
-      ),
+      module: resolveBundlerDependency("@bundler/asset-imports/bundler"),
       options: {
         imageRepresentation:
           config.imports?.bareImages === undefined
@@ -2089,9 +2362,7 @@ function createBuiltinPlugins(config: InternalBundlerConfig): BundlerPlugin[] {
     },
     {
       __bundlerPluginRef: true,
-      module: fileURLToPath(
-        new URL("../../module-paths/bundler.mjs", import.meta.url),
-      ),
+      module: resolveBundlerDependency("@bundler/module-paths/bundler"),
     },
   ];
   const cssTransformer =
@@ -2100,9 +2371,7 @@ function createBuiltinPlugins(config: InternalBundlerConfig): BundlerPlugin[] {
     const sourceMaps = resolveSourceMapOutput(config.outputs.sourceMap);
     plugins.push({
       __bundlerPluginRef: true,
-      module: fileURLToPath(
-        new URL("../../css-plugin/bundler.mjs", import.meta.url),
-      ),
+      module: resolveBundlerDependency("@bundler/css-plugin"),
       options: {
         sourceMaps: Boolean(sourceMaps),
         sourcesContent: sourceMaps?.sourcesContent ?? false,
@@ -2117,17 +2386,27 @@ function createRepresentationFallbackPlugins(): BundlerPlugin[] {
   return [
     {
       __bundlerPluginRef: true,
-      module: fileURLToPath(
-        new URL("../../static-assets/bundler.mjs", import.meta.url),
-      ),
+      module: resolveBundlerDependency("@bundler/static-assets/bundler"),
     },
   ];
+}
+
+function resolveBundlerDependency(specifier: string): string {
+  try {
+    return requireFromBundler.resolve(specifier);
+  } catch (error) {
+    throw new Error(
+      `Bundler runtime dependency '${specifier}' is unavailable. Run the package build before loading the bundler.`,
+      { cause: error },
+    );
+  }
 }
 
 function createCrossEnvironmentOwnerMaps(
   graphs: ModuleGraph[],
   entriesByEnv: Map<string, BundleEntry[]>,
   plugins: NormalizedPlugin[],
+  config: InternalBundlerConfig,
 ): Map<string, Map<string, string>> {
   type Occurrence = {
     graph: ModuleGraph;
@@ -2135,27 +2414,19 @@ function createCrossEnvironmentOwnerMaps(
     node: ModuleNode;
     consumers: Set<string>;
     consumerNodes: Map<string, string>;
-    selection: Map<string, Set<string>>;
   };
   const occurrencesByModule = new Map<string, Occurrence[]>();
   for (const graph of graphs) {
     const consumersByModule = new Map<string, Set<string>>();
     const entryNodes = new Map<string, string>();
-    const combinedSelection = new Map<string, Set<string>>();
     for (const entry of entriesByEnv.get(graph.envId) ?? []) {
       const entryNodeId = entry.entryNodeId ?? entry.entryId;
       entryNodes.set(entry.entryId, entryNodeId);
       const selection = collectBundleSelection(graph, entryNodeId);
-      for (const [moduleId, cells] of selection) {
+      for (const moduleId of selection.keys()) {
         const consumers = consumersByModule.get(moduleId) ?? new Set<string>();
         consumers.add(entry.entryId);
         consumersByModule.set(moduleId, consumers);
-        const combinedCells =
-          combinedSelection.get(moduleId) ?? new Set<string>();
-        for (const cellId of cells) {
-          combinedCells.add(cellId);
-        }
-        combinedSelection.set(moduleId, combinedCells);
       }
     }
     for (const [moduleId, consumers] of consumersByModule) {
@@ -2173,59 +2444,8 @@ function createCrossEnvironmentOwnerMaps(
             entryNodes.get(consumer) ?? consumer,
           ]),
         ),
-        selection: combinedSelection,
       });
       occurrencesByModule.set(moduleId, occurrences);
-    }
-  }
-
-  // A transform variant is only universal when its complete selected
-  // dependency chain is universal too. For example, react-dom can have the
-  // same transformed text in two environments while linking to different
-  // React condition variants. Keep removing such parents until compatibility
-  // reaches a fixed point.
-  const crossEnvironmentCompatibleModules = new Set<string>();
-  for (const [moduleId, occurrences] of occurrencesByModule) {
-    const variantIds = new Set(
-      occurrences.map((item) => item.node.irHeader.variantId),
-    );
-    const selectedCellSets = occurrences.map((item) =>
-      Array.from(item.selection.get(moduleId) ?? []).sort(),
-    );
-    const selectedCellsMatch = selectedCellSets.every((cells) =>
-      sameStringSet(selectedCellSets[0] ?? [], cells),
-    );
-    if (
-      occurrences.length > 1 &&
-      variantIds.size === 1 &&
-      !variantIds.has(undefined) &&
-      selectedCellsMatch
-    ) {
-      crossEnvironmentCompatibleModules.add(moduleId);
-    }
-  }
-  let compatibilityChanged = true;
-  while (compatibilityChanged) {
-    compatibilityChanged = false;
-    for (const moduleId of Array.from(crossEnvironmentCompatibleModules)) {
-      const occurrences = occurrencesByModule.get(moduleId) ?? [];
-      const dependencySets = occurrences.map((occurrence) =>
-        collectSelectedFileDeps(occurrence.node, occurrence.selection).sort(),
-      );
-      const referenceDependencies = dependencySets[0] ?? [];
-      const dependenciesMatch = dependencySets.every((dependencies) =>
-        sameStringSet(referenceDependencies, dependencies),
-      );
-      if (
-        !dependenciesMatch ||
-        referenceDependencies.some(
-          (dependencyId) =>
-            !crossEnvironmentCompatibleModules.has(dependencyId),
-        )
-      ) {
-        crossEnvironmentCompatibleModules.delete(moduleId);
-        compatibilityChanged = true;
-      }
     }
   }
 
@@ -2266,23 +2486,9 @@ function createCrossEnvironmentOwnerMaps(
   }
   for (const occurrences of occurrencesByModule.values()) {
     const first = occurrences[0];
-    const canShareAcrossEnvironments = crossEnvironmentCompatibleModules.has(
-      first.moduleId,
-    );
     const consumers = Array.from(
       new Set(occurrences.flatMap((item) => Array.from(item.consumers))),
     ).sort();
-    const portableConsumers = new Set(
-      consumers.map((consumer) => {
-        const occurrence = occurrences.find((item) =>
-          item.consumerNodes.has(consumer),
-        );
-        const consumerNode = occurrence?.consumerNodes.get(consumer);
-        return occurrence && consumerNode
-          ? portableGraphModuleIdentity(occurrence.graph, consumerNode)
-          : portableHashIdentity(consumer);
-      }),
-    );
     const moduleInfo = {
       id: first.moduleId,
       moduleIdentity: first.node.irHeader.moduleIdentity,
@@ -2327,6 +2533,8 @@ function createCrossEnvironmentOwnerMaps(
     }
     for (const occurrence of occurrences) {
       const localConsumers = Array.from(occurrence.consumers).sort();
+      const splitThisScope =
+        config.envs[occurrence.graph.envId].chunking === "split";
       const rootOwner = localConsumers.find(
         (consumer) =>
           occurrence.consumerNodes.get(consumer) === occurrence.moduleId,
@@ -2334,19 +2542,19 @@ function createCrossEnvironmentOwnerMaps(
       const owner = rootOwner
         ? rootOwner
         : (manualOwner ??
-          (canShareAcrossEnvironments && consumers.length > 1
-            ? createSharedBundleEntryId(portableConsumers)
-            : localConsumers.length > 1
-              ? createSharedBundleEntryId(
-                  new Set(
-                    localConsumers.map((consumer) =>
-                      portableGraphModuleIdentity(
-                        occurrence.graph,
-                        occurrence.consumerNodes.get(consumer) ?? consumer,
-                      ),
+          (splitThisScope && localConsumers.length > 1
+            ? createSharedBundleEntryId(
+                new Set(
+                  localConsumers.map((consumer) =>
+                    portableGraphModuleIdentity(
+                      occurrence.graph,
+                      occurrence.consumerNodes.get(consumer) ?? consumer,
                     ),
                   ),
-                )
+                ),
+              )
+            : localConsumers.length > 1
+              ? "bundler:shared:single"
               : localConsumers[0]));
       if (owner) {
         ownersByEnv
@@ -2355,7 +2563,156 @@ function createCrossEnvironmentOwnerMaps(
       }
     }
   }
+  splitEvaluationIncompatibleOwners(ownersByEnv, graphs, entriesByEnv);
   return ownersByEnv;
+}
+
+function splitEvaluationIncompatibleOwners(
+  ownersByEnv: Map<string, Map<string, string>>,
+  graphs: ModuleGraph[],
+  entriesByEnv: Map<string, BundleEntry[]>,
+): void {
+  type OrderedModule = {
+    moduleId: string;
+    portableId: string;
+    portableConsumers: Set<string>;
+    orderByConsumer: Map<string, number>;
+  };
+  const modulesByOwner = new Map<string, Map<string, OrderedModule>>();
+
+  for (const graph of graphs) {
+    const owners = ownersByEnv.get(graph.envId);
+    if (!owners) continue;
+    for (const entry of entriesByEnv.get(graph.envId) ?? []) {
+      const entryNodeId = entry.entryNodeId ?? entry.entryId;
+      const selection = collectBundleSelection(graph, entryNodeId);
+      const ordered = orderSelectedFiles(graph, selection);
+      const portableConsumer = portableGraphModuleIdentity(graph, entryNodeId);
+      const consumerId = `${graph.envId}\0${portableConsumer}`;
+      for (const [index, node] of ordered.entries()) {
+        const owner = owners.get(node.id);
+        if (
+          !owner ||
+          (!owner.startsWith("bundler:shared:") &&
+            !owner.startsWith("bundler:manual:"))
+        ) {
+          continue;
+        }
+        const modules = modulesByOwner.get(owner) ?? new Map();
+        const module = modules.get(node.id) ?? {
+          moduleId: node.id,
+          portableId: portableGraphModuleIdentity(graph, node.id),
+          portableConsumers: new Set<string>(),
+          orderByConsumer: new Map<string, number>(),
+        };
+        module.portableConsumers.add(portableConsumer);
+        module.orderByConsumer.set(consumerId, index);
+        modules.set(node.id, module);
+        modulesByOwner.set(owner, modules);
+      }
+    }
+  }
+
+  let reassignedSingleOwner = false;
+  for (const [owner, modulesMap] of modulesByOwner) {
+    const modules = Array.from(modulesMap.values()).sort((left, right) =>
+      left.portableId.localeCompare(right.portableId),
+    );
+    if (owner.startsWith("bundler:manual:")) {
+      if (!hasAcyclicEvaluationOrder(modules)) {
+        throw new Error(
+          `Manual chunk '${owner}' has incompatible evaluation order across entrypoints.`,
+        );
+      }
+      continue;
+    }
+
+    const compatibleGroups: OrderedModule[][] = [];
+    for (const module of modules) {
+      const group = compatibleGroups.find((candidate) =>
+        hasAcyclicEvaluationOrder([...candidate, module]),
+      );
+      if (group) {
+        group.push(module);
+      } else {
+        compatibleGroups.push([module]);
+      }
+    }
+    if (compatibleGroups.length <= 1) continue;
+
+    if (owner === "bundler:shared:single") {
+      for (const module of modules) {
+        const splitOwner = createSharedBundleEntryId(module.portableConsumers);
+        for (const owners of ownersByEnv.values()) {
+          if (owners.get(module.moduleId) === owner) {
+            owners.set(module.moduleId, splitOwner);
+          }
+        }
+      }
+      reassignedSingleOwner = true;
+      continue;
+    }
+
+    for (const group of compatibleGroups) {
+      const splitOwner = `${owner}:${contentHashShort(
+        group
+          .map((module) => module.portableId)
+          .sort()
+          .join("\0"),
+        10,
+      )}`;
+      const moduleIds = new Set(group.map((module) => module.moduleId));
+      for (const owners of ownersByEnv.values()) {
+        for (const moduleId of moduleIds) {
+          if (owners.get(moduleId) === owner) {
+            owners.set(moduleId, splitOwner);
+          }
+        }
+      }
+    }
+  }
+  if (reassignedSingleOwner) {
+    splitEvaluationIncompatibleOwners(ownersByEnv, graphs, entriesByEnv);
+  }
+}
+
+function hasAcyclicEvaluationOrder(
+  modules: Array<{ orderByConsumer: Map<string, number> }>,
+): boolean {
+  const edges = new Map(
+    modules.map((module) => [module, new Set<(typeof modules)[number]>()]),
+  );
+  const consumers = new Set(
+    modules.flatMap((module) => Array.from(module.orderByConsumer.keys())),
+  );
+  for (const consumer of consumers) {
+    const ordered = modules
+      .flatMap((module) => {
+        const order = module.orderByConsumer.get(consumer);
+        return order === undefined ? [] : [{ module, order }];
+      })
+      .sort((left, right) => left.order - right.order);
+    for (let index = 1; index < ordered.length; index += 1) {
+      if (ordered[index - 1].order !== ordered[index].order) {
+        edges.get(ordered[index - 1].module)?.add(ordered[index].module);
+      }
+    }
+  }
+
+  const active = new Set<(typeof modules)[number]>();
+  const visited = new Set<(typeof modules)[number]>();
+  const visit = (module: (typeof modules)[number]): boolean => {
+    if (active.has(module)) return false;
+    if (visited.has(module)) return true;
+    active.add(module);
+    for (const dependency of edges.get(module) ?? []) {
+      if (!visit(dependency)) return false;
+    }
+    active.delete(module);
+    visited.add(module);
+    return true;
+  };
+  return modules.every(visit);
 }
 
 function createBundlePartitions(
@@ -2621,6 +2978,9 @@ function createBundlePartitions(
       .sort()
       .map((entryId) => ({
         entryId,
+        entryKind: entryId.startsWith("bundler:manual:")
+          ? ("manual" as const)
+          : ("shared" as const),
         exportMode: "dynamic" as const,
       })),
   ].map((entry) => {
@@ -2701,7 +3061,8 @@ async function createBundlePlan(
   devOptions: ResolvedDevOptions,
   hmrTarget: boolean,
 ): Promise<BundlePlanDraftWithHmr> {
-  const { entryId, exportMode, conditions, diagnostics, selection } = partition;
+  const { entryId, entryKind, exportMode, conditions, diagnostics, selection } =
+    partition;
   const entryNode = partition.entryNodeId
     ? graph.nodes.get(partition.entryNodeId)
     : undefined;
@@ -2712,14 +3073,7 @@ async function createBundlePlan(
   const conditionRecordsForGraph = Array.from(conditions.entries())
     .filter((entry): entry is [string, ConditionExpr] => entry[1] !== undefined)
     .map(([moduleId, condition]) => ({ moduleId, condition }));
-  const selectionForOrdering = entryId.startsWith("bundler:")
-    ? new Map(
-        Array.from(selection.entries()).sort(([left], [right]) =>
-          left.localeCompare(right),
-        ),
-      )
-    : selection;
-  const orderedFiles = orderSelectedFiles(graph, selectionForOrdering);
+  const orderedFiles = orderSelectedFiles(graph, selection);
   const orderedFileIds = new Set(orderedFiles.map((node) => node.id));
   const conditionRecords = conditionRecordsForGraph.filter((record) =>
     orderedFileIds.has(record.moduleId),
@@ -2873,6 +3227,7 @@ async function createBundlePlan(
   return {
     envId: graph.envId,
     entryId,
+    entryKind,
     exportMode,
     modules: orderedFiles.map((node) => node.id),
     conditions: conditionRecords,
@@ -2902,6 +3257,7 @@ function createHmrRuntimePlan(
   return {
     envId,
     entryId,
+    entryKind: "shared",
     exportMode: "dynamic",
     modules: [],
     conditions: [],
@@ -2924,43 +3280,104 @@ function portableHashIdentity(id: string): string {
   return path.isAbsolute(id) ? normalizePosixPath(path.basename(id)) : id;
 }
 
+function portableManifestIdentity(
+  id: string,
+  fileRecords: FileRecord[],
+): string {
+  const record = fileRecords.find(
+    (candidate) =>
+      candidate.id === id ||
+      candidate.filePath === id ||
+      candidate.moduleIdentity === id,
+  );
+  return record?.moduleIdentity ?? portableHashIdentity(id);
+}
+
 function portableBundleParts(
   parts: BundlePart[],
   portableIdentity: (id: string) => string,
 ): Array<Omit<BundlePart, "references"> & { references?: unknown[] }> {
   return parts.map((part) => ({
     ...part,
-    references: part.references?.map((reference) => {
-      if (reference.kind === "asset-url") {
-        return {
-          kind: reference.kind,
-          symbol: reference.symbol,
-          assetId: reference.assetId,
-          usage: reference.usage,
-        };
-      }
-      if ("symbol" in reference) {
-        return { kind: reference.kind, symbol: reference.symbol };
-      }
-      if (reference.kind === "output-styles") {
-        return {
-          kind: reference.kind,
-          outputIds: reference.outputIds.map(portableIdentity),
-        };
-      }
+    references: part.references?.map((reference) =>
+      portableLinkReference(reference, portableIdentity),
+    ),
+  }));
+}
+
+function portableLinkReference(
+  reference: LinkReference,
+  portableIdentity: (id: string) => string,
+): unknown {
+  switch (reference.kind) {
+    case "module-url":
+    case "module-filename":
+    case "module-dirname":
+      return {
+        kind: reference.kind,
+        symbol: reference.symbol,
+        ownerId: portableIdentity(reference.ownerId),
+      };
+    case "asset-url":
+      return {
+        kind: reference.kind,
+        symbol: reference.symbol,
+        assetId: portableIdentity(reference.assetId),
+        ownerId: reference.ownerId
+          ? portableIdentity(reference.ownerId)
+          : undefined,
+        request: reference.request,
+        usage: reference.usage,
+      };
+    case "output-url":
       return {
         kind: reference.kind,
         outputId: portableIdentity(reference.outputId),
         outputType: reference.outputType,
+        symbol: reference.symbol,
+        ownerId: reference.ownerId
+          ? portableIdentity(reference.ownerId)
+          : undefined,
+        request: reference.request,
+        usage: reference.usage,
+        includeDependencies: reference.includeDependencies,
+        urlMode: reference.urlMode,
+        // Script selectors are represented by the resolved dependency class in
+        // createPlanLinkDescriptor. Keeping the literal target name here would
+        // prevent equivalent target graphs from sharing physical output.
+        environment:
+          reference.outputType === "script" ? undefined : reference.environment,
+        targetId:
+          reference.outputType === "script" ? undefined : reference.targetId,
       };
-    }),
-  }));
+    case "output-integrity":
+      return {
+        kind: reference.kind,
+        outputId: portableIdentity(reference.outputId),
+        outputType: reference.outputType,
+        ownerId: reference.ownerId
+          ? portableIdentity(reference.ownerId)
+          : undefined,
+      };
+    case "output-styles":
+      return {
+        kind: reference.kind,
+        outputIds: reference.outputIds.map(portableIdentity),
+        ownerId: reference.ownerId
+          ? portableIdentity(reference.ownerId)
+          : undefined,
+      };
+  }
 }
 
 function coalescePhysicalBundlePlans(
   plans: BundlePlan[],
   hmr: boolean,
   fileRecords: FileRecord[],
+  resolvedMapByEnv: Map<string, Map<string, ModuleResolution>>,
+  config: InternalBundlerConfig,
+  resourcePlanFingerprints: Map<string, string[]>,
+  conditionNames: string[],
 ): PhysicalBundlePlan[] {
   const portableIdentities = new Map(
     fileRecords.flatMap((record) => {
@@ -2973,16 +3390,27 @@ function coalescePhysicalBundlePlans(
   );
   const portableIdentity = (id: string): string =>
     portableIdentities.get(id) ?? portableHashIdentity(id);
-  const plansByEntrypoint = new Map(
-    plans.map((plan) => [`${plan.envId}:${plan.entryId}`, plan]),
-  );
+  const plansByEntrypoint = new Map<string, BundlePlan>();
+  for (const plan of plans) {
+    plansByEntrypoint.set(`${plan.envId}:${plan.entryId}`, plan);
+    const moduleIdentity = resolvedMapByEnv
+      .get(plan.envId)
+      ?.get(plan.entryId)?.moduleIdentity;
+    if (moduleIdentity) {
+      plansByEntrypoint.set(`${plan.envId}:${moduleIdentity}`, plan);
+    }
+  }
   const localFingerprints = new Map(
     plans.map((plan) => [
       plan,
       contentHash(
         JSON.stringify({
           ...(hmr ? { envId: plan.envId } : {}),
+          ...(conditionNames.length > 0
+            ? { platform: config.envs[plan.envId].platform }
+            : {}),
           entryId: portableIdentity(plan.entryId),
+          entryKind: plan.entryKind,
           exportMode: plan.exportMode,
           parts: portableBundleParts(plan.parts, portableIdentity),
           staticImports: plan.staticImports.map((item) => ({
@@ -2990,6 +3418,8 @@ function coalescePhysicalBundlePlans(
             symbols: item.symbols,
           })),
           modules: plan.modules.map(portableIdentity),
+          resources:
+            resourcePlanFingerprints.get(logicalBundlePlanKey(plan)) ?? [],
           conditions: plan.conditions.map((item) => ({
             moduleId: portableIdentity(item.moduleId),
             condition: item.condition,
@@ -2999,50 +3429,36 @@ function coalescePhysicalBundlePlans(
       ),
     ]),
   );
-  let dependencyClasses = assignCanonicalPlanClasses(
-    plans,
-    (plan) => localFingerprints.get(plan) as string,
-  );
-  let descriptors = new Map<BundlePlan, string>();
-  for (let iteration = 0; iteration <= plans.length; iteration += 1) {
-    descriptors = new Map(
-      plans.map((plan) => [
-        plan,
-        createPlanLinkDescriptor(
-          plan,
-          localFingerprints.get(plan) as string,
-          dependencyClasses,
-          plansByEntrypoint,
-          portableIdentity,
-        ),
-      ]),
-    );
-    const nextClasses = assignCanonicalPlanClasses(
-      plans,
-      (plan) => descriptors.get(plan) as string,
-    );
-    if (
-      plans.every(
-        (plan) => nextClasses.get(plan) === dependencyClasses.get(plan),
-      )
-    ) {
-      dependencyClasses = nextClasses;
-      break;
+  const descriptors = new Map<BundlePlan, string>();
+  const activePlans = new Set<BundlePlan>();
+  const describePlan = (plan: BundlePlan): string => {
+    const existing = descriptors.get(plan);
+    if (existing) return existing;
+    if (activePlans.has(plan)) {
+      throw new Error(
+        `Cyclic logical output reference through bundle '${plan.entryId}' in '${plan.envId}'.`,
+      );
     }
-    dependencyClasses = nextClasses;
-  }
-  descriptors = new Map(
-    plans.map((plan) => [
+    activePlans.add(plan);
+    const descriptor = createPlanLinkDescriptor(
       plan,
-      createPlanLinkDescriptor(
-        plan,
-        localFingerprints.get(plan) as string,
-        dependencyClasses,
-        plansByEntrypoint,
-        portableIdentity,
-      ),
-    ]),
-  );
+      localFingerprints.get(plan) as string,
+      (entryId, scopeId = plan.envId) => {
+        const dependency = plansByEntrypoint.get(`${scopeId}:${entryId}`);
+        return dependency
+          ? contentHash(describePlan(dependency))
+          : `missing:${scopeId}:${portableIdentity(entryId)}`;
+      },
+      portableIdentity,
+      config,
+    );
+    activePlans.delete(plan);
+    descriptors.set(plan, descriptor);
+    return descriptor;
+  };
+  for (const plan of plans) {
+    describePlan(plan);
+  }
   if (!hmr) {
     const manualSignatures = new Map<string, string>();
     for (const plan of plans) {
@@ -3077,7 +3493,6 @@ function coalescePhysicalBundlePlans(
     const fingerprint = contentHashShort(
       JSON.stringify({
         entryId: portableIdentity(plan.entryId),
-        environments: environmentIds,
         linkFingerprint: contentHash(descriptors.get(plan) as string),
         parts: portableBundleParts(plan.parts, portableIdentity),
         staticImports: plan.staticImports.map((item) => ({
@@ -3095,6 +3510,7 @@ function coalescePhysicalBundlePlans(
       entrypoints: group.map((item) => ({
         envId: item.envId,
         entryId: item.entryId,
+        entryKind: item.entryKind,
         exportMode: item.exportMode,
       })),
       plan,
@@ -3102,44 +3518,48 @@ function coalescePhysicalBundlePlans(
   });
 }
 
-function assignCanonicalPlanClasses(
-  plans: BundlePlan[],
-  describe: (plan: BundlePlan) => string,
-): Map<BundlePlan, number> {
-  const descriptions = new Map(plans.map((plan) => [plan, describe(plan)]));
-  const classByDescription = new Map(
-    Array.from(new Set(descriptions.values()))
-      .sort()
-      .map((description, index) => [description, index]),
-  );
-  return new Map(
-    plans.map((plan) => [
-      plan,
-      classByDescription.get(descriptions.get(plan) as string) as number,
-    ]),
-  );
+function logicalBundlePlanKey(
+  plan: Pick<BundlePlan, "envId" | "entryId">,
+): string {
+  return JSON.stringify([plan.envId, plan.entryId]);
 }
 
 function createPlanLinkDescriptor(
   plan: BundlePlan,
   localFingerprint: string,
-  dependencyClasses: Map<BundlePlan, number>,
-  plansByEntrypoint: Map<string, BundlePlan>,
+  dependencyFingerprint: (entryId: string, scopeId?: string) => string,
   portableIdentity: (id: string) => string,
+  config: InternalBundlerConfig,
 ): string {
-  const dependencyClass = (entryId: string): number | string => {
-    const dependency = plansByEntrypoint.get(`${plan.envId}:${entryId}`);
-    return dependency
-      ? (dependencyClasses.get(dependency) as number)
-      : `missing:${portableIdentity(entryId)}`;
-  };
+  const outputReferences = dedupeBundleReferences(plan.parts)
+    .filter(
+      (
+        reference,
+      ): reference is Extract<LinkReference, { kind: "output-url" }> =>
+        reference.kind === "output-url" && reference.outputType === "script",
+    )
+    .map((reference) => ({
+      symbol: reference.symbol,
+      outputId: portableIdentity(reference.outputId),
+      usage: reference.usage,
+      includeDependencies: reference.includeDependencies === true,
+      urlMode: reference.urlMode ?? "module-relative",
+      dependencyFingerprint: dependencyFingerprint(
+        reference.outputId,
+        resolveReferenceScopeId(reference, plan.envId, config),
+      ),
+    }))
+    .sort((left, right) =>
+      JSON.stringify(left).localeCompare(JSON.stringify(right)),
+    );
   return JSON.stringify({
     localFingerprint,
     staticImports: plan.staticImports.map((item) => ({
       entryId: portableIdentity(item.entryId),
       symbols: item.symbols,
-      dependencyClass: dependencyClass(item.entryId),
+      dependencyFingerprint: dependencyFingerprint(item.entryId),
     })),
+    outputReferences,
   });
 }
 
@@ -3151,6 +3571,7 @@ function finalizePhysicalBundleOutputs(
   stylesByBundle: Map<string, string[]>,
   pendingFiles: PendingEmitFile[],
   resourceFingerprints = new Map<string, string[]>(),
+  conditionNames: string[] = [],
 ): Map<string, PhysicalBundleOutput> {
   const byEntrypoint = new Map(
     physicalPlans.flatMap((physicalPlan) =>
@@ -3285,8 +3706,14 @@ function finalizePhysicalBundleOutputs(
             );
           }
         } else if (reference.outputType === "style") {
+          const referenceScopeId = resolveReferenceScopeId(
+            reference,
+            plan.envId,
+            config,
+          );
           const styles =
-            stylesByBundle.get(`${plan.envId}:${reference.outputId}`) ?? [];
+            stylesByBundle.get(`${referenceScopeId}:${reference.outputId}`) ??
+            [];
           if (styles.length > 1) {
             throw new Error(
               `Logical style output '${reference.outputId}' resolves to multiple files.`,
@@ -3306,7 +3733,14 @@ function finalizePhysicalBundleOutputs(
         }
         return {
           outputId: reference.outputId,
+          outputType: reference.outputType,
           symbol: reference.symbol,
+          usage: reference.usage ?? "javascript",
+          includeDependencies: reference.includeDependencies === true,
+          urlMode:
+            reference.outputType === "script"
+              ? (reference.urlMode ?? "module-relative")
+              : "module-relative",
           fileNames,
           contentHash: pendingOutputs.get(reference.outputId)?.contentHash,
         };
@@ -3323,7 +3757,11 @@ function finalizePhysicalBundleOutputs(
         linkedAssets,
         linkedOutputs,
         resourceFingerprints: resourceFingerprints.get(physicalPlan.id) ?? [],
+        conditionNames: conditionNames.length > 0 ? conditionNames : undefined,
         rootURL: config.outputs.rootURL,
+        outputFilePattern: config.outputs.fileName,
+        outputEntry: sanitizeOutputName(plan.entryId),
+        outputScope: scopeTokens(physicalPlan),
         sourceMap: config.outputs.sourceMap,
       }),
     );
@@ -3604,6 +4042,7 @@ async function transformModule(
     resolutionMeta: module.meta,
     buildMode,
     transformConfig: resolvedTransformConfig(config),
+    environmentVariables: config.environmentVariables ?? {},
     pkg: module.pkg,
     envs,
     allEnvIds,
@@ -3642,6 +4081,39 @@ async function transformModule(
       hmr: config.dev?.hmr === true,
     },
   };
+  const resolvedDuringTransform = new Map<string, ModuleResolution>();
+  const rememberResolution = (
+    requestScopeId: string,
+    request: WorkerImportRequest,
+    resolved: ModuleResolution,
+  ): void => {
+    resolvedDuringTransform.set(
+      workerResolutionKey(requestScopeId, request),
+      resolved,
+    );
+    if (resolved.target.kind === "runtime") {
+      return;
+    }
+    resolvedDuringTransform.set(
+      workerResolvedTargetKey(requestScopeId, resolved.target.moduleId),
+      resolved,
+    );
+    const dependencyScopeId = resolved.scopeId ?? requestScopeId;
+    const resolvedMap = resolvedMapByEnv.get(dependencyScopeId);
+    resolvedMap?.set(resolved.id, resolved);
+    resolvedMap?.set(resolved.moduleIdentity, resolved);
+    schedule({
+      id: resolved.id,
+      moduleIdentity: resolved.moduleIdentity,
+      filePath: resolved.filePath,
+      envId: dependencyScopeId,
+      pkg: resolved.pkg,
+      type: resolved.type,
+      representation: resolved.representation,
+      canonicalPath: resolved.target.canonicalPath,
+      meta: resolved.meta,
+    });
+  };
   const response = (await pool.run(requestBase, async (payload) => {
     const coordinatorRequest = payload as WorkerCoordinatorRequest;
     if (coordinatorRequest.type !== "resolve-imports") {
@@ -3654,6 +4126,7 @@ async function transformModule(
       envs,
       resolver,
       coordinatorRequest.requestsByEnv,
+      rememberResolution,
     );
   })) as WorkerTransformResponse;
   for (const variant of response.variants ?? []) {
@@ -3717,6 +4190,7 @@ async function transformModule(
         resolver,
         module,
         config,
+        resolvedDuringTransform,
       );
     for (const resolved of dependencies) {
       if (resolved.target.kind === "runtime") {
@@ -3763,6 +4237,7 @@ async function transformModule(
           envs: dynamicEntry.entryEnvs ?? [envId],
           entryNodeId: dynamicEntry.id,
           exportMode: dynamicEntry.exportMode,
+          entryKind: dynamicEntry.entryKind ?? "dynamic",
         });
       }
       for (const targetEnv of dynamicEntry.entryEnvs ?? [envId]) {
@@ -3794,29 +4269,41 @@ async function discoverModulesFromHeader(
   resolver: Resolver,
   owner: ScheduledModule,
   config: InternalBundlerConfig,
+  resolvedDuringTransform: Map<string, ModuleResolution>,
 ): Promise<{
   dependencies: ModuleResolution[];
   dynamicEntries: DynamicEntryDiscovery[];
 }> {
   const dependencyPromises: Array<Promise<ModuleResolution>> = [];
   const dynamicPromises: Array<Promise<DynamicEntryDiscovery>> = [];
+  const resolveRecordedTarget = (
+    target: Extract<ModuleResolution["target"], { kind: "file" }>,
+    fallback: () => Promise<ModuleResolution>,
+  ): Promise<ModuleResolution> =>
+    Promise.resolve(
+      resolvedDuringTransform.get(
+        workerResolvedTargetKey(envId, target.moduleId),
+      ),
+    ).then((resolved) => resolved ?? fallback());
 
   for (const importEntry of irHeader.imports) {
     if (importEntry.kind === "type" || importEntry.target.kind === "runtime") {
       continue;
     }
     dependencyPromises.push(
-      resolver(
-        irHeader.id,
-        irHeader.filePath,
-        importEntry.request ?? importEntry.source,
-        envId,
-        importEntry.condition ? "conditional-import" : "import",
-        importEntry.attributes ??
-          (typeof importEntry.condition === "string"
-            ? { condition: importEntry.condition }
-            : undefined),
-        irHeader.resolutionMeta,
+      resolveRecordedTarget(importEntry.target, () =>
+        resolver(
+          irHeader.id,
+          irHeader.filePath,
+          importEntry.request ?? importEntry.source,
+          envId,
+          importEntry.condition ? "conditional-import" : "import",
+          importEntry.attributes ??
+            (typeof importEntry.condition === "string"
+              ? { condition: importEntry.condition }
+              : undefined),
+          irHeader.resolutionMeta,
+        ),
       ),
     );
   }
@@ -3840,17 +4327,21 @@ async function discoverModulesFromHeader(
           ),
         )
       : undefined;
+    const elseRequest =
+      conditionalImport.elseRequest ?? conditionalImport.elseSource;
     dependencyPromises.push(
-      resolver(
-        irHeader.id,
-        irHeader.filePath,
-        conditionalImport.elseRequest ?? conditionalImport.elseSource,
-        envId,
-        "conditional-else",
-        elseAttributes && Object.keys(elseAttributes).length > 0
-          ? elseAttributes
-          : undefined,
-        irHeader.resolutionMeta,
+      resolveRecordedTarget(conditionalImport.elseTarget, () =>
+        resolver(
+          irHeader.id,
+          irHeader.filePath,
+          elseRequest,
+          envId,
+          "conditional-else",
+          elseAttributes && Object.keys(elseAttributes).length > 0
+            ? elseAttributes
+            : undefined,
+          irHeader.resolutionMeta,
+        ),
       ),
     );
   }
@@ -3863,14 +4354,16 @@ async function discoverModulesFromHeader(
       continue;
     }
     dependencyPromises.push(
-      resolver(
-        irHeader.id,
-        irHeader.filePath,
-        reexport.request ?? reexport.source,
-        envId,
-        "reexport",
-        undefined,
-        irHeader.resolutionMeta,
+      resolveRecordedTarget(reexport.target, () =>
+        resolver(
+          irHeader.id,
+          irHeader.filePath,
+          reexport.request ?? reexport.source,
+          envId,
+          "reexport",
+          undefined,
+          irHeader.resolutionMeta,
+        ),
       ),
     );
   }
@@ -3917,6 +4410,7 @@ async function discoverModulesFromHeader(
             entryId: owner.filePath,
             entryEnvs: [targetEnv],
             exportMode: normalized.exportMode ?? "entry",
+            entryKind: normalized.entryKind ?? "dynamic",
           }),
         );
       }
@@ -3932,19 +4426,29 @@ async function discoverModulesFromHeader(
       envId,
       config,
     )) {
+      const recorded = resolvedDuringTransform.get(
+        workerResolutionKey(targetEnv, {
+          kind: "dynamic-import",
+          request: normalized.request,
+        }),
+      );
       dynamicPromises.push(
-        resolver(
-          irHeader.id,
-          irHeader.filePath,
-          normalized.request,
-          targetEnv,
-          "dynamic-import",
+        (recorded
+          ? Promise.resolve(recorded)
+          : resolver(
+              irHeader.id,
+              irHeader.filePath,
+              normalized.request,
+              targetEnv,
+              "dynamic-import",
+            )
         ).then((resolved) => ({
           ...resolved,
           envId: targetEnv,
           entryId: resolved.filePath,
           entryEnvs: [targetEnv],
           exportMode: normalized.exportMode,
+          entryKind: normalized.entryKind ?? "dynamic",
         })),
       );
     }
@@ -4009,14 +4513,14 @@ async function prepareDebugOutput(
   ) {
     throw new Error("Bundler debug must be a boolean.");
   }
+  if (config.debug !== true) {
+    return null;
+  }
   const debugOutputDir = path.join(
     findCacheContainer(cacheBaseDir),
     "__DEBUG__",
   );
   await fs.rm(debugOutputDir, { recursive: true, force: true });
-  if (config.debug !== true) {
-    return null;
-  }
   await fs.mkdir(debugOutputDir, { recursive: true });
   return debugOutputDir;
 }
@@ -4232,6 +4736,11 @@ async function resolveImportRequestsForEnvs(
   envs: string[],
   resolver: Resolver,
   requestsByEnv: Record<string, WorkerImportRequest[]>,
+  onResolve?: (
+    envId: string,
+    request: WorkerImportRequest,
+    resolved: ModuleResolution,
+  ) => void,
 ): Promise<
   Record<
     string,
@@ -4272,6 +4781,7 @@ async function resolveImportRequestsForEnvs(
             request.importAttributes,
             module.meta,
           );
+          onResolve?.(envId, request, resolved);
           return [
             request.key,
             {
@@ -4288,6 +4798,22 @@ async function resolveImportRequestsForEnvs(
   );
 
   return resolvedByEnv;
+}
+
+function workerResolutionKey(
+  envId: string,
+  request: Pick<WorkerImportRequest, "kind" | "request" | "importAttributes">,
+): string {
+  return JSON.stringify([
+    envId,
+    request.kind,
+    request.request,
+    request.importAttributes ?? null,
+  ]);
+}
+
+function workerResolvedTargetKey(envId: string, moduleId: string): string {
+  return JSON.stringify([envId, "target", moduleId]);
 }
 
 function collectBundleSelection(
@@ -4709,13 +5235,17 @@ function prependLinkReferencePrelude(
 }
 
 function dedupeBundleReferences(parts: BundlePart[]): LinkReference[] {
-  return Array.from(
-    new Map(
-      parts
-        .flatMap((part) => part.references ?? [])
-        .map((reference) => [reference.id, reference]),
-    ).values(),
-  ).sort((left, right) => left.id.localeCompare(right.id));
+  const references = new Map<string, LinkReference>();
+  for (const reference of parts.flatMap((part) => part.references ?? [])) {
+    const existing = references.get(reference.id);
+    if (existing && JSON.stringify(existing) !== JSON.stringify(reference)) {
+      throw new Error(`Conflicting link reference '${reference.id}'.`);
+    }
+    references.set(reference.id, reference);
+  }
+  return Array.from(references.values()).sort((left, right) =>
+    left.id.localeCompare(right.id),
+  );
 }
 
 function emitLinkReferencePrelude(
@@ -4821,6 +5351,7 @@ function emitOutputReferencePrelude(
   pendingFiles: PendingEmitFile[],
   rootURL = "/",
   config?: InternalBundlerConfig,
+  conditionOptionSet?: OptionSet,
 ): string {
   const pendingOutputs = collectPendingLogicalOutputs(pendingFiles);
   return references
@@ -4841,9 +5372,9 @@ function emitOutputReferencePrelude(
         const referenceScopeId = config
           ? resolveReferenceScopeId(reference, envId, config)
           : envId;
-        const bundleTarget =
-          bundleMap.get(`${referenceScopeId}:${reference.outputId}`) ??
-          bundleMap.get(reference.outputId);
+        const bundleTarget = bundleMap.get(
+          `${referenceScopeId}:${reference.outputId}`,
+        );
         fileNames = bundleTarget
           ? [
               bundleTarget.fileName,
@@ -4852,10 +5383,22 @@ function emitOutputReferencePrelude(
                 : []),
             ]
           : undefined;
+        if (
+          conditionOptionSet &&
+          conditionOptionSet.conditions.length > 0 &&
+          config?.envs[referenceScopeId]?.platform === "browser"
+        ) {
+          fileNames = fileNames?.map((fileName) =>
+            withConditionIdPlaceholder(fileName, conditionOptionSet),
+          );
+        }
         relative = reference.urlMode !== "public";
       } else if (reference.outputType === "style") {
+        const referenceScopeId = config
+          ? resolveReferenceScopeId(reference, envId, config)
+          : envId;
         const styles =
-          stylesByBundle.get(`${envId}:${reference.outputId}`) ?? [];
+          stylesByBundle.get(`${referenceScopeId}:${reference.outputId}`) ?? [];
         if (styles.length > 1) {
           throw new Error(
             `Logical style output '${reference.outputId}' resolves to multiple files.`,
@@ -5266,6 +5809,15 @@ function fromBundleDraft(draft: BundlePlanDraftWithHmr): BundlePlan {
   return {
     envId: draft.envId,
     entryId: draft.entryId,
+    entryKind:
+      draft.entryKind ??
+      (draft.entryId.startsWith("bundler:manual:")
+        ? "manual"
+        : draft.entryId.startsWith("bundler:")
+          ? "shared"
+          : draft.exportMode === "dynamic"
+            ? "dynamic"
+            : "explicit"),
     exportMode: draft.exportMode,
     parts: draft.orderedParts,
     staticImports: draft.staticImports ?? [],
@@ -5277,17 +5829,18 @@ function fromBundleDraft(draft: BundlePlanDraftWithHmr): BundlePlan {
   };
 }
 
-async function flushPendingFiles(
-  outDir: string,
+function flushPendingFiles(
   files: PendingEmitFile[],
   manifest: BundleManifest,
-): Promise<void> {
+  outputRegistry: OutputRegistry,
+): void {
   for (const file of files) {
     const finalName = finalPendingFileName(file);
-    await fs.mkdir(path.dirname(path.join(outDir, finalName)), {
-      recursive: true,
-    });
-    await fs.writeFile(path.join(outDir, finalName), file.contents);
+    outputRegistry.add(
+      finalName,
+      file.contents,
+      `emitted:${file.outputId ?? file.bundleKey ?? file.pluginName ?? file.type ?? "file"}:${file.fileName}`,
+    );
     const bundleKey =
       file.type === "style"
         ? stableManifestBundleKey(manifest, file.bundleKey)

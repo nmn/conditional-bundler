@@ -2,6 +2,7 @@ import type { BundlerPlugin } from "./plugins/types.js";
 import type { CacheConfig } from "@bundler/shared";
 
 export type Platform = "node" | "browser";
+export type BundleEntryKind = "explicit" | "dynamic" | "shared" | "manual";
 
 export type PackageResolverReference = {
   __bundlerPackageResolverRef: true;
@@ -22,6 +23,14 @@ export function resolver(
 
 export type TargetConfig = {
   platform: Platform;
+  /**
+   * `split` creates shared chunks for distinct entrypoint consumer sets.
+   * `single` puts ordinary modules shared by multiple entries in one common
+   * chunk, splitting it only when entrypoints require conflicting evaluation
+   * order. Compatible chunks required by another split target are reused, and
+   * dynamic import boundaries remain lazy.
+   */
+  chunking?: "split" | "single";
   packageResolver?: PackageResolverReference;
   defines?: Record<string, string | number | boolean | null>;
 };
@@ -37,6 +46,7 @@ export type BuildScopeConfig = {
   environmentId: string;
   targetId: string;
   platform: Platform;
+  chunking: "split" | "single";
   packageResolver?: PackageResolverReference;
   defines: Record<string, string | number | boolean | null>;
   packageConditions: string[];
@@ -77,6 +87,8 @@ export type EntrySpec = {
   entryNodeId?: string;
   /** @internal Linking mode requested by a discovered entry. */
   exportMode?: "entry" | "dynamic";
+  /** @internal How this entry entered the graph; independent of exportMode. */
+  entryKind?: BundleEntryKind;
 };
 
 /** @internal Coordinator form used after public configuration normalization. */
@@ -119,6 +131,11 @@ export type DevSpec = {
 export type BundlerConfig = {
   targets: Record<string, TargetConfig>;
   environments: Record<string, EnvironmentConfig>;
+  /**
+   * Explicit build-time environment values available to import attributes.
+   * These values participate in transformation cache identity.
+   */
+  environmentVariables?: Record<string, string>;
   entries: EntrySpec[];
   outputs: OutputSpec;
   plugins?: BundlerPlugin[];
@@ -184,6 +201,19 @@ export function normalizeBundlerConfig(
     throw new Error("At least one target must be configured.");
   }
 
+  for (const [name, value] of Object.entries(
+    config.environmentVariables ?? {},
+  )) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      throw new Error(`Environment variable name '${name}' is invalid.`);
+    }
+    if (typeof value !== "string") {
+      throw new Error(
+        `Environment variable '${name}' must be configured with a string value.`,
+      );
+    }
+  }
+
   for (const [environmentId, environment] of Object.entries(
     config.environments,
   )) {
@@ -209,11 +239,23 @@ export function normalizeBundlerConfig(
         `Target '${targetId}' has unsupported platform '${String(target.platform)}'.`,
       );
     }
+    if (
+      target.chunking !== undefined &&
+      target.chunking !== "split" &&
+      target.chunking !== "single"
+    ) {
+      throw new Error(
+        `Target '${targetId}' has unsupported chunking mode '${String(target.chunking)}'.`,
+      );
+    }
     for (const environmentId of environmentIds) {
       envs[buildScopeId(environmentId, targetId)] = {
         environmentId,
         targetId,
         platform: target.platform,
+        chunking:
+          target.chunking ??
+          (target.platform === "browser" ? "split" : "single"),
         packageResolver: target.packageResolver,
         defines: { ...(target.defines ?? {}) },
         packageConditions:
@@ -230,6 +272,11 @@ export function normalizeBundlerConfig(
 
   return {
     ...config,
+    environmentVariables: Object.fromEntries(
+      Object.entries(config.environmentVariables ?? {}).sort(
+        ([left], [right]) => left.localeCompare(right),
+      ),
+    ),
     entries,
     envs,
   };
@@ -266,6 +313,7 @@ export function normalizeEntrySpec(
   }
   return {
     ...entry,
+    entryKind: entry.entryKind ?? "explicit",
     environment: environmentId,
     targets: [...requestedTargets],
     id: entry.path,
@@ -284,6 +332,7 @@ export const defaultConfig: BundlerConfig = {
   environments: {
     default: {},
   },
+  environmentVariables: {},
   entries: [],
   outputs: {
     outDir: "dist",

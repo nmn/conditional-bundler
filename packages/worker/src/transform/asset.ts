@@ -59,6 +59,7 @@ const imageExtensions = new Set([
 export function prepareAssetTransform(
   input: AssetTransformInput,
 ): PreparedAssetTransform {
+  const graphIdentity = portableAssetGraphIdentity(input);
   const extension = path.extname(input.realPath).toLowerCase();
   let facade: string;
   if (input.representation === "raw") {
@@ -87,7 +88,7 @@ export default { src: __bundler_image_url, width: ${dimensions.width}, height: $
     const reference = createOutputReference(
       input.normalType === "asset" ? input.assetId : input.normalModuleIdentity,
       input.normalType === "asset" ? "asset" : input.primaryOutputType,
-      input.moduleIdentity,
+      graphIdentity,
       input.representation === "url_and_deps_array",
       input.requestedUrlMode ??
         (input.requestedTarget ? "public" : "module-relative"),
@@ -114,6 +115,7 @@ export function transformAsset(
   resolvedImports: Record<string, TransformResolvedImport> = {},
   preparation = prepareAssetTransform(input),
 ): TransformResult {
+  const graphIdentity = portableAssetGraphIdentity(input);
   const copiedOutput =
     input.normalType === "asset" && input.representation === "url";
   const outputId = copiedOutput ? input.assetId : input.normalModuleIdentity;
@@ -123,7 +125,7 @@ export function transformAsset(
       ? createOutputReference(
           outputId,
           copiedOutput ? "asset" : input.primaryOutputType,
-          input.moduleIdentity,
+          graphIdentity,
           input.representation === "url_and_deps_array",
           input.requestedUrlMode ??
             (input.requestedTarget ? "public" : "module-relative"),
@@ -135,10 +137,10 @@ export function transformAsset(
   const { facade, prepared } = preparation;
   const result = transformWithCore(
     {
-      id: input.id,
-      moduleIdentity: input.moduleIdentity,
+      id: graphIdentity,
+      moduleIdentity: graphIdentity,
       canonicalPath: input.canonicalPath,
-      symbolIdentity: input.moduleIdentity,
+      symbolIdentity: graphIdentity,
       code: facade,
       realPath: input.realPath,
       pkg: input.pkg,
@@ -180,6 +182,7 @@ export function transformAsset(
     fileRecord: result.fileRecord
       ? {
           ...result.fileRecord,
+          moduleIdentity: input.moduleIdentity,
           discoveredEntrypoints,
           linkReferences: references,
           extraOutputs: copiedOutput
@@ -208,6 +211,13 @@ export function transformAsset(
         }
       : undefined,
   };
+}
+
+function portableAssetGraphIdentity(input: AssetTransformInput): string {
+  return input.id === input.moduleIdentity ||
+    input.id.startsWith(`${input.moduleIdentity}::link=`)
+    ? input.id
+    : input.moduleIdentity;
 }
 
 function createOutputReference(

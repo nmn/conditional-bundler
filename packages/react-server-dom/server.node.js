@@ -9,11 +9,19 @@ export function createClientImplementation(chunks, exportName) {
 }
 
 const clientMetadata = new Map();
-const inlineClientReferences = new Proxy(Object.create(null), {
-  get(_target, id) {
-    return typeof id === "string" ? clientMetadata.get(id) : undefined;
-  },
-});
+function createInlineClientReferences(mapClientChunk) {
+  return new Proxy(Object.create(null), {
+    get(_target, id) {
+      if (typeof id !== "string") return undefined;
+      const metadata = clientMetadata.get(id);
+      if (!metadata || typeof mapClientChunk !== "function") return metadata;
+      return {
+        ...metadata,
+        chunks: metadata.chunks.map(mapClientChunk),
+      };
+    },
+  });
+}
 
 export function registerClientReference(
   implementation,
@@ -46,15 +54,34 @@ function readOptions(manifestOrOptions, explicitOptions) {
   return undefined;
 }
 
+function readRenderConfiguration(manifestOrOptions, explicitOptions) {
+  const options = readOptions(manifestOrOptions, explicitOptions);
+  if (!options || typeof options.mapClientChunk !== "function") {
+    return {
+      manifest: createInlineClientReferences(),
+      options,
+    };
+  }
+  const { mapClientChunk, ...upstreamOptions } = options;
+  return {
+    manifest: createInlineClientReferences(mapClientChunk),
+    options: upstreamOptions,
+  };
+}
+
 export function renderToPipeableStream(
   model,
   manifestOrOptions,
   explicitOptions,
 ) {
+  const configuration = readRenderConfiguration(
+    manifestOrOptions,
+    explicitOptions,
+  );
   return upstream.renderToPipeableStream(
     model,
-    inlineClientReferences,
-    readOptions(manifestOrOptions, explicitOptions),
+    configuration.manifest,
+    configuration.options,
   );
 }
 
@@ -63,18 +90,26 @@ export function renderToReadableStream(
   manifestOrOptions,
   explicitOptions,
 ) {
+  const configuration = readRenderConfiguration(
+    manifestOrOptions,
+    explicitOptions,
+  );
   return upstream.renderToReadableStream(
     model,
-    inlineClientReferences,
-    readOptions(manifestOrOptions, explicitOptions),
+    configuration.manifest,
+    configuration.options,
   );
 }
 
 export function prerender(model, manifestOrOptions, explicitOptions) {
+  const configuration = readRenderConfiguration(
+    manifestOrOptions,
+    explicitOptions,
+  );
   return upstream.prerender(
     model,
-    inlineClientReferences,
-    readOptions(manifestOrOptions, explicitOptions),
+    configuration.manifest,
+    configuration.options,
   );
 }
 
@@ -83,10 +118,14 @@ export function prerenderToNodeStream(
   manifestOrOptions,
   explicitOptions,
 ) {
+  const configuration = readRenderConfiguration(
+    manifestOrOptions,
+    explicitOptions,
+  );
   return upstream.prerenderToNodeStream(
     model,
-    inlineClientReferences,
-    readOptions(manifestOrOptions, explicitOptions),
+    configuration.manifest,
+    configuration.options,
   );
 }
 

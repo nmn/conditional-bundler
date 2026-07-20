@@ -6,24 +6,10 @@ import { useCart } from "./CartContext.jsx";
 export function CommerceChrome({ children, path }) {
   const cart = useCart();
 
-  function handleClick(event) {
-    const anchor = event.target.closest("a[href]");
-    if (!anchor || anchor.target || anchor.origin !== window.location.origin) {
-      return;
-    }
-    event.preventDefault();
-    window.dispatchEvent(
-      new CustomEvent("bundler:rsc-navigate", {
-        cancelable: true,
-        detail: { path: anchor.pathname + anchor.search },
-      }),
-    );
-  }
-
   return (
-    <div onClick={handleClick}>
+    <>
       <aside
-        className="fixed right-5 bottom-5 z-20 flex items-center gap-2"
+        className="mx-auto flex max-w-[1380px] items-center justify-start gap-2 px-4 pt-3 sm:justify-end sm:px-8"
         aria-label="Cart status"
       >
         <a
@@ -46,6 +32,6 @@ export function CommerceChrome({ children, path }) {
         </span>
       </aside>
       {children}
-    </div>
+    </>
   );
 }

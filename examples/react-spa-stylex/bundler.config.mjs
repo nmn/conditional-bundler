@@ -17,6 +17,9 @@ export default {
     },
   },
   environments: { javascript: {} },
+  environmentVariables: {
+    NODE_ENV: process.env.NODE_ENV ?? "development",
+  },
   entries: [
     {
       path: path.join(root, "src/server.server.jsx"),

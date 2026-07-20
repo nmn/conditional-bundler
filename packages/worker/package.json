@@ -5,8 +5,25 @@
   "type": "module",
   "main": "dist/worker.js",
   "types": "dist/worker.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js",
+      "default": "./dist/worker.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js",
+      "default": "./dist/worker.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "package.json"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -b tsconfig.json",
     "clean": "rimraf dist",
     "test": "NODE_OPTIONS=--experimental-vm-modules ../../node_modules/.bin/jest"
   },

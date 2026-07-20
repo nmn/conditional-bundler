@@ -1,5 +1,6 @@
 import React from "react";
 import * as stylex from "@stylexjs/stylex";
+import { BrowserConditionProof } from "./BrowserString.jsx";
 import { navItems } from "./router.js";
 
 export function App({ routeId, Route }) {
@@ -25,6 +26,7 @@ export function App({ routeId, Route }) {
           </nav>
         </aside>
         <main {...stylex.props(styles.main)}>
+          <BrowserConditionProof />
           <Route />
         </main>
       </div>
@@ -37,9 +39,7 @@ const styles = stylex.create({
     backgroundColor: "#0f1715",
     color: "#e8f3ee",
     fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
-    margin: -8,
     minHeight: "100vh",
-    padding: 8,
   },
   shell: {
     display: "grid",

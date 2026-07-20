@@ -3,6 +3,7 @@ import basicMark from "./assets/basic-mark.svg";
 import moduleStyles from "./App.module.css";
 import "./showcase.css";
 import { Counter } from "./Counter.jsx";
+import { BrowserConditionProof } from "./BrowserString.jsx";
 import { DraftPad } from "./DraftPad.jsx";
 import { PreferenceSwitch } from "./PreferenceSwitch.jsx";
 
@@ -24,6 +25,7 @@ export default function App() {
           second bundler in the toolchain.
         </p>
       </section>
+      <BrowserConditionProof />
       <section className="client-grid" aria-label="Client component examples">
         <Counter initialCount={2} />
         <PreferenceSwitch />

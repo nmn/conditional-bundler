@@ -111,7 +111,7 @@ function adaptLegacyFixtureResult(result) {
   );
   const adaptBundle = (bundle) => ({
     ...bundle,
-    envId: bundle.environmentId,
+    envId: bundle.environmentId ?? bundle.envId,
     entrypoints: bundle.entrypoints.map((entrypoint) => ({
       ...entrypoint,
       envId: entrypoint.environmentId,

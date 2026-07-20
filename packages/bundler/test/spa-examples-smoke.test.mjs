@@ -14,6 +14,8 @@ const examples = [
     route: "/inventory",
     heading: "Stock without guesswork.",
     stylePattern: /^stylex\.all\.javascript\.[a-z0-9]+\.css$/,
+    serverSharedBundleCount: 2,
+    clientSharedBundleCount: 2,
   },
   {
     name: "react-spa-tailwind",
@@ -21,6 +23,8 @@ const examples = [
     route: "/reports",
     heading: "Signals, not spreadsheet fog.",
     stylePattern: /^tailwind\.all\.javascript\.[a-z0-9]+\.css$/,
+    serverSharedBundleCount: 1,
+    clientSharedBundleCount: 1,
   },
 ];
 
@@ -34,7 +38,11 @@ for (const example of examples) {
 
     await buildExample(exampleDir, "production");
     const manifest = await readManifest(exampleDir);
-    expectBundleShape(manifest);
+    expectBundleShape(
+      manifest,
+      example.serverSharedBundleCount,
+      example.clientSharedBundleCount,
+    );
     const styles = manifest.assets.filter((asset) => asset.type === "style");
     expect(styles).toHaveLength(1);
     expect(styles[0].fileName).toMatch(example.stylePattern);
@@ -50,10 +58,7 @@ for (const example of examples) {
       "::src/App.jsx::environment=javascript",
     );
     expect(appRecords).toHaveLength(1);
-    expect(Object.keys(appRecords[0].fileRecordsByEnv).sort()).toEqual([
-      "client::javascript",
-      "server::javascript",
-    ]);
+    expect(Object.values(appRecords[0].scopeVariants)).toHaveLength(1);
     for (const route of [
       "Dashboard.jsx",
       "Inventory.jsx",
@@ -65,10 +70,7 @@ for (const example of examples) {
         `::src/routes/${route}::environment=javascript`,
       );
       expect(routeRecords).toHaveLength(1);
-      expect(Object.keys(routeRecords[0].fileRecordsByEnv).sort()).toEqual([
-        "client::javascript",
-        "server::javascript",
-      ]);
+      expect(Object.values(routeRecords[0].scopeVariants)).toHaveLength(1);
     }
 
     await withServer(exampleDir, "production", async (baseUrl) => {
@@ -188,8 +190,14 @@ test("react-spa-stylex keeps StyleX definitions beside their components", async 
   }
 });
 
-function expectBundleShape(manifest) {
-  expect(manifest.bundles).toHaveLength(8);
+function expectBundleShape(
+  manifest,
+  serverSharedBundleCount,
+  clientSharedBundleCount,
+) {
+  expect(manifest.bundles).toHaveLength(
+    10 + serverSharedBundleCount + clientSharedBundleCount,
+  );
   const serverOnlyBundles = manifest.bundles.filter(
     (bundle) =>
       bundle.targetIds.length === 1 && bundle.targetIds[0] === "server",
@@ -198,30 +206,47 @@ function expectBundleShape(manifest) {
     (bundle) =>
       bundle.targetIds.length === 1 && bundle.targetIds[0] === "client",
   );
-  expect(serverOnlyBundles).toHaveLength(1);
-  expect(clientOnlyBundles).toHaveLength(1);
-  expect(serverOnlyBundles[0].entryId).toMatch(/server\.server\.jsx$/);
-  expect(clientOnlyBundles[0].entryId).toMatch(/client\.client\.jsx$/);
+  expect(serverOnlyBundles).toHaveLength(5 + serverSharedBundleCount);
+  expect(clientOnlyBundles).toHaveLength(5 + clientSharedBundleCount);
+  const serverEntry = serverOnlyBundles.find(
+    (bundle) => bundle.entryKind === "explicit",
+  );
+  const clientEntry = clientOnlyBundles.find(
+    (bundle) => bundle.entryKind === "explicit",
+  );
+  expect(serverEntry.entryId).toMatch(/server\.server\.jsx$/);
+  expect(clientEntry.entryId).toMatch(/client\.client\.jsx$/);
 
   const universalBundles = manifest.bundles.filter(
     (bundle) =>
       bundle.targetIds.includes("server") &&
       bundle.targetIds.includes("client"),
   );
-  expect(universalBundles).toHaveLength(6);
+  expect(universalBundles).toHaveLength(0);
   expect(
-    universalBundles
-      .map((bundle) => path.basename(bundle.entryId))
-      .filter((name) =>
-        /^(Dashboard|Inventory|Reports|Settings)\.jsx$/.test(name),
-      )
-      .sort(),
-  ).toEqual(["Dashboard.jsx", "Inventory.jsx", "Reports.jsx", "Settings.jsx"]);
-  expect(
-    universalBundles.filter((bundle) =>
+    serverOnlyBundles.filter((bundle) =>
       bundle.entryId.startsWith("bundler:shared:"),
     ),
-  ).toHaveLength(2);
+  ).toHaveLength(serverSharedBundleCount);
+  expect(
+    clientOnlyBundles.filter((bundle) =>
+      bundle.entryId.startsWith("bundler:shared:"),
+    ),
+  ).toHaveLength(clientSharedBundleCount);
+  expect(Object.keys(manifest.dynamicImports)).toHaveLength(8);
+  expect(
+    manifest.bundles.filter((bundle) => bundle.entryKind === "dynamic"),
+  ).toHaveLength(8);
+  expect(
+    manifest.bundles
+      .filter((bundle) => bundle.entryKind === "shared")
+      .every(
+        (bundle) =>
+          manifest.dynamicImports[
+            `${bundle.entrypoints[0].envId}:${bundle.entryId}`
+          ] === undefined,
+      ),
+  ).toBe(true);
   for (const routeName of [
     "Dashboard.jsx",
     "Inventory.jsx",
@@ -229,13 +254,15 @@ function expectBundleShape(manifest) {
     "Settings.jsx",
   ]) {
     const routePath = path.join(
-      path.dirname(serverOnlyBundles[0].entryId),
+      path.dirname(serverEntry.entryId),
       "routes",
       routeName,
     );
     expect(
       manifest.entrypoints[`server::javascript:${routePath}`].fileName,
-    ).toBe(manifest.entrypoints[`client::javascript:${routePath}`].fileName);
+    ).not.toBe(
+      manifest.entrypoints[`client::javascript:${routePath}`].fileName,
+    );
   }
 }
 
@@ -326,10 +353,12 @@ async function findCacheRecords(cacheDir, identitySuffix) {
     const filePath = path.join(entry.parentPath, entry.name);
     const record = JSON.parse(await fs.readFile(filePath, "utf8"));
     if (
-      Object.values(record.fileRecordsByEnv ?? {}).some((fileRecord) =>
-        (fileRecord.moduleIdentity ?? fileRecord.id ?? "").endsWith(
-          identitySuffix,
-        ),
+      Object.values(record.scopeVariants ?? {}).some((variant) =>
+        (
+          variant.fileRecord?.moduleIdentity ??
+          variant.fileRecord?.id ??
+          ""
+        ).endsWith(identitySuffix),
       )
     ) {
       records.push(record);
@@ -342,6 +371,10 @@ async function expectHealthyPage(baseUrl, route, expected) {
   const response = await fetch(`${baseUrl}${route}`);
   const text = await response.text();
   expect(response.status).toBe(200);
+  expect(text).toMatch(/^<!DOCTYPE html>/);
+  expect(text).toContain('<html lang="en">');
+  expect(text).not.toContain('<div id="root"></div>');
+  expect(text).not.toContain("<style>");
   expect(text).toContain(expected);
   expect(text).not.toContain("Internal server error");
 }

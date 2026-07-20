@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createCjsModuleIdentity } from "@bundler/cjs-to-esm";
 
 const requireFromPlugin = createRequire(import.meta.url);
+const runtimeClientRequest = "@bundler/react-rsc-plugin/runtime-client";
 const reactPackageRequests = new Set([
   "react",
   "react-server",
@@ -15,6 +16,8 @@ const reactPackageRequests = new Set([
   "react-dom/client",
   "react-dom/server",
   "react-dom/server.node",
+  "react-dom/static",
+  "react-dom/static.node",
   "react-server-dom-webpack/client.browser",
   "react-server-dom-webpack/client",
   "react-server-dom-webpack/client.node",
@@ -48,11 +51,14 @@ export function createReactRscPlugin(options) {
     root,
     options.clientReferenceEntry ?? options.client?.referenceEntry,
   );
+  const runtimeClientPath = fileURLToPath(
+    new URL("./runtime-client.js", import.meta.url),
+  );
   const runtimeEntry =
     options.runtimeEntry === false || options.client?.runtimeEntry === false
       ? undefined
       : options.runtimeEntry === true || options.client?.runtimeEntry === true
-        ? fileURLToPath(new URL("./runtime-client.js", import.meta.url))
+        ? runtimeClientPath
         : resolveProjectPath(
             root,
             options.runtimeEntry ?? options.client?.runtimeEntry,
@@ -101,6 +107,13 @@ export function createReactRscPlugin(options) {
       }
     },
     resolveImport(context) {
+      if (context.request === runtimeClientRequest) {
+        return {
+          id: runtimeClientPath,
+          filePath: runtimeClientPath,
+          type: "javascript",
+        };
+      }
       if (!reactPackageRequests.has(context.request)) return undefined;
 
       const runtimeEnvironment =
@@ -138,9 +151,7 @@ export function createReactRscPlugin(options) {
       [
         "./runtime-transform.mjs",
         {
-          runtimeTemplatePath: fileURLToPath(
-            new URL("./runtime-client.js", import.meta.url),
-          ),
+          runtimeTemplatePath: runtimeClientPath,
           rscEndpoint: options.rscEndpoint ?? "/rsc",
           clientReferenceEntry,
         },
@@ -277,6 +288,9 @@ function resolveReactImplementation(
     case "react-dom/server":
     case "react-dom/server.node":
       return path.join(packageRoot("react-dom"), "server.node.js");
+    case "react-dom/static":
+    case "react-dom/static.node":
+      return path.join(packageRoot("react-dom"), "static.node.js");
     case "react-server-dom-webpack/client.browser":
     case "react-server-dom-webpack/client":
       return path.join(rscPackageRoot, "client.browser.js");
@@ -294,6 +308,8 @@ function getReactRuntimeEnvironment(request, environmentId, clientEnvironment) {
   if (
     request === "react-dom/server" ||
     request === "react-dom/server.node" ||
+    request === "react-dom/static" ||
+    request === "react-dom/static.node" ||
     request === "react-server-dom-webpack/client.node"
   ) {
     return clientEnvironment;

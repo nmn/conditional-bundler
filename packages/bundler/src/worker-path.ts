@@ -1,5 +1,14 @@
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+
+const requireFromBundler = createRequire(import.meta.url);
 
 export function resolveWorkerPath(): string {
-  return fileURLToPath(new URL("../../worker/dist/worker.js", import.meta.url));
+  try {
+    return requireFromBundler.resolve("@bundler/worker/worker");
+  } catch (error) {
+    throw new Error(
+      "The bundler worker artifact is unavailable. Run the package build before starting the bundler.",
+      { cause: error },
+    );
+  }
 }

@@ -1,55 +1,60 @@
 import React from "react";
 import * as stylex from "@stylexjs/stylex";
 import monarchMark from "./assets/monarch-mark.svg";
+import { BrowserConditionProof } from "./BrowserString.jsx";
 import { CartProvider } from "./client/CartContext.jsx";
 import { CommerceChrome } from "./client/CommerceChrome.jsx";
-import { navItems, resolveRoute } from "./router.js";
+import { Router } from "./client/Router.jsx";
+import { navItems, resolveRoute } from "./routes.js";
 
 export default async function App({ path, searchParams }) {
   const { id, label, Component } = await resolveRoute(path);
   return (
     <div {...stylex.props(styles.page)}>
       <CartProvider>
-        <CommerceChrome path={path}>
-          <main {...stylex.props(styles.shell)} data-route={id}>
-            <header {...stylex.props(styles.header)}>
-              <a href="/" {...stylex.props(styles.brand)}>
-                <span {...stylex.props(styles.brandMark)}>M</span>
-                <span {...stylex.props(styles.brandCopy)}>
-                  <strong {...stylex.props(styles.brandTitle)}>
-                    Monarch Goods
-                  </strong>
-                  <small {...stylex.props(styles.smallCaps)}>
-                    provisions for precise homes / StyleX
-                  </small>
-                </span>
-              </a>
-              <img
-                {...stylex.props(styles.assetMark)}
-                src={monarchMark.src}
-                width={monarchMark.width}
-                height={monarchMark.height}
-                alt=""
-              />
-              <nav {...stylex.props(styles.nav)} aria-label="Store">
-                {navItems.map((item) => (
-                  <a
-                    key={item.id}
-                    href={item.href}
-                    aria-current={item.label === label ? "page" : undefined}
-                    {...stylex.props(
-                      styles.navLink,
-                      item.label === label && styles.navLinkActive,
-                    )}
-                  >
-                    {item.label}
-                  </a>
-                ))}
-              </nav>
-            </header>
-            <Component path={path} searchParams={searchParams} />
-          </main>
-        </CommerceChrome>
+        <Router>
+          <CommerceChrome path={path}>
+            <main {...stylex.props(styles.shell)} data-route={id}>
+              <header {...stylex.props(styles.header)}>
+                <a href="/" {...stylex.props(styles.brand)}>
+                  <span {...stylex.props(styles.brandMark)}>M</span>
+                  <span {...stylex.props(styles.brandCopy)}>
+                    <strong {...stylex.props(styles.brandTitle)}>
+                      Monarch Goods
+                    </strong>
+                    <small {...stylex.props(styles.smallCaps)}>
+                      provisions for precise homes / StyleX
+                    </small>
+                  </span>
+                </a>
+                <img
+                  {...stylex.props(styles.assetMark)}
+                  src={monarchMark.src}
+                  width={monarchMark.width}
+                  height={monarchMark.height}
+                  alt=""
+                />
+                <nav {...stylex.props(styles.nav)} aria-label="Store">
+                  {navItems.map((item) => (
+                    <a
+                      key={item.id}
+                      href={item.href}
+                      aria-current={item.label === label ? "page" : undefined}
+                      {...stylex.props(
+                        styles.navLink,
+                        item.label === label && styles.navLinkActive,
+                      )}
+                    >
+                      {item.label}
+                    </a>
+                  ))}
+                </nav>
+              </header>
+              <BrowserConditionProof />
+              <Component path={path} searchParams={searchParams} />
+            </main>
+          </CommerceChrome>
+        </Router>
       </CartProvider>
     </div>
   );
@@ -61,16 +66,17 @@ const styles = stylex.create({
     color: "#1b1915",
     fontFamily:
       '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif',
-    margin: -8,
-    minHeight: "100vh",
-    padding: 8,
+    minHeight: "100dvh",
   },
   shell: {
     marginInline: "auto",
     maxWidth: 1380,
-    minHeight: "100vh",
+    minHeight: "100dvh",
     paddingBlock: 28,
     paddingInline: 32,
+    "@media (max-width: 640px)": {
+      paddingInline: 16,
+    },
   },
   header: {
     alignItems: "center",
@@ -79,9 +85,13 @@ const styles = stylex.create({
     borderBottomWidth: 2,
     display: "grid",
     gap: 18,
-    gridTemplateColumns: "minmax(250px, 1fr) auto",
+    gridTemplateColumns: "minmax(250px, 1fr) auto auto",
     marginBottom: 34,
     paddingBottom: 18,
+    "@media (max-width: 820px)": {
+      alignItems: "start",
+      gridTemplateColumns: "1fr",
+    },
   },
   brand: {
     alignItems: "center",
@@ -117,6 +127,9 @@ const styles = stylex.create({
     flexWrap: "wrap",
     gap: 7,
     justifyContent: "flex-end",
+    "@media (max-width: 820px)": {
+      justifyContent: "flex-start",
+    },
   },
   navLink: {
     borderColor: "#2f2a22",
@@ -126,6 +139,12 @@ const styles = stylex.create({
     paddingBlock: 9,
     paddingInline: 12,
     textDecoration: "none",
+    ":focus-visible": {
+      outlineColor: "#b64b2f",
+      outlineOffset: 3,
+      outlineStyle: "solid",
+      outlineWidth: 3,
+    },
   },
   navLinkActive: {
     backgroundColor: "#d7ff45",

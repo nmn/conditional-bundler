@@ -14,22 +14,23 @@ export function emitStaticBundleImports(
   imports: StaticBundleImport[],
   bundleMap: Map<string, BundleTarget>,
   envId: string,
+  fromFileName?: string,
+  mapScriptFileName: (fileName: string) => string = (fileName) => fileName,
 ): string {
   const lines: string[] = [];
 
-  for (const bundleImport of [...imports].sort((left, right) =>
-    left.entryId.localeCompare(right.entryId),
-  )) {
-    const target =
-      bundleMap.get(`${envId}:${bundleImport.entryId}`) ??
-      bundleMap.get(bundleImport.entryId);
+  for (const bundleImport of imports) {
+    const target = bundleMap.get(`${envId}:${bundleImport.entryId}`);
     if (!target) {
       throw new Error(
         `Missing bundle for static dependency '${bundleImport.entryId}' in '${envId}'.`,
       );
     }
 
-    const specifier = normalizeChunkSpecifier(target.fileName);
+    const targetFileName = mapScriptFileName(target.fileName);
+    const specifier = fromFileName
+      ? relativeChunkSpecifier(fromFileName, targetFileName)
+      : normalizeChunkSpecifier(targetFileName);
     const symbols = Array.from(new Set(bundleImport.symbols)).sort();
     lines.push(
       symbols.length > 0
@@ -39,6 +40,15 @@ export function emitStaticBundleImports(
   }
 
   return lines.join("\n");
+}
+
+function relativeChunkSpecifier(
+  fromFileName: string,
+  targetFileName: string,
+): string {
+  return normalizeChunkSpecifier(
+    path.posix.relative(path.posix.dirname(fromFileName), targetFileName),
+  );
 }
 
 function normalizeChunkSpecifier(fileName: string): string {
@@ -52,3 +62,4 @@ function normalizeChunkSpecifier(fileName: string): string {
   }
   return `./${fileName}`;
 }
+import path from "node:path";

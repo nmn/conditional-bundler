@@ -16,6 +16,7 @@ export async function transform(
     id,
     resolvedImports,
     dev,
+    environmentVariables,
   } = {},
 ) {
   const { scanImportRequests, transformWithCore } =
@@ -31,6 +32,7 @@ export async function transform(
     syntax,
     envs: ["browser"],
     dev,
+    environmentVariables,
   };
   return transformWithCore(
     {
@@ -42,6 +44,7 @@ export async function transform(
     },
     {
       importAttrAllow: ["json"],
+      environmentVariables,
       sourceMap: sourceMap
         ? {
             sourceFileName: filePath,

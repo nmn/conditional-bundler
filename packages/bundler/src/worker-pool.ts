@@ -4,6 +4,7 @@ import { Worker } from "node:worker_threads";
 export type WorkerPoolOptions = {
   workerPath: string;
   size: number;
+  initialSize?: number;
 };
 
 type WorkerTask = {
@@ -23,20 +24,26 @@ export class WorkerPool {
   private queue: WorkerTask[] = [];
   private workers: Worker[] = [];
   private idle: Worker[] = [];
-  private parallelismEnabled: boolean;
+  private closed = false;
 
   constructor(private options: WorkerPoolOptions) {
     if (!Number.isInteger(options.size) || options.size < 1) {
       throw new Error("Worker pool size must be a positive integer.");
     }
-    this.parallelismEnabled = options.size === 1;
-    this.createWorker();
+    const initialSize = options.initialSize ?? 1;
+    if (!Number.isInteger(initialSize) || initialSize < 1) {
+      throw new Error("Worker pool initialSize must be a positive integer.");
+    }
+    this.ensureSize(initialSize);
   }
 
   run(
     payload: unknown,
     handleRequest?: (payload: unknown) => Promise<unknown>,
   ): Promise<unknown> {
+    if (this.closed) {
+      return Promise.reject(new Error("Worker pool is closed."));
+    }
     return new Promise((resolve, reject) => {
       this.queue.push({ payload, handleRequest, resolve, reject });
       this.drain();
@@ -44,20 +51,34 @@ export class WorkerPool {
   }
 
   async close(): Promise<void> {
-    await Promise.all(this.workers.map((worker) => worker.terminate()));
+    this.closed = true;
+    const error = new Error("Worker pool closed before completing its task.");
+    for (const task of this.queue.splice(0)) {
+      task.reject(error);
+    }
+    const workers = [...this.workers];
+    for (const worker of workers) {
+      const current = (worker as Worker & { current?: WorkerTask }).current;
+      if (current) {
+        current.reject(error);
+        (worker as Worker & { current?: WorkerTask }).current = undefined;
+      }
+    }
+    this.workers.length = 0;
+    this.idle.length = 0;
+    await Promise.all(workers.map((worker) => worker.terminate()));
+  }
+
+  ensureSize(size: number): void {
+    const desiredSize = Math.min(this.options.size, Math.max(1, size));
+    while (!this.closed && this.workers.length < desiredSize) {
+      this.createWorker();
+    }
   }
 
   private drain(): void {
-    if (this.parallelismEnabled) {
-      const busyCount = this.workers.length - this.idle.length;
-      const desiredSize = Math.min(
-        this.options.size,
-        busyCount + this.queue.length,
-      );
-      while (this.workers.length < desiredSize) {
-        this.createWorker();
-      }
-    }
+    const busyCount = this.workers.length - this.idle.length;
+    this.ensureSize(busyCount + this.queue.length);
     while (this.idle.length > 0 && this.queue.length > 0) {
       const worker = this.idle.shift();
       const task = this.queue.shift();
@@ -84,12 +105,6 @@ export class WorkerPool {
       if (payload && payload.ok === false) {
         current.reject(new Error(payload.error ?? "Worker error"));
       } else {
-        if (isCacheMiss(payload)) {
-          this.parallelismEnabled = true;
-          while (this.workers.length < this.options.size) {
-            this.createWorker();
-          }
-        }
         current.resolve(message);
       }
       (worker as Worker & { current?: WorkerTask }).current = undefined;
@@ -130,26 +145,32 @@ export class WorkerPool {
       current.reject(error);
       (worker as Worker & { current?: WorkerTask }).current = undefined;
     }
-    this.idle.push(worker);
+    this.workers = this.workers.filter((candidate) => candidate !== worker);
+    this.idle = this.idle.filter((candidate) => candidate !== worker);
     this.drain();
+  }
+
+  private handleExit(this: WorkerPool, worker: Worker, code: number): void {
+    if (
+      !this.workers.includes(worker) &&
+      !(worker as Worker & { current?: WorkerTask }).current
+    ) {
+      return;
+    }
+    this.handleError(
+      worker,
+      new Error(`Worker exited before completing its task (code ${code}).`),
+    );
   }
 
   private createWorker(): void {
     const worker = new Worker(path.resolve(this.options.workerPath));
     worker.on("message", this.handleMessage.bind(this, worker));
     worker.on("error", this.handleError.bind(this, worker));
+    worker.on("exit", this.handleExit.bind(this, worker));
     this.workers.push(worker);
     this.idle.push(worker);
   }
-}
-
-function isCacheMiss(payload: unknown): boolean {
-  return (
-    typeof payload === "object" &&
-    payload !== null &&
-    (payload as { ok?: unknown }).ok === true &&
-    (payload as { cacheHit?: unknown }).cacheHit === false
-  );
 }
 
 function isWorkerRequestMessage(

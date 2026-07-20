@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useId, useState } from "react";
+import React, { useState } from "react";
 
 const windows = {
   local: "Tomorrow, 2-6 PM",
@@ -9,7 +9,7 @@ const windows = {
 };
 
 export function DeliveryEstimator() {
-  const selectId = useId();
+  const selectId = "delivery-region";
   const [zone, setZone] = useState("local");
 
   return (

@@ -88,6 +88,7 @@ export async function normalizePlugins(plugins: BundlerPlugin[]): Promise<{
       beforeCombine: plugin.beforeCombine,
       afterCombine: plugin.afterCombine,
       buildEnd: plugin.buildEnd,
+      planBundleResources: plugin.planBundleResources,
       generateBundleResources: plugin.generateBundleResources,
       manualChunk: plugin.manualChunk,
     });
@@ -452,6 +453,7 @@ function buildWorkerTransformProfile(
         plugins: plugins
           .map((plugin) => plugin.workerFingerprint)
           .filter((value): value is string => Boolean(value)),
+        coreToolchain: coreWorkerToolchainFingerprint(),
       }),
     ),
     transform,
@@ -471,6 +473,64 @@ function portableBabelSpec(value: NormalizedBabelPluginSpec): {
     modulePath: portablePathIdentity(value.modulePath),
     options: portableFingerprintValue(value.options),
   };
+}
+
+let cachedCoreWorkerToolchainFingerprint: string | undefined;
+
+function coreWorkerToolchainFingerprint(): string {
+  if (cachedCoreWorkerToolchainFingerprint) {
+    return cachedCoreWorkerToolchainFingerprint;
+  }
+  const workerEntry = requireFromHere.resolve("@bundler/worker/worker");
+  const workerRoot = findPkgRoot(workerEntry) ?? path.dirname(workerEntry);
+  const workerRequire = createRequire(pathToFileURL(workerEntry));
+  const dependencyVersions = Object.fromEntries(
+    [
+      "@ampproject/remapping",
+      "@babel/core",
+      "@babel/generator",
+      "@babel/parser",
+      "@babel/traverse",
+      "@babel/types",
+      "image-size",
+      "lightningcss",
+    ].map((specifier) => {
+      const resolved = workerRequire.resolve(specifier);
+      const root = findPkgRoot(resolved) ?? path.dirname(resolved);
+      return [specifier, readPkgSafe(root).version];
+    }),
+  );
+  const distDir = path.join(workerRoot, "dist");
+  const implementation = collectFingerprintFiles(distDir).map((filePath) => [
+    normalizePortableRelativePath(path.relative(distDir, filePath)),
+    hashFileIfExists(filePath),
+  ]);
+  cachedCoreWorkerToolchainFingerprint = contentHash(
+    JSON.stringify({
+      workerVersion: readPkgSafe(workerRoot).version,
+      dependencyVersions,
+      implementation,
+    }),
+  );
+  return cachedCoreWorkerToolchainFingerprint;
+}
+
+function collectFingerprintFiles(directory: string): string[] {
+  if (!fs.existsSync(directory)) return [];
+  return fs
+    .readdirSync(directory, { withFileTypes: true })
+    .flatMap((entry) => {
+      const filePath = path.join(directory, entry.name);
+      if (entry.isDirectory()) return collectFingerprintFiles(filePath);
+      return entry.isFile() && /\.(?:c?js|json)$/.test(entry.name)
+        ? [filePath]
+        : [];
+    })
+    .sort();
+}
+
+function normalizePortableRelativePath(filePath: string): string {
+  return filePath.split(path.sep).join("/");
 }
 
 function portableScopedSpecs(

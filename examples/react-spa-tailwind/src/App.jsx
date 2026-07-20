@@ -1,4 +1,5 @@
 import React from "react";
+import { BrowserConditionProof } from "./BrowserString.jsx";
 import { classes } from "./classes.js";
 import { navItems } from "./router.js";
 
@@ -29,6 +30,7 @@ export function App({ routeId, Route }) {
           </nav>
         </aside>
         <main className="grid content-start gap-5">
+          <BrowserConditionProof />
           <Route />
         </main>
       </div>

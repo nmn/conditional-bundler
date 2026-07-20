@@ -51,6 +51,8 @@ export type DiscoveredEntrypoint = {
   environment?: string;
   targets?: string[];
   exportMode?: "entry" | "dynamic";
+  /** Discovery role is independent from the JavaScript export surface. */
+  entryKind?: "explicit" | "dynamic" | "shared" | "manual";
   /** Select the represented file's ordinary module variant portably. */
   self?: "normal";
   moduleIdentity?: string;

@@ -7,6 +7,7 @@ import { buildProject, type BuildResult } from "../builder.js";
 import { parseBuildScopeId, type BundlerConfig } from "../config.js";
 import { resolveDevOptions } from "./options.js";
 import { readDevAsset } from "./conditional-assets.js";
+import { resolveUserAgentOptionKey, withConditionId } from "@bundler/assets";
 import {
   acceptWebSocket,
   broadcast,
@@ -231,9 +232,24 @@ async function handleRscDevRequest(
     response.end(body);
     return;
   }
-  for (const assetName of matchAssetRequests(url.pathname)) {
+  let assetNames = matchAssetRequests(url.pathname);
+  if (url.searchParams.has("hmr") && build.conditionNames.length > 0) {
+    const optionSet = { conditions: build.conditionNames };
+    const userAgent = request.headers["user-agent"];
+    const resolved = await resolveUserAgentOptionKey(
+      optionSet,
+      Array.isArray(userAgent) ? userAgent[0] : userAgent,
+    );
+    assetNames = assetNames.map((fileName) =>
+      /\.[cm]?js$/.test(fileName)
+        ? withConditionId(fileName, optionSet, resolved.key)
+        : fileName,
+    );
+  }
+  for (const assetName of assetNames) {
     const served = await readDevAsset(config, build, assetName);
     if (served) {
+      response.statusCode = served.statusCode;
       response.setHeader("content-type", served.contentType);
       response.end(served.body);
       return;
@@ -510,13 +526,19 @@ export async function syncChangedRscNodeModules(
         {
           envId: bundle.envId,
           entryId: bundle.entryId,
+          entryKind: bundle.entryKind,
           exportMode: bundle.exportMode,
         },
       ]
     )
       .filter(
         (entrypoint) =>
-          entrypoint.exportMode === "dynamic" &&
+          (entrypoint.entryKind ??
+            (entrypoint.entryId.startsWith("bundler:")
+              ? "shared"
+              : entrypoint.exportMode === "dynamic"
+                ? "dynamic"
+                : "explicit")) === "dynamic" &&
           config.targets[
             entrypoint.targetId ?? parseBuildScopeId(entrypoint.envId).targetId
           ]?.platform === "node",

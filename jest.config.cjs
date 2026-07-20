@@ -5,4 +5,5 @@ module.exports = {
   moduleFileExtensions: ["mjs", "js", "json"],
   roots: ["<rootDir>/packages"],
   transform: {},
+  watchman: false,
 };

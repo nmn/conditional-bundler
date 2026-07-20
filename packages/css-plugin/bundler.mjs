@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import {
+  contentHash,
   contentHashShort,
   normalizePosixPath,
   readPkgSafe,
@@ -39,38 +40,36 @@ export default function cssBundlerPlugin(options = {}) {
         },
       },
     },
+    planBundleResources(context) {
+      const moduleOutputs = collectCssModuleOutputs(context.modules);
+      return Object.fromEntries(
+        context.bundles.map((bundle) => {
+          const selected = selectCssBundleOutputs(bundle, moduleOutputs);
+          return selected.length === 0
+            ? [bundle.id, "none"]
+            : [
+                bundle.id,
+                contentHash(
+                  JSON.stringify(
+                    selected.map((item) => ({
+                      moduleId: item.moduleId,
+                      variantId: item.record.variantId,
+                      outputId: item.output.outputId,
+                      type: item.output.type,
+                      template: item.output.template,
+                      metadata: item.output.metadata,
+                    })),
+                  ),
+                ),
+              ];
+        }),
+      );
+    },
     async generateBundleResources(context) {
-      const moduleOutputs = new Map();
-      for (const moduleRecord of context.modules) {
-        const output = moduleRecord.extraOutputs?.["bundler-css"];
-        if (output) {
-          const item = {
-            moduleId: moduleRecord.moduleIdentity ?? moduleRecord.id,
-            output,
-            record: moduleRecord,
-          };
-          for (const envId of moduleRecord.environmentIds ??
-            moduleRecord.envs ??
-            []) {
-            moduleOutputs.set(`${envId}:${moduleRecord.id}`, item);
-            moduleOutputs.set(`${envId}:${item.moduleId}`, item);
-          }
-        }
-      }
+      const moduleOutputs = collectCssModuleOutputs(context.modules);
 
       for (const bundle of context.bundles) {
-        const selected = Array.from(
-          new Map(
-            bundle.scopeIds
-              .flatMap((envId) =>
-                bundle.modules.map((moduleId) =>
-                  moduleOutputs.get(`${envId}:${moduleId}`),
-                ),
-              )
-              .filter(Boolean)
-              .map((item) => [item.moduleId, item]),
-          ).values(),
-        );
+        const selected = selectCssBundleOutputs(bundle, moduleOutputs);
         if (selected.length === 0) {
           continue;
         }
@@ -122,6 +121,7 @@ export default function cssBundlerPlugin(options = {}) {
               provisional,
               context.resolveReference,
               emittedModules,
+              bundle.envId,
             )),
           );
         }
@@ -139,7 +139,11 @@ export default function cssBundlerPlugin(options = {}) {
               .map(
                 (reference) =>
                   `  ${reference.symbol}: url("${escapeCssUrl(
-                    context.resolveReference(reference.id, provisional),
+                    context.resolveReference(
+                      reference.id,
+                      provisional,
+                      bundle.envId,
+                    ),
                   )}");`,
               )
               .join("\n")}\n}`,
@@ -186,7 +190,42 @@ export default function cssBundlerPlugin(options = {}) {
   };
 }
 
-async function serializeTemplate(output, fileName, resolveReference) {
+function collectCssModuleOutputs(modules) {
+  const moduleOutputs = new Map();
+  for (const moduleRecord of modules) {
+    const output = moduleRecord.extraOutputs?.["bundler-css"];
+    if (!output) continue;
+    const item = {
+      moduleId: moduleRecord.moduleIdentity ?? moduleRecord.id,
+      output,
+      record: moduleRecord,
+    };
+    for (const envId of moduleRecord.environmentIds ??
+      moduleRecord.envs ??
+      []) {
+      moduleOutputs.set(`${envId}:${moduleRecord.id}`, item);
+      moduleOutputs.set(`${envId}:${item.moduleId}`, item);
+    }
+  }
+  return moduleOutputs;
+}
+
+function selectCssBundleOutputs(bundle, moduleOutputs) {
+  return Array.from(
+    new Map(
+      bundle.scopeIds
+        .flatMap((envId) =>
+          bundle.modules.map((moduleId) =>
+            moduleOutputs.get(`${envId}:${moduleId}`),
+          ),
+        )
+        .filter(Boolean)
+        .map((item) => [item.moduleId, item]),
+    ).values(),
+  );
+}
+
+async function serializeTemplate(output, fileName, resolveReference, scopeId) {
   const template = output.template;
   if (!template) {
     return readOutputContents(output);
@@ -196,7 +235,9 @@ async function serializeTemplate(output, fileName, resolveReference) {
       if (part.kind === "text") {
         return part.value;
       }
-      return escapeCssUrl(resolveReference(part.referenceId, fileName));
+      return escapeCssUrl(
+        resolveReference(part.referenceId, fileName, scopeId),
+      );
     })
     .join("");
 }
@@ -207,6 +248,7 @@ async function renderCssModule(
   fileName,
   resolveReference,
   emitted,
+  scopeId,
 ) {
   if (emitted.has(moduleId)) return [];
   emitted.add(moduleId);
@@ -221,6 +263,7 @@ async function renderCssModule(
       fileName,
       resolveReference,
       emitted,
+      scopeId,
       new Set(),
       new Set(),
     );
@@ -236,6 +279,7 @@ async function renderCssModule(
       fileName,
       resolveReference,
       emitted,
+      scopeId,
     );
     for (const item of child) {
       const wrapped = wrapImportedCss(item.css, dependency);
@@ -247,7 +291,7 @@ async function renderCssModule(
     }
   }
   rendered.push({
-    css: await serializeTemplate(output, fileName, resolveReference),
+    css: await serializeTemplate(output, fileName, resolveReference, scopeId),
     map: await readOutputMap(output),
     mapLineOffset: 0,
     references: output.template?.references ?? [],
@@ -262,6 +306,7 @@ async function renderCssCellGraph(
   fileName,
   resolveReference,
   emittedModules,
+  scopeId,
   emittedCells,
   visitingCells,
 ) {
@@ -287,6 +332,7 @@ async function renderCssCellGraph(
           fileName,
           resolveReference,
           emittedModules,
+          scopeId,
           emittedCells,
           visitingCells,
         )),
@@ -311,6 +357,7 @@ async function renderCssCellGraph(
       fileName,
       resolveReference,
       emittedModules,
+      scopeId,
     );
     for (const childPart of child) {
       const wrapped = wrapImportedCss(childPart.css, dependency);
@@ -328,7 +375,12 @@ async function renderCssCellGraph(
     throw new Error(`Missing CSS artifact '${cell.outputName}'.`);
   }
   rendered.push({
-    css: await serializeTemplate(cellOutput, fileName, resolveReference),
+    css: await serializeTemplate(
+      cellOutput,
+      fileName,
+      resolveReference,
+      scopeId,
+    ),
     map: await readOutputMap(cellOutput),
     mapLineOffset: 0,
     references: cellOutput.template?.references ?? [],

@@ -3,13 +3,25 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "package.json"
+  ],
   "bin": {
     "bundler": "bin/bundler.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -b tsconfig.json",
     "clean": "rimraf dist"
   },
   "dependencies": {
@@ -17,12 +29,16 @@
     "@babel/traverse": "^7.24.0",
     "@babel/types": "^7.24.0",
     "@bundler/assets": "workspace:*",
+    "@bundler/asset-imports": "workspace:*",
     "@bundler/browser-package-resolver": "workspace:*",
     "@bundler/css-plugin": "workspace:*",
+    "@bundler/dynamic-imports": "workspace:*",
     "@bundler/html-plugin": "workspace:*",
+    "@bundler/import-attributes": "workspace:*",
     "@bundler/json-plugin": "workspace:*",
     "@bundler/module-paths": "workspace:*",
     "@bundler/node-package-resolver": "workspace:*",
+    "@bundler/query-imports": "workspace:*",
     "@bundler/static-assets": "workspace:*",
     "@bundler/shared": "workspace:*",
     "@bundler/typescript-plugin": "workspace:*",

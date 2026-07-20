@@ -1,4 +1,17 @@
 export {
+  applyConditionIdToUrl,
+  conditionIdPlaceholder,
   createEnvironmentConditionEvaluator,
+  createOptionSet,
+  createUserAgentConditionEvaluator,
+  decodeOptionKey,
+  formatOptionKey,
+  optionKeyWidth,
+  parseConditionIdUrl,
+  resolveOptionKey,
+  resolveUserAgentOptionKey,
   transformConditionalBundle,
+  transformConditionalBundleById,
+  withConditionId,
+  withConditionIdPlaceholder,
 } from "./dist/index.js";

@@ -2,13 +2,13 @@
 
 import React, { useState } from "react";
 import { useExampleLog } from "./useExampleLog.dev.jsx" with {
-  condition: "DEV",
+  NODE_ENV: "development",
   else: "./useExampleLog.noop.jsx",
 };
 
 export function Counter({ initialCount }) {
   const [count, setCount] = useState(initialCount);
-  useExampleLog("Counter mounted through the DEV branch.");
+  useExampleLog("Counter mounted through the development branch.");
 
   return (
     <section className="client-panel counter">

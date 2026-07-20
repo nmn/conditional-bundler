@@ -8,6 +8,7 @@ import { parseBuildScopeId, type BundlerConfig } from "../config.js";
 import { materializeHmrPatch, type HmrCellRecord } from "./hmr-linker.js";
 import { resolveDevOptions } from "./options.js";
 import { readDevAsset, resolveConditionalCode } from "./conditional-assets.js";
+import { resolveUserAgentOptionKey, withConditionId } from "@bundler/assets";
 
 export type DevServer = {
   url: string;
@@ -224,18 +225,26 @@ async function handleRequest(
     response.end(body);
     return;
   }
+  const optionSet = { conditions: build.conditionNames };
+  const resolvedOptions = await resolveUserAgentOptionKey(
+    optionSet,
+    Array.isArray(request.headers["user-agent"])
+      ? request.headers["user-agent"][0]
+      : request.headers["user-agent"],
+  );
   if (url.pathname === "/") {
     const document = build.manifest.documents?.[0];
     if (document) {
       const served = await readDevAsset(config, build, document.fileName);
       if (served) {
+        response.statusCode = served.statusCode;
         response.setHeader("content-type", served.contentType);
         response.end(served.body);
         return;
       }
     }
     response.setHeader("content-type", "text/html; charset=utf-8");
-    response.end(renderIndex(config, build));
+    response.end(renderIndex(config, build, optionSet, resolvedOptions.key));
     return;
   }
 
@@ -252,7 +261,7 @@ async function handleRequest(
   }
   if (!served && request.headers.accept?.includes("text/html")) {
     response.setHeader("content-type", "text/html; charset=utf-8");
-    response.end(renderIndex(config, build));
+    response.end(renderIndex(config, build, optionSet, resolvedOptions.key));
     return;
   }
   if (!served) {
@@ -260,11 +269,17 @@ async function handleRequest(
     response.end("Not found");
     return;
   }
+  response.statusCode = served.statusCode;
   response.setHeader("content-type", served.contentType);
   response.end(served.body);
 }
 
-function renderIndex(config: BundlerConfig, build: BuildResult): string {
+function renderIndex(
+  config: BundlerConfig,
+  build: BuildResult,
+  optionSet: { conditions: string[] },
+  optionKey: string,
+): string {
   const styles = (build.manifest.assets ?? [])
     .filter((asset) => asset.type === "style")
     .map(
@@ -276,7 +291,11 @@ function renderIndex(config: BundlerConfig, build: BuildResult): string {
     .filter((bundle) => isConfiguredBrowserEntry(config, bundle))
     .map(
       (bundle) =>
-        `<script type="module" src="/${escapeHtml(bundle.fileName)}"></script>`,
+        `<script type="module" src="/${escapeHtml(
+          optionSet.conditions.length > 0
+            ? withConditionId(bundle.fileName, optionSet, optionKey)
+            : bundle.fileName,
+        )}"></script>`,
     )
     .join("\n");
   return `<!doctype html>

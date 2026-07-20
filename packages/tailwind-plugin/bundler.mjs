@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import {
+  contentHash,
   contentHashShort,
   findPkgRoot,
   normalizePosixPath,
@@ -27,29 +28,25 @@ export default function tailwindBundlerPlugin(options = {}) {
         },
       ],
     ],
+    async planBundleResources(context) {
+      const inputCss = await readInputCss(cssFiles);
+      const candidates = collectTailwindCandidates(context.modules);
+      const fingerprint = contentHash(JSON.stringify({ inputCss, candidates }));
+      return Object.fromEntries(
+        context.bundles.map((bundle) => [bundle.id, fingerprint]),
+      );
+    },
     async generateBundleResources(context) {
       const inputCss = await readInputCss(cssFiles);
       const compiler = await compile(inputCss, {
         base: options.rootDir ?? process.cwd(),
         loadStylesheet: loadTailwindStylesheet,
       });
-      const candidates = Array.from(
-        new Set(
-          context.modules.flatMap((moduleRecord) =>
-            Object.values(moduleRecord.extraOutputs ?? {}).flatMap((extra) =>
-              extra.type === "tailwind-candidates" &&
-              Array.isArray(extra.metadata?.candidates)
-                ? extra.metadata.candidates
-                : [],
-            ),
-          ),
-        ),
-      ).sort();
+      const candidates = collectTailwindCandidates(context.modules);
       const unannotatedCss = compiler.build(candidates);
       if (!unannotatedCss.trim()) {
         return;
       }
-      const owner = context.bundles[0];
       const pattern =
         context.outputs.cssFileName ??
         "[entry].[target].[environment].[hash].css";
@@ -74,11 +71,10 @@ export default function tailwindBundlerPlugin(options = {}) {
         sourceMapMode === "external" && mapFileName
           ? `${unannotatedCss}\n/*# sourceMappingURL=${path.basename(mapFileName)} */`
           : unannotatedCss;
-      const bundleKey = owner?.id;
+      const bundleKey = options.bundleKey ?? "tailwind:global";
       context.emitFile({
         fileName,
         contents: css,
-        envId: owner?.envId,
         type: "style",
         contentType: "text/css; charset=utf-8",
         bundleKey,
@@ -97,7 +93,6 @@ export default function tailwindBundlerPlugin(options = {}) {
             names: [],
             mappings: "",
           }),
-          envId: owner?.envId,
           type: "source-map",
           contentType: "application/json; charset=utf-8",
           bundleKey,
@@ -105,6 +100,21 @@ export default function tailwindBundlerPlugin(options = {}) {
       }
     },
   };
+}
+
+function collectTailwindCandidates(modules) {
+  return Array.from(
+    new Set(
+      modules.flatMap((moduleRecord) =>
+        Object.values(moduleRecord.extraOutputs ?? {}).flatMap((extra) =>
+          extra.type === "tailwind-candidates" &&
+          Array.isArray(extra.metadata?.candidates)
+            ? extra.metadata.candidates
+            : [],
+        ),
+      ),
+    ),
+  ).sort();
 }
 
 function outputAxisToken(values, override) {

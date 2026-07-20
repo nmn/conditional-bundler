@@ -61,7 +61,7 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
   const commonBundle = clientBundles.find((bundle) =>
     bundle.entryId.startsWith("bundler:shared:"),
   );
-  expect(clientBundleFiles).toHaveLength(9);
+  expect(clientBundleFiles).toHaveLength(11);
   expect(clientBundleFiles).toEqual(
     expect.arrayContaining([
       expect.stringMatching(
@@ -86,11 +86,13 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
         /^ProductActions\.client\.react\.client\.[a-z0-9]+\.js$/,
       ),
       expect.stringMatching(
+        /^BrowserString\.client\.react\.client\.[a-z0-9]+\.js$/,
+      ),
+      expect.stringMatching(/^Router\.client\.react\.client\.[a-z0-9]+\.js$/),
+      expect.stringMatching(
         /^bundler-shared-[a-z0-9]+\.client\.react\.client\.[a-z0-9]+\.js$/,
       ),
-      expect.stringMatching(
-        /^runtime-client\.client\.react\.client\.[a-z0-9]+\.js$/,
-      ),
+      expect.stringMatching(/^client\.client\.react\.client\.[a-z0-9]+\.js$/),
     ]),
   );
   expect(
@@ -123,7 +125,9 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     }),
   );
   for (const code of islandCodes) {
-    expect(code).toContain(`from "./${commonBundle.fileName}"`);
+    expect(code).toContain(
+      `from "./${conditionFileName(commonBundle.fileName, "x")}"`,
+    );
     expect(code).not.toContain("ReactSharedInternals");
   }
   const cartContextBundle = clientBundles.find((bundle) =>
@@ -138,7 +142,9 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
       path.join(exampleDir, "dist", referenceBundle.fileName),
       "utf8",
     );
-    expect(code).toContain(`from "./${cartContextBundle.fileName}"`);
+    expect(code).toContain(
+      `from "./${conditionFileName(cartContextBundle.fileName, "x")}"`,
+    );
   }
   expect(
     buildManifest.bundles.every(
@@ -184,6 +190,7 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     /^HomeCounter\.client\.react\.client\.[a-z0-9]+\.js$/,
   );
   expect(Object.keys(clientReferences).sort()).toEqual([
+    "/src/BrowserString.jsx",
     "/src/client/CartContext.jsx",
     "/src/client/CartTable.jsx",
     "/src/client/CategoryPicker.jsx",
@@ -191,6 +198,7 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     "/src/client/DeliveryEstimator.jsx",
     "/src/client/HomeCounter.jsx",
     "/src/client/ProductActions.jsx",
+    "/src/client/Router.jsx",
   ]);
   expect(JSON.stringify(clientReferences)).not.toContain(rootDir);
 
@@ -235,6 +243,13 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     await waitForHttp(`${baseUrl}/`, () => childOutput);
     const html = await fetchText(`${baseUrl}/`);
     expect(html).toContain("Monarch Goods");
+    expect(html).toMatch(/^<!DOCTYPE html>/);
+    expect(html).toContain('<html lang="en">');
+    expect(html).toContain(
+      '<meta name="description" content="An editorial React Server Components storefront built with conditional-bundler."/>',
+    );
+    expect(html).not.toContain("<style>");
+    expect(html).toContain('data-router="client"');
     expect(html).toMatch(
       /<main class="app-shell [a-z][a-z0-9]{7}" data-route="home">/,
     );
@@ -245,7 +260,7 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     expect(html).not.toContain("importmap");
     expect(html).not.toContain("esm.sh");
     expect(html).toMatch(
-      /<script type="module" src="\/runtime-client\.client\.react\.client\.[a-z0-9]+\.js"><\/script>/,
+      /<script type="module" src="\/client\.client\.react\.client\.[a-z0-9]+\.id-0\.js"><\/script>/,
     );
     expect(html).toContain(
       `<link rel="stylesheet" href="/${showcaseAssets.style.fileName}"`,
@@ -253,9 +268,11 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     const clientBundle = buildManifest.bundles.find(
       (bundle) =>
         bundleAppliesTo(bundle, "client") &&
-        bundle.entryId.endsWith("runtime-client.js"),
+        bundle.entryId.endsWith("client.jsx"),
     );
-    const clientAsset = await fetchAsset(`${baseUrl}/${clientBundle.fileName}`);
+    const clientAsset = await fetchAsset(
+      `${baseUrl}/${conditionFileName(clientBundle.fileName, "0")}`,
+    );
     expect(clientAsset.contentType).toContain("text/javascript");
     expect(clientAsset.text).toContain(
       `//# sourceMappingURL=${clientBundle.mapFileName}`,
@@ -284,7 +301,10 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     expect(home).toContain("src/client/CategoryPicker.jsx");
     expect(home).toContain("src/client/DeliveryEstimator.jsx");
     expect(home).toContain(
-      `["/src/client/HomeCounter.jsx",["/${homeCounterBundle.fileName}","/${commonBundle.fileName}"],"HomeCounter"]`,
+      `["/src/client/HomeCounter.jsx",["/${conditionFileName(
+        homeCounterBundle.fileName,
+        "0",
+      )}","/${conditionFileName(commonBundle.fileName, "0")}"],"HomeCounter"]`,
     );
     expect(home).not.toContain(":E");
 
@@ -316,8 +336,8 @@ test("react-rsc-commerce production server serves HTML and RSC routes", async ()
     const product = await fetchText(
       `${baseUrl}/rsc?path=${encodeURIComponent("/product/copper-kettle")}`,
     );
-    expect(product).toContain("DEV merchandising");
-    expect(product).not.toContain("available for this batch");
+    expect(product).toContain("available for this batch");
+    expect(product).not.toContain("DEV merchandising");
     expect(product).not.toContain(":E");
   });
 });
@@ -367,35 +387,39 @@ test("react-rsc-commerce dev server serves linked source maps", async () => {
     expect(html).toContain("HomeCounter.client.react.client.");
     expect(html).toContain("CategoryPicker.client.react.client.");
     expect(html).toContain("DeliveryEstimator.client.react.client.");
+    expect(html).toContain("Router.client.react.client.");
+    expect(html).toMatch(/^<!DOCTYPE html>/);
+    expect(html).not.toContain("<style>");
     const styleMatch = html.match(
       /<link rel="stylesheet" href="\/(server\.server\.react\.server\.[a-z0-9]+\.css)"/,
     );
     expect(styleMatch).not.toBeNull();
     const scriptMatch = html.match(
-      /<script type="module" src="\/(runtime-client\.client\.react\.client\.[a-z0-9]+\.js)"><\/script>/,
+      /<script type="module" src="\/(client\.client\.react\.client\.[a-z0-9]+\.id-0\.js)"><\/script>/,
     );
     expect(scriptMatch).not.toBeNull();
 
     const bundleFileName = scriptMatch[1];
+    const rawBundleFileName = bundleFileName.replace(".id-0.js", ".js");
     const bundleAsset = await fetchAsset(`${baseUrl}/${bundleFileName}`);
     expect(bundleAsset.contentType).toContain("text/javascript");
     expect(bundleAsset.text).toContain(
-      `//# sourceMappingURL=${bundleFileName}.map`,
+      `//# sourceMappingURL=${rawBundleFileName}.map`,
     );
 
-    const mapAsset = await fetchAsset(`${baseUrl}/${bundleFileName}.map`);
+    const mapAsset = await fetchAsset(`${baseUrl}/${rawBundleFileName}.map`);
     expect(mapAsset.contentType).toContain("application/json");
     expect(JSON.parse(mapAsset.text)).toMatchObject({
       version: 3,
-      file: bundleFileName,
+      file: rawBundleFileName,
       sections: expect.any(Array),
     });
 
     const product = await fetchText(
       `${baseUrl}/rsc?path=${encodeURIComponent("/product/copper-kettle")}`,
     );
-    expect(product).toContain("available for this batch");
-    expect(product).not.toContain("DEV merchandising");
+    expect(product).toContain("DEV merchandising");
+    expect(product).not.toContain("available for this batch");
 
     const home = await fetchText(`${baseUrl}/rsc?path=%2F`);
     expect(home).toContain("src/client/HomeCounter.jsx");
@@ -451,7 +475,9 @@ test("react-rsc-commerce dev server serves linked source maps", async () => {
       if (bundle.entryId === runtimeBundle.entryId) {
         continue;
       }
-      expect(code).toContain(`from "./${runtimeBundle.fileName}"`);
+      expect(code).toContain(
+        `from "./${conditionFileName(runtimeBundle.fileName, "x")}"`,
+      );
     }
     const serverBundle = findRscBundle(manifest);
     expect(serverBundle.mapFileName).toBe(`${serverBundle.fileName}.map`);
@@ -493,9 +519,11 @@ async function expectShowcaseAssets(manifest) {
   expect(css.indexOf("isolation: isolate")).toBeLessThan(
     css.indexOf("position: relative"),
   );
-  expect(css.indexOf("position: relative")).toBeLessThan(
-    css.indexOf("background: var(--"),
+  const assetBackgroundIndex = css.search(
+    /background: var\(--[^)]*__finalURL\)/,
   );
+  expect(assetBackgroundIndex).toBeGreaterThan(-1);
+  expect(css.indexOf("position: relative")).toBeLessThan(assetBackgroundIndex);
 
   const serverBundle = findRscBundle(manifest);
   const serverCode = await fs.readFile(
@@ -606,6 +634,10 @@ async function fetchAsset(url) {
   }
 }
 
+function conditionFileName(fileName, id) {
+  return fileName.replace(/\.js$/, `.id-${id}.js`);
+}
+
 async function expectMappedServerStack(fileName, query = "") {
   const specifier = `./dist/${fileName}${query}`;
   const script = `
@@ -685,7 +717,9 @@ async function findCachedModuleIdentities(cacheDir) {
   for (const filePath of moduleFiles) {
     const raw = await fs.readFile(filePath, "utf8");
     const parsed = JSON.parse(raw);
-    const records = Object.values(parsed.fileRecordsByEnv ?? {});
+    const records = Object.values(parsed.scopeVariants ?? {}).map(
+      (variant) => variant.fileRecord,
+    );
     for (const record of records) {
       if (record?.filePath) {
         found.add(record.filePath);

@@ -115,6 +115,28 @@ test("rejects the removed env and entry-id shapes and keeps environments flat", 
       [],
     ),
   ).rejects.toThrow("Environment 'app' is flat");
+
+  await expect(
+    buildProject(
+      {
+        ...config,
+        environmentVariables: { "NOT-VALID": "value" },
+      },
+      [],
+    ),
+  ).rejects.toThrow("Environment variable name 'NOT-VALID' is invalid");
+
+  await expect(
+    buildProject(
+      {
+        ...config,
+        environmentVariables: { NODE_ENV: true },
+      },
+      [],
+    ),
+  ).rejects.toThrow(
+    "Environment variable 'NODE_ENV' must be configured with a string value",
+  );
 });
 
 test("environment is part of module identity while target variants share one transform identity", async () => {
@@ -179,6 +201,18 @@ test("environment is part of module identity while target variants share one tra
       bundle.targetIds.includes("beta"),
   );
   expect(shared?.scopeIds).toHaveLength(2);
+  expect(shared).not.toHaveProperty("targetId");
+  expect(shared?.environmentId).toBe("first");
+  expect(shared?.platform).toBe("browser");
+  const entryPath = path.join(projectDir, "src/index.js");
+  for (const scopeId of ["alpha::first", "beta::first"]) {
+    expect(result.entrypoints[`${scopeId}:${entryPath}`].entryId).toBe(
+      first[0].moduleIdentity,
+    );
+  }
+  expect(result.entrypoints[`alpha::second:${entryPath}`].entryId).toBe(
+    second[0].moduleIdentity,
+  );
 });
 
 test("target defines and package resolution split variants only when records differ", async () => {
@@ -251,6 +285,244 @@ test("target defines and package resolution split variants only when records dif
   expect(serverCode).toContain("true");
   expect(clientCode).toContain("browser-resolution");
   expect(clientCode).toContain("false");
+});
+
+test("warm cache preserves target-specific package resolution when transform behavior is equal", async () => {
+  const projectDir = await createProject("warm-target-resolution", {
+    "src/index.js":
+      'import value from "variant-package"; export const result = value;',
+    "node_modules/variant-package/package.json": JSON.stringify({
+      name: "variant-package",
+      version: "1.0.0",
+      main: "node.js",
+      browser: "browser.js",
+    }),
+    "node_modules/variant-package/node.js": 'export default "node-resolution";',
+    "node_modules/variant-package/browser.js":
+      'export default "browser-resolution";',
+  });
+  const entryPath = path.join(projectDir, "src/index.js");
+  const config = baseConfig(projectDir, {
+    targets: {
+      server: {
+        platform: "node",
+        packageResolver: resolver("@bundler/node-package-resolver", {
+          browserField: false,
+        }),
+      },
+      client: {
+        platform: "browser",
+        packageResolver: resolver("@bundler/browser-package-resolver", {
+          browserField: true,
+        }),
+      },
+    },
+    entries: [
+      {
+        path: entryPath,
+        environment: "app",
+        targets: ["server", "client"],
+      },
+    ],
+  });
+
+  await buildProject(config, []);
+  const warm = await buildProject(config, []);
+  const readEntrypointClosure = async (scopeId) => {
+    const entrypoint = warm.entrypoints[`${scopeId}:${entryPath}`];
+    expect(entrypoint).toBeDefined();
+    return (
+      await Promise.all(
+        entrypoint.bundles.map((fileName) =>
+          fs.readFile(path.join(config.outputs.outDir, fileName), "utf8"),
+        ),
+      )
+    ).join("\n");
+  };
+  const serverCode = await readEntrypointClosure("server::app");
+  const clientCode = await readEntrypointClosure("client::app");
+
+  expect(serverCode).toContain("node-resolution");
+  expect(serverCode).not.toContain("browser-resolution");
+  expect(clientCode).toContain("browser-resolution");
+  expect(clientCode).not.toContain("node-resolution");
+});
+
+test("cache retains older resolution variants after a different resolution is added", async () => {
+  const projectDir = await createProject("alternating-resolution-cache", {
+    "src/index.js":
+      'import value from "variant-package"; export const result = value;',
+    "node_modules/variant-package/package.json": JSON.stringify({
+      name: "variant-package",
+      version: "1.0.0",
+      main: "node.js",
+      browser: "browser.js",
+    }),
+    "node_modules/variant-package/node.js": 'export default "node-resolution";',
+    "node_modules/variant-package/browser.js":
+      'export default "browser-resolution";',
+  });
+  const cacheDir = path.join(projectDir, ".cache");
+  const withResolver = (module, options) =>
+    baseConfig(projectDir, {
+      cacheDir,
+      debug: true,
+      targets: {
+        runtime: {
+          platform: "browser",
+          packageResolver: resolver(module, options),
+        },
+      },
+      entries: [
+        {
+          path: path.join(projectDir, "src/index.js"),
+          environment: "app",
+          targets: ["runtime"],
+        },
+      ],
+    });
+  const nodeConfig = withResolver("@bundler/node-package-resolver", {
+    browserField: false,
+  });
+  const browserConfig = withResolver("@bundler/browser-package-resolver", {
+    browserField: true,
+  });
+
+  await buildProject(nodeConfig, []);
+  await buildProject(browserConfig, []);
+  await buildProject(nodeConfig, []);
+
+  const debugRecords = (await walk(path.join(cacheDir, "__DEBUG__"))).filter(
+    (filePath) => filePath.endsWith("record.json"),
+  );
+  const entryRecord = (
+    await Promise.all(
+      debugRecords.map(async (filePath) =>
+        JSON.parse(await fs.readFile(filePath, "utf8")),
+      ),
+    )
+  ).find((record) => record.input.canonicalPath.endsWith("::src/index.js"));
+  expect(entryRecord.input.cacheHit).toBe(true);
+});
+
+test("concurrent builds safely share immutable transform-cache entries", async () => {
+  const projectDir = await createProject("concurrent-cache-writers", {
+    "src/index.js":
+      'import { dependency } from "./dependency.js"; export const value = dependency;',
+    "src/dependency.js": "export const dependency = 42;",
+  });
+  const cacheDir = path.join(projectDir, ".cache");
+  const config = baseConfig(projectDir, { cacheDir });
+  const alternate = {
+    ...config,
+    outputs: {
+      ...config.outputs,
+      outDir: path.join(projectDir, "dist-alternate"),
+    },
+  };
+
+  const [first, second] = await Promise.all([
+    buildProject(config, []),
+    buildProject(alternate, []),
+  ]);
+  expect(first.bundles).toHaveLength(1);
+  expect(second.bundles).toHaveLength(1);
+
+  const cacheFiles = await walk(cacheDir);
+  const inputRecords = cacheFiles.filter(
+    (filePath) => path.basename(path.dirname(filePath)) === "inputs",
+  );
+  const variantRecords = cacheFiles.filter(
+    (filePath) => path.basename(path.dirname(filePath)) === "scope-variants",
+  );
+  expect(inputRecords.length).toBeGreaterThanOrEqual(2);
+  expect(variantRecords.length).toBeGreaterThanOrEqual(2);
+  expect(cacheFiles.some((filePath) => filePath.endsWith(".lock"))).toBe(false);
+
+  await Promise.all(
+    inputRecords.map(async (filePath) => {
+      const record = JSON.parse(await fs.readFile(filePath, "utf8"));
+      expect(record.inputFingerprint).toBe(path.basename(filePath, ".json"));
+      expect(Array.isArray(record.dependencyRequests)).toBe(true);
+    }),
+  );
+  await Promise.all(
+    variantRecords.map(async (filePath) => {
+      const record = JSON.parse(await fs.readFile(filePath, "utf8"));
+      expect(typeof record.inputFingerprint).toBe("string");
+      expect(typeof record.resolutionFingerprint).toBe("string");
+      expect(record.fileRecord).toBeDefined();
+    }),
+  );
+
+  const initialMtimes = new Map(
+    await Promise.all(
+      [...inputRecords, ...variantRecords].map(async (filePath) => [
+        filePath,
+        (await fs.stat(filePath)).mtimeMs,
+      ]),
+    ),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  await expect(buildProject(config, [])).resolves.toBeDefined();
+  await Promise.all(
+    Array.from(initialMtimes, async ([filePath, mtimeMs]) => {
+      expect((await fs.stat(filePath)).mtimeMs).toBe(mtimeMs);
+    }),
+  );
+}, 15_000);
+
+test("keeps target-selected URL facades distinct inside one importer", async () => {
+  const projectDir = await createProject("target-selected-urls", {
+    "src/index.js": `
+      import clientUrl from "./route.js" with { as: "url", target: "client" };
+      import serverUrl from "./route.js" with { as: "url", target: "server" };
+      export const urls = [clientUrl, serverUrl];
+    `,
+    "src/route.js": "export const target = __TARGET_NAME__;",
+  });
+  const entryPath = path.join(projectDir, "src/index.js");
+  const routePath = path.join(projectDir, "src/route.js");
+  const config = baseConfig(projectDir, {
+    targets: {
+      client: {
+        platform: "browser",
+        defines: { __TARGET_NAME__: "client" },
+      },
+      server: {
+        platform: "node",
+        defines: { __TARGET_NAME__: "server" },
+      },
+    },
+    entries: [
+      {
+        path: entryPath,
+        environment: "app",
+        targets: ["client"],
+      },
+    ],
+  });
+
+  const result = await buildProject(config, []);
+  const routeBundles = result.bundles.filter(
+    (bundle) => bundle.entryId === routePath,
+  );
+  expect(routeBundles).toHaveLength(2);
+  const clientRoute = routeBundles.find((bundle) =>
+    bundle.targetIds.includes("client"),
+  );
+  const serverRoute = routeBundles.find((bundle) =>
+    bundle.targetIds.includes("server"),
+  );
+  expect(clientRoute.fileName).not.toBe(serverRoute.fileName);
+
+  const entryBundle = result.bundles.find(
+    (bundle) => bundle.entryId === entryPath,
+  );
+  const entryCode = await readBundle(config, entryBundle);
+  expect(entryCode).toContain(`/${clientRoute.fileName}`);
+  expect(entryCode).toContain(`/${serverRoute.fileName}`);
+  expect(entryCode.match(/const __bundler_.*_output_url/g)).toHaveLength(2);
 });
 
 test("ordinary imports inherit environment and explicit imports switch it exactly", async () => {
@@ -345,6 +617,64 @@ test("adding an equivalent target reuses shared environment and core transform c
   const after = await cacheFileTimes(sharedCache);
 
   expect(after).toEqual(before);
+});
+
+test("resource planners must explicitly describe no-resource equivalence", async () => {
+  const projectDir = await createProject("resource-planner-equivalence", {
+    "src/index.js": "export const value = 1;",
+  });
+  const config = baseConfig(projectDir, {
+    targets: {
+      first: { platform: "browser" },
+      second: { platform: "browser" },
+    },
+    entries: [
+      {
+        path: path.join(projectDir, "src/index.js"),
+        environment: "app",
+        targets: ["first", "second"],
+      },
+    ],
+  });
+  const incomplete = {
+    name: "incomplete-resource-planner",
+    resourceFingerprint: "incomplete-resource-planner-v1",
+    planBundleResources() {
+      "incomplete-resource-planner-v1";
+      return {};
+    },
+    generateBundleResources() {
+      "incomplete-resource-generator-v1";
+    },
+  };
+  const explicitNone = {
+    ...incomplete,
+    name: "explicit-none-resource-planner",
+    resourceFingerprint: "explicit-none-resource-planner-v1",
+    planBundleResources({ bundles }) {
+      "explicit-none-resource-planner-v1";
+      return Object.fromEntries(bundles.map((bundle) => [bundle.id, "none"]));
+    },
+  };
+
+  const scoped = await buildProject(config, [incomplete]);
+  const coalesced = await buildProject(
+    {
+      ...config,
+      outputs: {
+        ...config.outputs,
+        outDir: path.join(projectDir, "dist-explicit-none"),
+      },
+    },
+    [explicitNone],
+  );
+
+  expect(scoped.bundles).toHaveLength(2);
+  expect(scoped.bundles.every((bundle) => bundle.targetIds.length === 1)).toBe(
+    true,
+  );
+  expect(coalesced.bundles).toHaveLength(1);
+  expect(coalesced.bundles[0].targetIds).toEqual(["first", "second"]);
 });
 
 async function cacheFileTimes(directory) {
