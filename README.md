@@ -238,6 +238,8 @@ incompatibilities are documented in
   keys
 - `packages/worker`: atomic Babel-based file transforms and cell generation
 - `packages/shared`: portable IR, condition types, hashing, and cache utilities
+- `packages/wasm-plugin`: executable WebAssembly initializer and binary asset
+  emission
 - `packages/cjs-to-esm`: CommonJS-to-ESM transform plugin
 - `packages/react-rsc-plugin` and `packages/react-server-dom`: RSC boundary
   transforms plus the pinned inline-reference serializer and client runtimes

@@ -42,6 +42,7 @@
     "@bundler/static-assets": "workspace:*",
     "@bundler/shared": "workspace:*",
     "@bundler/typescript-plugin": "workspace:*",
+    "@bundler/wasm-plugin": "workspace:*",
     "@bundler/worker": "workspace:*",
     "react-refresh": "0.14.2"
   }

@@ -26,6 +26,13 @@ test.each([
   );
 });
 
+test("normalizes .wasm?init to the wasm representation", async () => {
+  const result = await transform('import init from "./module.wasm?init";');
+  expect(result.code).toBe(
+    'import init from "./module.wasm" with { as: "wasm" };',
+  );
+});
+
 test("rejects conflicting and malformed representation queries", async () => {
   await expect(
     transform('import value from "./resource?url" with { as: "raw" };'),
@@ -33,4 +40,13 @@ test("rejects conflicting and malformed representation queries", async () => {
   await expect(
     transform('import value from "./resource?worker&raw";'),
   ).rejects.toThrow("E_IMPORT_QUERY");
+  await expect(
+    transform('import value from "./resource.js?init";'),
+  ).rejects.toThrow("E_IMPORT_QUERY");
+  await expect(
+    transform('import value from "./resource.wasm?init&url";'),
+  ).rejects.toThrow("E_IMPORT_QUERY");
+  await expect(
+    transform('import value from "./resource.wasm?init" with { as: "url" };'),
+  ).rejects.toThrow("E_IMPORT_REPRESENTATION_CONFLICT");
 });

@@ -31,8 +31,8 @@ package can be configured and tested without the bundler core:
   to a deduplicated `as: "url_and_deps_array"` import and a loader that starts
   native imports for the target and its static bundle dependencies in
   parallel.
-- `@bundler/query-imports` converts `?url`, `?worker&url`, `?raw`, and
-  `?base64` queries to `as`.
+- `@bundler/query-imports` converts `?url`, `?worker&url`, `?raw`, `?base64`,
+  and `.wasm?init` queries to `as`.
 - `@bundler/import-attributes` moves legacy representation values from `type`
   to `as`, leaving source-format assertions such as `type: "json"` intact.
 - `@bundler/asset-imports` assigns configurable representations to bare image
@@ -71,10 +71,54 @@ export default {
 - `image-reference-with-size` exports `{ src, width, height }`. Its generated
   facade imports the same image with `as: "url"`, so this representation is an
   ordinary self-edge to the URL variant.
+- `wasm` is `.wasm`-only and exports an asynchronous initialization function.
+  The original binary is emitted as a hashed `application/wasm` asset.
 - `css-dependency` is provided by the CSS plugin for a JavaScript dependency
   on a CSS/CSS-Module transform and its linked stylesheet output.
 
 Unknown values fail unless a plugin claims them.
+
+## Executable WebAssembly
+
+Bare `.wasm` imports retain the opaque-asset behavior and return a public URL.
+Use `?init` or the canonical attributed form to compile and instantiate a
+binary:
+
+```js
+import init from "./math.wasm?init";
+import initAttributed from "./math.wasm" with { as: "wasm" };
+
+const instance = await init({
+  env: {
+    offset(value) {
+      return value + 1;
+    },
+  },
+});
+instance.exports.run();
+```
+
+Both forms default-export
+`(imports = {}) => Promise<WebAssembly.Instance>`. The compiled
+`WebAssembly.Module` is cached by the JavaScript facade, while every call
+creates a fresh instance so mutable state and import objects are not shared.
+
+HTTP(S) output uses streaming compilation when the response is served as
+`application/wasm` and falls back to compiling its `ArrayBuffer` otherwise.
+Module-relative `file:` output uses `node:fs/promises`, supporting
+Node-compatible server bundles without embedding the binary in JavaScript.
+Direct named exports from Wasm and automatic wiring of Wasm imports to
+JavaScript modules are not supported; those require an asynchronous module
+graph, while this bundler deliberately rejects top-level `await`.
+
+TypeScript projects can describe the query form locally:
+
+```ts
+declare module "*.wasm?init" {
+  const init: (imports?: WebAssembly.Imports) => Promise<WebAssembly.Instance>;
+  export default init;
+}
+```
 
 ## Atomicity and cache behavior
 

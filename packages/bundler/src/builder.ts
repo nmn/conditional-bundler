@@ -2362,6 +2362,10 @@ function createBuiltinPlugins(config: InternalBundlerConfig): BundlerPlugin[] {
     },
     {
       __bundlerPluginRef: true,
+      module: resolveBundlerDependency("@bundler/wasm-plugin"),
+    },
+    {
+      __bundlerPluginRef: true,
       module: resolveBundlerDependency("@bundler/module-paths/bundler"),
     },
   ];
@@ -5411,7 +5415,10 @@ function emitOutputReferencePrelude(
           assetFileNames.get(reference.outputId) ??
           pendingOutputs.get(reference.outputId)?.fileName;
         fileNames = fileName ? [fileName] : [];
-        relative = !assetFileNames.has(reference.outputId);
+        relative =
+          reference.urlMode === "module-relative" ||
+          (reference.urlMode !== "public" &&
+            !assetFileNames.has(reference.outputId));
       }
       if (!fileNames || fileNames.length === 0) {
         throw new Error(

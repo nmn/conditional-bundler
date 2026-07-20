@@ -1,0 +1,11 @@
+{
+  "name": "@bundler/wasm-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./bundler.mjs",
+  "exports": {
+    ".": "./bundler.mjs",
+    "./transform": "./transform.mjs"
+  }
+}

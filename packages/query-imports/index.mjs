@@ -1,4 +1,9 @@
-const representations = new Set(["url", "raw", "base64"]);
+const representationQueries = new Map([
+  ["url", "url"],
+  ["raw", "raw"],
+  ["base64", "base64"],
+  ["init", "wasm"],
+]);
 
 export default function queryImportsBabelPlugin(api) {
   api.assertVersion(7);
@@ -62,11 +67,14 @@ export function normalizeRequest(request) {
     throw new Error(`E_IMPORT_QUERY: Duplicate import query in '${request}'.`);
   }
   const flags = new Set(parts);
-  const requested = parts.filter((part) => representations.has(part));
+  const requested = parts.filter((part) => representationQueries.has(part));
   const validWorkerUrl =
     flags.size === 2 && flags.has("worker") && flags.has("url");
   const validSingle =
-    flags.size === 1 && requested.length === 1 && !flags.has("worker");
+    flags.size === 1 &&
+    requested.length === 1 &&
+    !flags.has("worker") &&
+    (requested[0] !== "init" || pathname.toLowerCase().endsWith(".wasm"));
   if (!validWorkerUrl && !validSingle) {
     throw new Error(
       `E_IMPORT_QUERY: Unsupported import representation query '${request}'.`,
@@ -74,7 +82,9 @@ export function normalizeRequest(request) {
   }
   return {
     request: pathname,
-    representation: validWorkerUrl ? "url" : requested[0],
+    representation: validWorkerUrl
+      ? "url"
+      : representationQueries.get(requested[0]),
   };
 }
 

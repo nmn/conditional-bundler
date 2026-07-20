@@ -144,6 +144,9 @@ type-check.
 assigned to imports without an explicit `as` attribute. Both accept any
 representation-handler name or `false`. Images default to
 `"image-reference-with-size"` and other opaque assets default to `"url"`.
+This includes bare `.wasm` imports, which return an emitted asset URL. Use
+`.wasm?init` or `with { as: "wasm" }` when the binary should instead expose an
+asynchronous `WebAssembly.Instance` initializer.
 Representation identity is independent of environment identity. See
 [`import-representations.md`](./import-representations.md) for normalization,
 built-in behavior, and the plugin handler contract.
